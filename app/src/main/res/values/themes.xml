@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Pient" parent="android:Theme.Material.NoActionBar">
+        <!-- 窗口底色仅作 Compose 首帧兜底（默认主题为深色）。
+             运行时窗口底色由 MainActivity/PientApp 按主题动态设置；
+             页面真实底色统一由 PientApp 根部绘制 colorScheme.background。 -->
+        <item name="android:windowBackground">@color/pient_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <!-- CropImageActivity（android-image-cropper 4.5.0）要求 AppCompat 主题。
+         该版本库布局不含 toolbar，「完成/取消」等动作走系统 ActionBar 菜单——
+         因此 parent 必须带 ActionBar（NoActionBar 会导致菜单无处显示、用户看不到确认按键）。
+         颜色由 CropImageOptions 运行时传入（4.5.0 仅 activityMenuIconColor/activityTitle 生效）。 -->
+    <style name="Theme.Pient.CropImage" parent="Theme.AppCompat.Light">
+        <item name="android:windowBackground">@color/pient_bg</item>
+    </style>
+</resources>

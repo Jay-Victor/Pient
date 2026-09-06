@@ -1,0 +1,437 @@
+package com.pient.app.data
+
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+
+// ─────────────────────────────────────────────────────────────
+// 全局设置（跨页面即时生效；UI 原型阶段以内存状态承载）
+// 注（2026-08-27 用户决策）：已全面弃用玻璃拟态，容器统一为
+// 普通材质（PientPanel：纯色面板 + hairline 边框）。
+// ─────────────────────────────────────────────────────────────
+enum class DensityLevel { DEFAULT, COMPACT }
+
+enum class BubbleStyle { FLAT, BUBBLE }
+
+enum class ThemeMode { DARK, LIGHT, SYSTEM }
+
+/** 抽屉展出方式：水平滑出（默认）/ 3D 透视（仅手机；平板自动用压缩滑出） */
+enum class DrawerMode { SLIDE, PERSPECTIVE }
+
+/** 自定义背景媒体类型（背景设置标签：分段控制器两段） */
+enum class BackgroundMediaType { IMAGE, VIDEO }
+
+/** 视频背景画面裁剪模式（视频裁剪对话框：画面裁剪分段） */
+enum class VideoCropMode(val label: String) {
+    ORIGINAL("原始"),
+    SQUARE("1:1"),
+    RATIO_16_9("16:9"),
+    RATIO_9_16("9:16"),
+}
+
+/** 字体来源（字体设置标签：分段控制器两段） */
+enum class FontSource { BUILTIN, CUSTOM }
+
+/** 字体大小滑轨范围（sp） */
+const val FONT_SIZE_MIN = 12f
+const val FONT_SIZE_MAX = 24f
+
+/** 内置字体来源类型 */
+enum class BuiltinFontKind { SYSTEM_FAMILY, SYSTEM_FILE, RES, ASSET }
+
+/** 内置字体选项（名称 + 来源；解析失败回退 fallbackName 或默认字体） */
+data class BuiltinFontOption(
+    val name: String,
+    val kind: BuiltinFontKind,
+    val familyName: String = "",   // SYSTEM_FAMILY：系统字体族名；SYSTEM_FILE/RES/ASSET：解析失败回退族名
+    val filePath: String = "",     // SYSTEM_FILE：系统字体文件路径
+    val resId: Int = 0,            // RES：应用资源字体
+    val assetPath: String = "",    // ASSET：assets 内字体路径
+)
+
+/** 内置字体列表（2026-08-31 用户定名：默认字体/思源黑体/思源宋体/霞鹜文楷/无衬线体/JetBrains Mono） */
+val BuiltinFonts = listOf(
+    BuiltinFontOption("默认字体", BuiltinFontKind.SYSTEM_FAMILY, familyName = "sans-serif"),
+    BuiltinFontOption("思源黑体", BuiltinFontKind.SYSTEM_FILE, familyName = "sans-serif", filePath = "/system/fonts/NotoSansCJK-Regular.ttc"),
+    BuiltinFontOption("思源宋体", BuiltinFontKind.SYSTEM_FILE, familyName = "serif", filePath = "/system/fonts/NotoSerifCJK-Regular.ttc"),
+    BuiltinFontOption("霞鹜文楷", BuiltinFontKind.ASSET, familyName = "cursive", assetPath = "fonts/lxgw_wenkai.ttf"),
+    BuiltinFontOption("无衬线体", BuiltinFontKind.SYSTEM_FILE, familyName = "sans-serif", filePath = "/system/fonts/SourceSansPro-Regular.ttf"),
+    BuiltinFontOption("JetBrains Mono", BuiltinFontKind.RES, familyName = "monospace", resId = com.pient.app.R.font.jetbrains_mono),
+)
+
+object SettingsStore {
+    var themeMode by mutableStateOf(ThemeMode.LIGHT)   // 2026-09-01：首启默认亮色（用户定）
+    var accent by mutableStateOf(AccentPresets[0])
+    var darkScheme by mutableStateOf(DarkSchemes[0])
+    var lightScheme by mutableStateOf(LightSchemes[0])
+    var density by mutableStateOf(DensityLevel.DEFAULT)
+    var bubbleStyle by mutableStateOf(BubbleStyle.FLAT)
+    var language by mutableStateOf("zh-CN")
+    var drawerMode by mutableStateOf(DrawerMode.SLIDE)
+
+    // ── 自定义主题色（2026-09-01）：开关 + 色相（0..360）；开启时覆盖 12 预设色作为 accent ──
+    var customAccentEnabled by mutableStateOf(false)
+    var customAccentHue by mutableStateOf(215f)   // 默认蓝 hue ≈ 215
+
+    // ── 背景设置（2026-08-31）：自定义背景（图片/视频各持一份 URI）+ 背景效果 ──
+    var backgroundMediaType by mutableStateOf(BackgroundMediaType.IMAGE)
+    var backgroundImageUri by mutableStateOf<String?>(null)
+    var backgroundVideoUri by mutableStateOf<String?>(null)
+    var backgroundBlurEnabled by mutableStateOf(false)
+    var backgroundBlurRadius by mutableStateOf(10f)   // 1..25
+    var backgroundBrightness by mutableStateOf(1f)    // 0.1..1.5
+
+    // ── 视频背景播放设置（2026-08-31）：静音/循环/裁剪区间（秒；null = 未裁剪）/画面裁剪模式/播放倍速 ──
+    var videoBackgroundMuted by mutableStateOf(true)
+    var videoBackgroundLoop by mutableStateOf(true)
+    var videoTrimStartSec by mutableStateOf<Float?>(null)
+    var videoTrimEndSec by mutableStateOf<Float?>(null)
+    var videoCropMode by mutableStateOf(VideoCropMode.ORIGINAL)
+    var videoPlaybackSpeed by mutableStateOf(1f)   // 0.5..2.0
+
+    // ── 字体设置（2026-08-31）：字体样式（内置/自定义）+ 字体大小 ──
+    var fontSource by mutableStateOf(FontSource.BUILTIN)
+    var builtinFontName by mutableStateOf(BuiltinFonts[0].name)   // 存储键 = 选项名
+    var customFontPath by mutableStateOf<String?>(null)   // filesDir/fonts/ 下文件名
+    var customFontLabel by mutableStateOf<String?>(null)  // 导入文件原始名（弹窗显示名）
+    var fontSize by mutableStateOf(14f)                   // 12..24 sp
+
+    /** 当前主题下生效的主色：自定义开启时按色相生成暗/亮双变体，否则用预设 */
+    fun accentFor(dark: Boolean): Color =
+        if (customAccentEnabled) {
+            if (dark) Color.hsv(customAccentHue, 0.65f, 1f)
+            else Color.hsv(customAccentHue, 0.9f, 0.7f)
+        } else if (dark) accent.dark else accent.light
+
+    /** 当前明暗下生效的界面主题方案 */
+    fun schemeFor(dark: Boolean): ThemeScheme = if (dark) darkScheme else lightScheme
+
+    /** 启动时恢复持久化主题（MainActivity 在 setContent 前调用，避免首帧闪错主题） */
+    fun load(androidCtx: android.content.Context) {
+        val p = androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
+        themeMode = runCatching {
+            ThemeMode.valueOf(p.getString("theme_mode", "LIGHT") ?: "LIGHT")
+        }.getOrDefault(ThemeMode.LIGHT)
+        val saved = p.getInt("accent", -1)
+        accent = AccentPresets.firstOrNull { it.dark.toArgb() == saved } ?: AccentPresets[0]
+        val savedDarkScheme = p.getString("dark_scheme", null)
+        darkScheme = DarkSchemes.firstOrNull { it.name == savedDarkScheme } ?: DarkSchemes[0]
+        val savedLightScheme = p.getString("light_scheme", null)
+        lightScheme = LightSchemes.firstOrNull { it.name == savedLightScheme } ?: LightSchemes[0]
+        drawerMode = runCatching {
+            DrawerMode.valueOf(p.getString("drawer_mode", "SLIDE") ?: "SLIDE")
+        }.getOrDefault(DrawerMode.SLIDE)
+        customAccentEnabled = p.getBoolean("custom_accent_enabled", false)
+        customAccentHue = p.getFloat("custom_accent_hue", 215f).coerceIn(0f, 360f)
+        backgroundMediaType = runCatching {
+            BackgroundMediaType.valueOf(p.getString("background_media_type", "IMAGE") ?: "IMAGE")
+        }.getOrDefault(BackgroundMediaType.IMAGE)
+        backgroundImageUri = p.getString("background_image_uri", null)
+        backgroundVideoUri = p.getString("background_video_uri", null)
+        backgroundBlurEnabled = p.getBoolean("background_blur", false)
+        backgroundBlurRadius = p.getFloat("background_blur_radius", 10f)
+        backgroundBrightness = p.getFloat("background_brightness", 1f)
+        videoBackgroundMuted = p.getBoolean("video_background_muted", true)
+        videoBackgroundLoop = p.getBoolean("video_background_loop", true)
+        videoTrimStartSec = if (p.contains("video_trim_start")) p.getFloat("video_trim_start", 0f) else null
+        videoTrimEndSec = if (p.contains("video_trim_end")) p.getFloat("video_trim_end", 0f) else null
+        videoCropMode = runCatching {
+            VideoCropMode.valueOf(p.getString("video_crop_mode", "ORIGINAL") ?: "ORIGINAL")
+        }.getOrDefault(VideoCropMode.ORIGINAL)
+        videoPlaybackSpeed = p.getFloat("video_playback_speed", 1f).coerceIn(0.5f, 2f)
+        fontSource = runCatching {
+            FontSource.valueOf(p.getString("font_source", "BUILTIN") ?: "BUILTIN")
+        }.getOrDefault(FontSource.BUILTIN)
+        val savedBuiltin = p.getString("builtin_font", null)
+        builtinFontName = BuiltinFonts.firstOrNull { it.name == savedBuiltin }?.name
+            ?: BuiltinFonts[0].name
+        customFontPath = p.getString("custom_font_path", null)
+        customFontLabel = p.getString("custom_font_label", null)
+        fontSize = p.getFloat("font_size", 14f).coerceIn(FONT_SIZE_MIN, FONT_SIZE_MAX)
+    }
+
+    /** 保存当前主题选择（外观模式 + 主题色 + 自定义主题色 + 深浅界面方案），重启后保持 */
+    fun saveTheme(androidCtx: android.content.Context) {
+        androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString("theme_mode", themeMode.name)
+            .putInt("accent", accent.dark.toArgb())
+            .putString("dark_scheme", darkScheme.name)
+            .putString("light_scheme", lightScheme.name)
+            .putBoolean("custom_accent_enabled", customAccentEnabled)
+            .putFloat("custom_accent_hue", customAccentHue)
+            .apply()
+    }
+
+    /** 保存抽屉展出方式（行为设置），重启后保持 */
+    fun saveDrawerMode(androidCtx: android.content.Context) {
+        androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString("drawer_mode", drawerMode.name)
+            .apply()
+    }
+
+    /** 保存背景设置（媒体类型/图片/视频/模糊/亮度/视频播放），重启后保持 */
+    fun saveBackground(androidCtx: android.content.Context) {
+        val e = androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString("background_media_type", backgroundMediaType.name)
+            .putBoolean("background_blur", backgroundBlurEnabled)
+            .putFloat("background_blur_radius", backgroundBlurRadius)
+            .putFloat("background_brightness", backgroundBrightness)
+            .putBoolean("video_background_muted", videoBackgroundMuted)
+            .putBoolean("video_background_loop", videoBackgroundLoop)
+            .putString("video_crop_mode", videoCropMode.name)
+            .putFloat("video_playback_speed", videoPlaybackSpeed)
+        backgroundImageUri?.let { e.putString("background_image_uri", it) } ?: e.remove("background_image_uri")
+        backgroundVideoUri?.let { e.putString("background_video_uri", it) } ?: e.remove("background_video_uri")
+        videoTrimStartSec?.let { e.putFloat("video_trim_start", it) } ?: e.remove("video_trim_start")
+        videoTrimEndSec?.let { e.putFloat("video_trim_end", it) } ?: e.remove("video_trim_end")
+        e.apply()
+    }
+
+    /** 保存字体设置（来源/内置字体/自定义字体文件/字号），重启后保持 */
+    fun saveFont(androidCtx: android.content.Context) {
+        val e = androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString("font_source", fontSource.name)
+            .putString("builtin_font", builtinFontName)
+            .putFloat("font_size", fontSize)
+        customFontPath?.let { e.putString("custom_font_path", it) } ?: e.remove("custom_font_path")
+        customFontLabel?.let { e.putString("custom_font_label", it) } ?: e.remove("custom_font_label")
+        e.apply()
+    }
+}
+
+/**
+ * 主题色预设色板（默认蓝 + 备选）。
+ * 每个预设含暗/亮双变体：暗色面板用高亮变体，亮色面板用深色变体，
+ * 保证 onPrimary 白字在两种模式下均满足对比度（设计计划附录 A 联动原则）。
+ */
+data class AccentPreset(
+    val dark: Color,
+    val light: Color,
+    val name: String,
+)
+
+val AccentPresets = listOf(
+    AccentPreset(Color(0xFF58A6FF), Color(0xFF0969DA), "默认蓝"),
+    AccentPreset(Color(0xFF3FB950), Color(0xFF1A7F37), "绿"),
+    AccentPreset(Color(0xFFA371F7), Color(0xFF8250DF), "紫"),
+    AccentPreset(Color(0xFFF0883E), Color(0xFF953800), "橙"),
+    AccentPreset(Color(0xFF39C5CF), Color(0xFF1B7C83), "青"),
+    AccentPreset(Color(0xFFF85149), Color(0xFFCF222E), "红"),
+    AccentPreset(Color(0xFFF778BA), Color(0xFFBF3989), "粉"),
+    AccentPreset(Color(0xFFE3B341), Color(0xFF9A6700), "黄"),
+    AccentPreset(Color(0xFFFFA657), Color(0xFFC4432B), "珊瑚"),
+    AccentPreset(Color(0xFFA5B4FC), Color(0xFF6366F1), "靛"),
+    AccentPreset(Color(0xFF2DD4BF), Color(0xFF0F766E), "青绿"),
+    AccentPreset(Color(0xFF8B949E), Color(0xFF57606A), "灰"),
+)
+
+/**
+ * 界面主题方案（2026-08-31）：底色/表面色套装，浅色与深色各独立一套选择。
+ * 仅替换背景类令牌；文字色（onBackground/onSurface）、error/scrim 不随方案变化。
+ * surfaceContainerLowest 沿用映射：暗色 = surfaceContainerLow，亮色 = background。
+ */
+data class ThemeScheme(
+    val name: String,
+    val description: String,
+    val background: Color,            // 页面底
+    val surfaceContainerLow: Color,   // 卡片底
+    val surfaceContainer: Color,      // 面板/弹层
+    val surfaceContainerHigh: Color,  // 悬浮态
+    val outlineVariant: Color,        // 描边
+    val onSurfaceVariant: Color,      // 次要文字
+)
+
+val DarkSchemes = listOf(
+    ThemeScheme("墨黑", "GitHub 暗色系，蓝调墨黑底色", Color(0xFF0D1117), Color(0xFF010409), Color(0xFF161B22), Color(0xFF21262D), Color(0xFF30363D), Color(0xFF8B949E)),
+    ThemeScheme("纯黑", "OLED 纯黑，极致对比与省电", Color(0xFF000000), Color(0xFF050505), Color(0xFF0F0F0F), Color(0xFF1A1A1A), Color(0xFF262626), Color(0xFF8B949E)),
+    ThemeScheme("深蓝", "深海军蓝调，柔和护眼", Color(0xFF0A0E1C), Color(0xFF050811), Color(0xFF0F1526), Color(0xFF1B2239), Color(0xFF2A3350), Color(0xFF8B949E)),
+    ThemeScheme("石墨", "中性石墨灰，均衡无偏色", Color(0xFF1A1D21), Color(0xFF0E1114), Color(0xFF1F2328), Color(0xFF292E34), Color(0xFF383D43), Color(0xFF8B949E)),
+    ThemeScheme("暗紫", "低饱和暗紫，夜景氛围", Color(0xFF12101C), Color(0xFF0B0912), Color(0xFF171226), Color(0xFF221B33), Color(0xFF2F2543), Color(0xFF8B949E)),
+)
+
+val LightSchemes = listOf(
+    ThemeScheme("亮白", "纯净白底，标准亮色系", Color(0xFFFFFFFF), Color(0xFFF6F8FA), Color(0xFFF6F8FA), Color(0xFFEFF2F5), Color(0xFFD0D7DE), Color(0xFF656D76)),
+    ThemeScheme("暖白", "米色暖调，久读舒适", Color(0xFFFDFBF6), Color(0xFFF8F3E9), Color(0xFFF8F3E9), Color(0xFFF1EADB), Color(0xFFD8CFBC), Color(0xFF6E675A)),
+    ThemeScheme("冷灰", "冷灰底，清爽冷静", Color(0xFFF4F6F9), Color(0xFFEDF1F5), Color(0xFFEDF1F5), Color(0xFFE3E9EF), Color(0xFFC9D2DC), Color(0xFF5D6773)),
+    ThemeScheme("薄荷", "微绿清新，护眼柔和", Color(0xFFF3FAF7), Color(0xFFEAF4EF), Color(0xFFEAF4EF), Color(0xFFE0EEE6), Color(0xFFC7DCD2), Color(0xFF5D6E66)),
+    ThemeScheme("亚麻", "亚麻米黄，纸张质感", Color(0xFFFBF7EC), Color(0xFFF5EEDC), Color(0xFFF5EEDC), Color(0xFFEDE3CB), Color(0xFFD6C9A8), Color(0xFF6E6550)),
+)
+
+// ─────────────────────────────────────────────────────────────
+// 会话与消息数据模型（会话格式与 pi 官方 session v3 对齐的 UI 投影）
+// ─────────────────────────────────────────────────────────────
+data class Project(
+    val name: String,
+    val path: String, // 展示的项目根路径（本地项目 = 绝对路径；SAF 项目 = 解析后的真实路径，解析失败回退 content URI）
+    val uri: String? = null, // SAF tree URI（访问文件用；本地项目为 null）
+)
+
+data class Session(
+    val id: String,
+    val title: String,
+    val project: String,
+    val relativeTime: String,
+    val running: Boolean = false,
+    val pinned: Boolean = false,
+)
+
+/** 附件类型（chip 图标展示与提交语义区分；2026-08-28 菜单扩为五项） */
+enum class AttachmentKind(val emoji: String) {
+    IMAGE("🖼 "), FILE("📎 "), FOLDER("📁 "), URL("🔗 ")
+}
+
+data class Attachment(
+    val name: String,
+    val kind: AttachmentKind = AttachmentKind.FILE,
+)
+
+sealed class Msg {
+    data class User(val text: String, val attachments: List<Attachment> = emptyList()) : Msg()
+
+    data class Assistant(
+        val markdown: String,
+        val usage: Usage? = null,
+    ) : Msg()
+
+    data class Thinking(
+        val level: String, // off/minimal/low/medium/high/xhigh
+        val text: String,
+    ) : Msg()
+
+    data class ToolCall(
+        val name: String,
+        val params: String,
+        val status: ToolStatus = ToolStatus.DONE,
+        val detail: String? = null,
+    ) : Msg()
+
+    data class ToolResult(
+        val toolName: String,
+        val preview: String,
+        val full: String? = null,
+    ) : Msg()
+
+    data class Compaction(
+        val tokensBefore: Int,
+        val saved: Int,
+        val summary: String,
+    ) : Msg()
+
+    /** 分支切换条（navigate_tree / fork 入口） */
+    data class BranchBar(
+        val label: String,
+        val branchCount: Int,
+    ) : Msg()
+}
+
+/**
+ * 会话树节点（P12 /tree 画布页数据源；原型由 mock 提供，
+ * 接入 pi 运行时后由 get_state 会话树 / SDK navigateTree() 驱动）。
+ * 节点 = 一条用户消息；exchange = 该节点代表的那次对话（用户消息 + 后续至
+ * 下一条用户消息前的全部条目，含 AI 回答）。
+ */
+data class SessionTreeNode(
+    val id: String,
+    val userText: String,
+    val exchange: List<Msg>,
+    val children: List<SessionTreeNode> = emptyList(),
+    val branchLabel: String? = null,
+    val active: Boolean = false,
+) {
+    /** 是否存在分支（顶栏分支键指示逻辑，pi-web hasBranch 同款：顶层 >1 或任一节点 children >1） */
+    fun hasBranches(): Boolean = children.size > 1 || children.any { it.hasBranches() }
+}
+
+enum class ToolStatus { RUNNING, DONE, FAILED }
+
+data class Usage(
+    val inTokens: Int,
+    val outTokens: Int,
+    val cacheTokens: Int,
+    val costUsd: Double,
+)
+
+// ─────────────────────────────────────────────────────────────
+// 模型（分组折叠列表数据源 = get_available_models 的 UI 投影）
+// ─────────────────────────────────────────────────────────────
+data class AiModel(
+    val id: String,      // provider/modelId
+    val name: String,
+    val provider: String,
+)
+
+/** thinking 五档 ↔ pi thinking 级别（minimal…xhigh；max 不暴露，设计计划 3.4.1） */
+enum class ThinkingLevel(val piValue: String, val label: String) {
+    MINIMAL("minimal", "最低"),
+    LOW("low", "低"),
+    MEDIUM("medium", "中"),
+    HIGH("high", "高"),
+    XHIGH("xhigh", "最高");
+
+    companion object {
+        fun fromPi(v: String): ThinkingLevel =
+            entries.firstOrNull { it.piValue == v } ?: MEDIUM
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 技能 / 插件
+// ─────────────────────────────────────────────────────────────
+data class SkillItem(
+    val name: String,
+    val desc: String,
+    val enabled: Boolean,
+    val global: Boolean = true,
+)
+
+data class PluginItem(
+    val name: String,
+    val source: String,
+    val enabled: Boolean,
+    val global: Boolean = true,
+)
+
+// ─────────────────────────────────────────────────────────────
+// 文件树（pi-web FileExplorer 的 TreeNode 投影，懒加载语义）
+// ─────────────────────────────────────────────────────────────
+class FileNode(
+    val name: String,
+    val isDir: Boolean,
+    val content: String? = null,          // 文本文件内容（mock）
+    val imageHint: String? = null,        // 图片类文件占位提示
+    val children: List<FileNode> = emptyList(),
+    val size: Long = 0L,                  // 文件大小（字节；排序用 mock）
+    val modifiedAt: Long = 0L,            // 最后修改时间（epoch ms；排序用 mock）
+    val source: String? = null,           // 真实位置（本地绝对路径 / SAF 文档 URI）；null = mock 节点
+) {
+    val ext: String
+        get() = if (isDir) "" else name.substringAfterLast('.', "")
+
+    // 注意：不要给 FileNode 实现 equals/hashCode——fileTreeRoot 是 mutableStateOf，
+    // 结构相等会让 refreshFileTree 的新树根与旧树根「相等」而静默跳过状态更新，
+    // 导致创建/删除文件后树不刷新（2026-09-03 实测，曾加 equals 后踩坑）。
+    // 同一文件判定一律显式按 name + source 比较（见 ChatState.openFile）。
+}
+
+// ─────────────────────────────────────────────────────────────
+// 终端（多会话，Ubuntu 24.04 ARM64 rootfs —— 唯一终端环境）
+// ─────────────────────────────────────────────────────────────
+data class TerminalLine(
+    val text: String,
+    val kind: TerminalLineKind = TerminalLineKind.OUTPUT,
+)
+
+enum class TerminalLineKind { COMMAND, OUTPUT, PROMPT, BANNER, SLOGAN }
+
+data class TerminalSession(
+    val id: Int,
+    val name: String,
+    val lines: androidx.compose.runtime.snapshots.SnapshotStateList<TerminalLine> =
+        androidx.compose.runtime.mutableStateListOf(),
+)

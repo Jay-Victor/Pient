@@ -1,0 +1,47 @@
+# ===== 文档与参考材料（本地保留，不入库） =====
+IDEA.md
+Docx/
+
+# ===== 第三方参考源码快照（不入库） =====
+Refences/pi-0.84.4/
+Refences/pi-web-0.8.9/
+Refences/Operit-1.12.1/
+Refences/Mdcito-1.2.0/
+# 注意：Refences/Logo/ 为项目自有图标源文件，需入库
+
+# ===== Gradle / Kotlin 构建缓存与产物 =====
+.gradle/
+.kotlin/
+build/
+
+# ===== Android 本地环境 =====
+local.properties
+*.jks
+*.keystore
+*.p12
+
+# ===== IDE =====
+.idea/
+*.iml
+.vscode/
+
+# ===== Hermes 桌面附件缓存 =====
+.hermes/
+
+# ===== Python =====
+__pycache__/
+*.pyc
+
+# ===== 日志 =====
+*.log
+
+# ===== 系统文件 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== 密钥与依赖（前瞻） =====
+.env
+.env.*
+!.env.*.example
+node_modules/
