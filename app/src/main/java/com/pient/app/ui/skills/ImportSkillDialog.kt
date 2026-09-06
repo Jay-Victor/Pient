@@ -49,7 +49,7 @@ import kotlinx.coroutines.launch
 fun ImportSkillDialog(
     global: Boolean,
     onDismiss: () -> Unit,
-    onImported: (name: String, desc: String) -> Unit,
+    onImported: (name: String, desc: String, skillMd: String?) -> Unit,
 ) {
     var tab by remember { mutableStateOf(0) }
     var name by remember { mutableStateOf("") }
@@ -77,9 +77,9 @@ fun ImportSkillDialog(
                     delay(900) // 原型导入进度
                     if (tab == 0) {
                         val n = zipPicked!!.removeSuffix(".zip")
-                        onImported(n, "由 ZIP 导入的技能")
+                        onImported(n, "由 ZIP 导入的技能", null)
                     } else {
-                        onImported(name, desc)
+                        onImported(name, desc, content.ifBlank { null })
                     }
                 }
             },

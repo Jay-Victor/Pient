@@ -188,14 +188,144 @@ object MockReplies {
 // 技能 / 插件（mock；分段切换 = 全局 ~/.pi/agent/skills、项目 .pi/skills）
 // ─────────────────────────────────────────────────────────────
 object MockStore {
+    // ── SKILL.md mock 内容（须声明在 globalSkills 之前，保证对象初始化顺序） ──
+    private val WEB_RESEARCH_MD = """
+        |---
+        |name: web-research
+        |description: 联网检索与资料整理
+        |---
+        |
+        |# 联网检索与资料整理
+        |
+        |## 触发场景
+        |- 需要检索最新资料、验证事实时
+        |- 整理多来源信息为结构化笔记
+        |
+        |## 工作流程
+        |1. 明确检索目标与关键词
+        |2. 检索并筛选高信度来源
+        |3. 交叉验证关键事实
+        |4. 输出带引用的结构化摘要
+    """.trimMargin()
+
+    private val CODE_REVIEW_MD = """
+        |---
+        |name: code-review
+        |description: 代码审查助手
+        |---
+        |
+        |# 代码审查助手
+        |
+        |## 审查要点
+        |- 安全：注入、越权、敏感信息泄漏
+        |- 正确性：边界条件、空值处理
+        |- 可维护性：命名、重复代码、死代码
+        |
+        |## 输出格式
+        |按严重程度分级列出问题，附文件与行号。
+    """.trimMargin()
+
+    private val ANDROID_DEBUG_MD = """
+        |---
+        |name: android-debug
+        |description: Android 崩溃定位与日志分析
+        |---
+        |
+        |# Android 崩溃定位与日志分析
+        |
+        |## 触发场景
+        |- Crash 堆栈分析
+        |- ANR / 卡顿定位
+        |- 系统日志过滤
+        |
+        |## 工具
+        |- logcat 过滤与关联分析
+        |- bugreport 解析
+    """.trimMargin()
+
+    private val PDF_UTILS_MD = """
+        |---
+        |name: pdf-utils
+        |description: PDF 文档解析与导出
+        |---
+        |
+        |# PDF 文档解析与导出
+        |
+        |## 触发场景
+        |- 提取 PDF 文本与表格
+        |- 生成带目录的导出文档
+        |
+        |## 工具
+        |- pymupdf 解析
+        |- 表格结构化输出
+    """.trimMargin()
+
+    private val KMP_MIGRATION_MD = """
+        |---
+        |name: kmp-migration
+        |description: Kotlin Multiplatform 迁移检查
+        |---
+        |
+        |# KMP 迁移检查
+        |
+        |检查 Java/Kotlin 项目迁移到 Kotlin Multiplatform 的兼容性：
+        |- 平台相关 API 清单
+        |- 共享模块边界建议
+        |- expect/actual 拆分方案
+    """.trimMargin()
+
+    // ── 技能目录 ASCII 树（详情弹窗「目录结构」窗口） ──
+    private val WEB_RESEARCH_TREE = """
+        |web-research/
+        |├── SKILL.md
+        |├── references/
+        |│   └── search-tips.md
+        |└── scripts/
+        |    ├── fetch.sh
+        |    └── summarize.py
+    """.trimMargin()
+
+    private val PDF_UTILS_TREE = """
+        |pdf-utils/
+        |├── references/
+        |│   └── pdf-spec.md
+        |└── scripts/
+        |    └── extract.py
+    """.trimMargin()
+
+    private val CODE_REVIEW_TREE = """
+        |code-review/
+        |├── SKILL.md
+        |└── assets/
+        |    └── checklist.md
+    """.trimMargin()
+
+    private val ANDROID_DEBUG_TREE = """
+        |android-debug/
+        |├── SKILL.md
+        |└── scripts/
+        |    └── logcat-filter.sh
+    """.trimMargin()
+
+    private val KMP_MIGRATION_TREE = """
+        |kmp-migration/
+        |└── references/
+        |    └── migration-notes.md
+    """.trimMargin()
+
     val globalSkills = mutableStateListOf(
-        SkillItem("web-research", "联网检索与资料整理", enabled = true, global = true),
-        SkillItem("pdf-utils", "PDF 文档解析与导出", enabled = false, global = true),
-        SkillItem("code-review", "代码审查助手", enabled = true, global = true),
+        SkillItem("web-research", "联网检索与资料整理", enabled = true, global = true,
+            skillMd = WEB_RESEARCH_MD, fileTree = WEB_RESEARCH_TREE),
+        SkillItem("pdf-utils", "PDF 文档解析与导出", enabled = false, global = true,
+            skillMd = PDF_UTILS_MD, fileTree = PDF_UTILS_TREE),
+        SkillItem("code-review", "代码审查助手", enabled = true, global = true,
+            skillMd = CODE_REVIEW_MD, fileTree = CODE_REVIEW_TREE),
     )
     val projectSkills = mutableStateListOf(
-        SkillItem("android-debug", "Android 崩溃定位与日志分析", enabled = true, global = false),
-        SkillItem("kmp-migration", "Kotlin Multiplatform 迁移检查", enabled = false, global = false),
+        SkillItem("android-debug", "Android 崩溃定位与日志分析", enabled = true, global = false,
+            skillMd = ANDROID_DEBUG_MD, fileTree = ANDROID_DEBUG_TREE),
+        SkillItem("kmp-migration", "Kotlin Multiplatform 迁移检查", enabled = false, global = false,
+            skillMd = KMP_MIGRATION_MD, fileTree = KMP_MIGRATION_TREE),
     )
     val globalPlugins = mutableStateListOf(
         PluginItem("pi-plugin-git", "npm:@x/pi-plugin-git", enabled = true, global = true),

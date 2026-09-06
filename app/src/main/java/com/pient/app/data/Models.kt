@@ -388,6 +388,8 @@ data class SkillItem(
     val desc: String,
     val enabled: Boolean,
     val global: Boolean = true,
+    val skillMd: String? = null,   // SKILL.md 文件内容（mock；null = 无此文件）
+    val fileTree: String? = null,  // 技能目录 ASCII 树（mock；null = 无目录信息）
 )
 
 data class PluginItem(

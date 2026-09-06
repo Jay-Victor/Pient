@@ -27,7 +27,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material3.DatePicker
@@ -97,7 +96,7 @@ private data class StackSegment(val label: String, val color: Color, val value: 
  * 模型用量信息（2026-09-01 制作，结构参照 deepseek 开放平台用量页；三版）：
  * 时间维度选择器 + 模型选择器（2026-09-01 新增，同款式卡片 + v 箭头列表）→ 三卡 →
  * Token / 费用 两张堆叠柱状图卡（单模型时按输入/输出堆叠，全部模型按模型堆叠）。
- * 数据为 UsageMock 演示数据；导出为原型占位（选择器行模型卡右侧）。
+ * 数据为 UsageMock 演示数据。
  */
 @Composable
 fun UsageScreen(nav: NavController) {
@@ -213,7 +212,7 @@ fun UsageScreen(nav: NavController) {
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            // 顶栏（2026-09-03：导出放回顶栏右侧；时区三点已移除）
+            // 顶栏（2026-09-06：导出已移除；时区三点已移除）
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -233,25 +232,6 @@ fun UsageScreen(nav: NavController) {
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(start = 12.dp).weight(1f),
                 )
-                // 导出
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clickable(onClick = { toast(context, "账单导出开发中") })
-                        .padding(horizontal = 6.dp, vertical = 7.dp),
-                ) {
-                    Icon(
-                        Icons.Outlined.FileDownload, null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Text(
-                        "导出",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(start = 3.dp),
-                    )
-                }
             }
 
             Column(
@@ -294,7 +274,7 @@ fun UsageScreen(nav: NavController) {
                         }
                     }
                     Spacer(Modifier.width(8.dp))
-                    // 2026-09-03：导出已移回顶栏；模型卡独占剩余宽度（fillMax 通栏）
+                    // 模型卡独占剩余宽度（fillMax 通栏）
                     SelectorCard(
                         label = "模型",
                         value = modelLabel,
@@ -429,8 +409,8 @@ private fun SelectorCard(
                 value,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onBackground,
-                // fillMax 时弹性占满剩余：值区有界，超长值（模型名）省略号截断，
-                // 卡片宽度恒定不挤掉右侧导出（2026-09-03；fill=false 在窄分配下会退化到 0 宽）
+                // fillMax 时弹性占满剩余：值区有界，超长值（模型名）省略号截断
+                // （2026-09-03；fill=false 在窄分配下会退化到 0 宽）
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = if (fillMax) Modifier.weight(1f).padding(end = 6.dp)

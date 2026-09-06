@@ -32,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.pient.app.data.MockStore
@@ -43,11 +44,14 @@ import com.pient.app.ui.theme.MonoFont
  * 技能管理（P7，设计计划第 4 章，pi-web SkillsConfig 参考）：
  * 全局/项目分段（~/.pi/agent/skills/ ↔ .pi/skills/）；列表 = 名称+描述+开关
  * （disable-model-invocation 外科手术式修改）；右下双 FAB：搜索 + 导入。
+ * 2026-09-06：点击技能卡片弹出详情弹窗（SKILL.md 内容/路径/删除+关闭）。
  */
 @Composable
 fun SkillsScreen(nav: NavController) {
     var segment by remember { mutableStateOf(0) }
     var importOpen by remember { mutableStateOf(false) }
+    var detailFor by remember { mutableStateOf<SkillItem?>(null) }
+    val context = LocalContext.current
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -96,7 +100,7 @@ fun SkillsScreen(nav: NavController) {
                 ),
             ) {
                 items(list.size, key = { i -> list[i].name }) { i ->
-                    SkillRow(list[i])
+                    SkillRow(list[i], onClick = { detailFor = list[i] })
                 }
             }
         }
@@ -135,18 +139,32 @@ fun SkillsScreen(nav: NavController) {
         ImportSkillDialog(
             global = segment == 0,
             onDismiss = { importOpen = false },
-            onImported = { name, desc ->
-                val item = SkillItem(name, desc, enabled = true, global = segment == 0)
+            onImported = { name, desc, md ->
+                val item = SkillItem(name, desc, enabled = true, global = segment == 0, skillMd = md)
                 if (segment == 0) MockStore.globalSkills.add(0, item)
                 else MockStore.projectSkills.add(0, item)
                 importOpen = false
             },
         )
     }
+
+    // 技能详情弹窗（2026-09-06：点技能卡片弹出；删除 = 从列表移除技能及全部文件）
+    detailFor?.let { item ->
+        SkillDetailDialog(
+            item = item,
+            onDismiss = { detailFor = null },
+            onDelete = {
+                if (item.global) MockStore.globalSkills.remove(item)
+                else MockStore.projectSkills.remove(item)
+                toast(context, "已删除技能 ${item.name}")
+                detailFor = null
+            },
+        )
+    }
 }
 
 @Composable
-private fun SkillRow(item: SkillItem) {
+private fun SkillRow(item: SkillItem, onClick: () -> Unit) {
     var enabled by remember(item.name) { mutableStateOf(item.enabled) }
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -157,7 +175,11 @@ private fun SkillRow(item: SkillItem) {
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
             .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
-        Column(Modifier.weight(1f)) {
+        Column(
+            Modifier
+                .weight(1f)
+                .clickable(onClick = onClick),
+        ) {
             Text(
                 item.name,
                 style = MaterialTheme.typography.labelLarge.copy(fontFamily = MonoFont),
@@ -180,4 +202,8 @@ private fun SkillRow(item: SkillItem) {
             colors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary),
         )
     }
+}
+
+private fun toast(context: android.content.Context, msg: String) {
+    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
 }
