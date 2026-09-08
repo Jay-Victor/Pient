@@ -20,6 +20,8 @@ data class ProviderInfo(
     val defaultEndpoint: String,
     val endpoints: List<String>,
     val models: List<String>,
+    /** 暗色主题专用 logo（0 = 复用 logoRes）。用于固有色在暗色卡片上不可见的图标 */
+    @DrawableRes val logoResDark: Int = 0,
 )
 
 object ProviderCatalog {
@@ -54,7 +56,8 @@ object ProviderCatalog {
             listOf("claude-sonnet-4-6", "claude-opus-4-6-thinking", "claude-opus-4-5-thinking", "claude-haiku-4-5")),
         p("amazon-bedrock", "Amazon Bedrock", R.drawable.provider_amazon_bedrock, mono = false,
             "https://bedrock-runtime.<region>.amazonaws.com",
-            listOf("eu.anthropic.claude-opus-4-6-v1", "anthropic.claude-sonnet-4-6-v1")),
+            listOf("eu.anthropic.claude-opus-4-6-v1", "anthropic.claude-sonnet-4-6-v1"),
+            logoResDark = R.drawable.provider_amazon_bedrock_dark),
         // ── Google 系 ──
         p("google", "Google", R.drawable.provider_google, mono = false,
             "https://generativelanguage.googleapis.com/v1beta",
@@ -68,7 +71,8 @@ object ProviderCatalog {
             listOf("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat")),
         p("kimi-coding", "Kimi For Coding", R.drawable.provider_kimi_coding, mono = false,
             "https://api.kimi.com/coding",
-            listOf("kimi-for-coding", "kimi-latest")),
+            listOf("kimi-for-coding", "kimi-latest"),
+            logoResDark = R.drawable.provider_kimi_coding_dark),
         p("moonshotai", "Moonshot AI", R.drawable.provider_moonshot, mono = true,
             "https://api.moonshot.ai/v1",
             listOf("kimi-k2", "kimi-latest")),
@@ -118,7 +122,7 @@ object ProviderCatalog {
         p("xai", "xAI", R.drawable.provider_xai, mono = true,
             "https://api.x.ai/v1",
             listOf("grok-4", "grok-3")),
-        p("groq", "Groq", R.drawable.provider_groq, mono = true,
+        p("groq", "Groq", R.drawable.provider_groq, mono = false,
             "https://api.groq.com/openai/v1",
             listOf("llama-3.3-70b-versatile", "llama-3.1-8b-instant")),
         // ── 聚合 / 网关 / 推理平台 ──
@@ -151,7 +155,7 @@ object ProviderCatalog {
         p("huggingface", "Hugging Face", R.drawable.provider_huggingface, mono = false,
             "https://router.huggingface.co/v1",
             listOf("Qwen/Qwen2.5-72B-Instruct", "meta-llama/Llama-3.3-70B-Instruct")),
-        p("cerebras", "Cerebras", R.drawable.provider_cerebras, mono = true,
+        p("cerebras", "Cerebras", R.drawable.provider_cerebras, mono = false,
             "https://api.cerebras.ai/v1",
             listOf("llama-3.3-70b", "llama-3.1-8b")),
         p("nvidia", "NVIDIA", R.drawable.provider_nvidia, mono = false,
@@ -180,9 +184,11 @@ object ProviderCatalog {
         defaultEndpoint: String,
         models: List<String> = emptyList(),
         endpoints: List<String> = emptyList(),
+        @DrawableRes logoResDark: Int = 0,
     ) = ProviderInfo(
         id, name, logoRes, mono, defaultEndpoint,
         if (endpoints.isEmpty()) listOf(defaultEndpoint) else endpoints,
         models,
+        logoResDark,
     )
 }

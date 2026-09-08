@@ -86,6 +86,7 @@ import com.pient.app.ui.components.DividerLine
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.components.PientDialog
 import com.pient.app.ui.components.SectionHeader
+import com.pient.app.ui.theme.LocalPientIsDark
 import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
 import kotlinx.coroutines.delay
@@ -470,6 +471,7 @@ fun ModelConfigScreen(nav: NavController) {
                     key = it.id,
                     title = it.name,
                     logoRes = it.logoRes,
+                    logoResDark = it.logoResDark,
                     monoLogo = it.monoLogo,
                     selected = it.id == selectedId,
                     added = it.id in configuredIds,
@@ -721,7 +723,8 @@ private fun ProviderBar(provider: ProviderInfo, onClick: () -> Unit) {
     }
 }
 
-/** 服务商 logo：Mono 图标用主题文字色着色、Color 图标原色（对齐 pi-web hasColor 语义） */
+/** 服务商 logo：Mono 图标用主题文字色着色、Color 图标原色（对齐 pi-web hasColor 语义）；
+ *  固有色在暗色卡片上不可见的图标（AWS 黑字 / Kimi 白 K）用 logoResDark 暗色变体 */
 @Composable
 private fun ProviderLogo(provider: ProviderInfo, size: androidx.compose.ui.unit.Dp) {
     if (provider.logoRes == 0) {
@@ -739,11 +742,14 @@ private fun ProviderLogo(provider: ProviderInfo, size: androidx.compose.ui.unit.
         }
         return
     }
+    val res = if (LocalPientIsDark.current && provider.logoResDark != 0) {
+        provider.logoResDark
+    } else provider.logoRes
     val tint = if (provider.monoLogo) {
         ColorFilter.tint(MaterialTheme.colorScheme.onSurface)
     } else null
     Image(
-        painter = painterResource(provider.logoRes),
+        painter = painterResource(res),
         contentDescription = provider.name,
         colorFilter = tint,
         modifier = Modifier.size(size),
@@ -990,6 +996,7 @@ private data class PickerEntry(
     val key: String,
     val title: String,
     @androidx.annotation.DrawableRes val logoRes: Int = 0,
+    @androidx.annotation.DrawableRes val logoResDark: Int = 0,
     val monoLogo: Boolean = false,
     val mono: Boolean = false, // 等宽字体渲染（端点/模型）
     val selected: Boolean = false,
@@ -1234,12 +1241,15 @@ private fun PickerRow(entry: PickerEntry, onClick: () -> Unit) {
     }
 }
 
-/** 弹窗项 logo（Mono 用主题文字色着色、Color 原色） */
+/** 弹窗项 logo（Mono 用主题文字色着色、Color 原色；暗色主题可用 logoResDark 变体） */
 @Composable
 private fun PickerEntryLogo(entry: PickerEntry, size: androidx.compose.ui.unit.Dp) {
+    val res = if (LocalPientIsDark.current && entry.logoResDark != 0) {
+        entry.logoResDark
+    } else entry.logoRes
     val tint = if (entry.monoLogo) ColorFilter.tint(MaterialTheme.colorScheme.onSurface) else null
     Image(
-        painter = painterResource(entry.logoRes),
+        painter = painterResource(res),
         contentDescription = entry.title,
         colorFilter = tint,
         modifier = Modifier.size(size),
