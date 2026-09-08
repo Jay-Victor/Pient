@@ -459,7 +459,7 @@ private fun NodeCard(
     Box(
         modifier = modifier.size(width = 248.dp, height = 72.dp),
     ) {
-        // 分支名标签（卡片上方空隙，与聊天页 BranchBar label 同源）
+        // 分支名标签（卡片上方空隙，取自节点 branchLabel）
         // 注意：必须放上方——放下方会与下一行卡片重叠被遮挡（行距 120dp、
         // 空隙仅 48dp，标签在 +76dp 处会进入下一行卡片区域）
         if (node.branchLabel != null) {

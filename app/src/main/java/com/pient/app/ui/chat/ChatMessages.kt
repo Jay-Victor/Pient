@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -15,10 +16,12 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -44,7 +47,6 @@ import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.ForkRight
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Summarize
-import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -76,15 +78,20 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.pient.app.data.Attachment
 import com.pient.app.data.Msg
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ToolStatus
 import com.pient.app.ui.components.MarkdownText
 import com.pient.app.ui.components.PermissionRequestDialog
 import com.pient.app.ui.components.PientButton
+import com.pient.app.ui.theme.LocalPientIsDark
+import com.pient.app.ui.theme.LocalPientUserBubble
 import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
 import kotlinx.coroutines.delay
@@ -92,10 +99,12 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
- * 消息区（P1 核心，设计计划 3.3）：
- * 用户消息 = 主色浅底胶囊右对齐；助手 = 无底卡片 Markdown；
- * 思考块可折叠 + 级别徽标；工具调用等宽小卡；工具结果缩略；
- * 压缩条目 / 分支切换条 / usage 统计。消息区禁止玻璃。
+ * 消息区（P1 核心，设计计划 3.3；2026-09-08 消息框/回复样式重设计对齐 pi-web/pi/Operit）：
+ * 用户消息 = userBubble 令牌底右对齐胶囊（Operit 20/4/20/20 尾角、85% 宽、44dp 最小高；
+ * FLAT 模式 pi-web 12dp 圆角 + accent 20% 边框）；附件 chip 气泡上方（Operit AttachmentTag）；
+ * 助手 = 无底卡片 Markdown + pi-web 模型标签行/usage 行；思考块/工具卡 pi-web 几何与绿红语义；
+ * 工具卡内嵌成对结果（多级折叠：一级工具卡、二级结果区，2026-09-08）；压缩条目 / usage 统计。
+ * 消息区禁止玻璃。
  */
 @Composable
 fun ChatMessages(
@@ -159,6 +168,8 @@ fun ChatMessages(
         ) {
             items(messages.size, key = { it }) { idx ->
                 val msg = messages[idx]
+                // 成对工具结果（ToolCall 紧跟 ToolResult）已并入工具卡渲染，此处跳过
+                if (msg is Msg.ToolResult && idx > 0 && messages[idx - 1] is Msg.ToolCall) return@items
                 // 长按 fork 入口：仅 User/Assistant 气泡响应（2026-09-02 分支功能设计 §4.1）
                 val longPressable = msg is Msg.User || msg is Msg.Assistant
                 Box(
@@ -191,7 +202,12 @@ fun ChatMessages(
                             } else Modifier,
                         ),
                 ) {
-                    MessageCard(msg, onRequestPermission = { showPermDemo = true })
+                    MessageCard(
+                        msg,
+                        toolResult = if (msg is Msg.ToolCall && idx + 1 < messages.size)
+                            messages[idx + 1] as? Msg.ToolResult else null,
+                        onRequestPermission = { showPermDemo = true },
+                    )
                 }
             }
             if (isStreaming) {
@@ -393,15 +409,18 @@ fun ChatMessages(
 }
 
 @Composable
-private fun MessageCard(msg: Msg, onRequestPermission: () -> Unit) {
+private fun MessageCard(
+    msg: Msg,
+    toolResult: Msg.ToolResult? = null,
+    onRequestPermission: () -> Unit,
+) {
     when (msg) {
         is Msg.User -> UserBubble(msg)
         is Msg.Assistant -> AssistantCard(msg)
         is Msg.Thinking -> ThinkingCard(msg)
-        is Msg.ToolCall -> ToolCallCard(msg, onRequestPermission)
-        is Msg.ToolResult -> ToolResultCard(msg)
+        is Msg.ToolCall -> ToolCallCard(msg, toolResult, onRequestPermission)
+        is Msg.ToolResult -> ToolResultCard(msg)   // 仅未成对的结果走独立卡
         is Msg.Compaction -> CompactionCard(msg)
-        is Msg.BranchBar -> BranchBarCard(msg)
     }
 }
 
@@ -487,49 +506,109 @@ private fun MenuRow(
 
 // ───────────────────────────── 用户消息 ─────────────────────────────
 
+/** 附件 chip（Operit AttachmentTag 规格：24dp 高、12dp 圆角、不透明实底 = 气泡色、图标 12dp + 名称 120dp 截断） */
+@Composable
+private fun AttachmentChip(att: Attachment, bubbleBg: Color) {
+    Row(
+        modifier = Modifier
+            .height(24.dp)
+            .background(bubbleBg, RoundedCornerShape(12.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            attachmentIcon(att.kind), null,
+            tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f),
+            modifier = Modifier.size(12.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            att.name,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 120.dp),
+        )
+    }
+}
+
+/**
+ * 用户消息气泡（2026-09-08 重设计，对齐三源）：
+ * - 几何（Operit BubbleUserMessageComposable）：右对齐、气泡最大宽 = 可用宽 85%、
+ *   BUBBLE 模式圆角 (20,4,20,20)（尾角右上）、最小高 44dp、内边距 12dp、无边框；
+ * - FLAT 模式（pi-web UserMessageView）：12dp 圆角、1dp accent 20% 边框、内边距 8×12；
+ * - 底色 = userBubble 令牌（Hermes --userBubble 同源，随主色联动）；
+ * - 附件 chip 在气泡上方右对齐一行（Operit trailing attachments）。
+ */
 @Composable
 private fun UserBubble(msg: Msg.User) {
+    val userBubbleBg = LocalPientUserBubble.current
     val bubble = SettingsStore.bubbleStyle == com.pient.app.data.BubbleStyle.BUBBLE
-    val shape = if (bubble) RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)
+    val shape = if (bubble) RoundedCornerShape(20.dp, 4.dp, 20.dp, 20.dp)
     else RoundedCornerShape(12.dp)
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.End,
     ) {
-        Column(
-            modifier = Modifier
-                .widthIn(max = 320.dp)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f), shape)
-                .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f), shape)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-        ) {
-            if (msg.attachments.isNotEmpty()) {
-                msg.attachments.forEach { att ->
-                    Text(
-                        att.kind.emoji + att.name,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(bottom = 4.dp),
-                    )
-                }
+        if (msg.attachments.isNotEmpty()) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 4.dp),
+            ) {
+                msg.attachments.forEach { att -> AttachmentChip(att, userBubbleBg) }
             }
-            Text(msg.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onBackground)
+        }
+        BoxWithConstraints {
+            val maxBubbleWidth = maxWidth * 0.85f
+            Column(
+                modifier = Modifier
+                    .widthIn(max = maxBubbleWidth)
+                    .then(if (bubble) Modifier.defaultMinSize(minHeight = 44.dp) else Modifier)
+                    .background(userBubbleBg, shape)
+                    .then(
+                        if (bubble) Modifier
+                        else Modifier.border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f), shape),
+                    )
+                    .padding(
+                        if (bubble) PaddingValues(12.dp)
+                        else PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    ),
+            ) {
+                Text(
+                    msg.text,
+                    style = userTextStyle(),
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+            }
         }
     }
 }
 
 // ───────────────────────────── 助手消息 ─────────────────────────────
 
+/**
+ * 助手回复（2026-09-08 重设计，对齐 pi / pi-web）：无气泡卡片、纯 Markdown 直排；
+ * 头部模型标签行（pi-web：11sp、弱化色、下距 4dp）；底部 usage 行（pi-web 顺序 in·out·cache·$、11sp）。
+ */
 @Composable
 private fun AssistantCard(msg: Msg.Assistant) {
     Column(Modifier.fillMaxWidth()) {
+        if (!msg.model.isNullOrBlank()) {
+            Text(
+                msg.model,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+        }
         MarkdownText(msg.markdown, modifier = Modifier.padding(top = 2.dp))
         if (msg.usage != null) {
             Text(
                 "in ${tok(msg.usage.inTokens)} · out ${tok(msg.usage.outTokens)} · " +
                     "cache ${tok(msg.usage.cacheTokens)} · \$${msg.usage.costUsd}",
                 style = MaterialTheme.typography.labelSmall,
-                fontFamily = MonoFont,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.95f),
                 modifier = Modifier.padding(top = 4.dp),
             )
@@ -542,23 +621,41 @@ private fun tok(n: Int): String {
     return if (k > 0) "${k}.${(n % 1000) / 100}k" else "$n"
 }
 
+/**
+ * 用户消息正文样式（Hermes user-message 规格）：13sp 字号（--conversation-text-font-size 0.8125rem）、
+ * 1.3 行高（--human-msg-line-height）。字号按全局字号设置等比缩放（基准 14sp）。
+ */
+@Composable
+private fun userTextStyle(): TextStyle {
+    val base = MaterialTheme.typography.bodyMedium
+    return base.copy(
+        fontSize = base.fontSize * (13f / 14f),
+        lineHeight = 1.3.em,
+    )
+}
+
 // ───────────────────────────── 思考块 ─────────────────────────────
 
+/**
+ * 思考块（2026-09-08 对齐 pi-web ThinkingBlock）：1dp outlineVariant 边框、6dp 圆角、
+ * 头部内边距 6×10（pi-web 6px 10px）、展开正文 10/10/8（pi-web 8px 10px）。
+ * 保留 Pient 特有：级别徽标（pi thinking 五档）。
+ */
 @Composable
 private fun ThinkingCard(msg: Msg.Thinking) {
     var expanded by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp)),
+            .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp)),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = { expanded = !expanded })
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
             Icon(
                 Icons.Outlined.Psychology, null,
@@ -593,7 +690,7 @@ private fun ThinkingCard(msg: Msg.Thinking) {
                 msg.text,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+                modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
             )
         }
     }
@@ -601,40 +698,77 @@ private fun ThinkingCard(msg: Msg.Thinking) {
 
 // ───────────────────────────── 工具调用 ─────────────────────────────
 
+/**
+ * 工具调用卡（2026-09-08 对齐 pi-web ToolCallBlock）：
+ * - 成功绿 / 失败红语义：边框 25%/45%、底 4%/5%（pi-web rgba(34,197,94,…)/rgba(248,113,113,…)）
+ *   映射到 Pient GitHub 绿 #3FB950/#1A7F37 与 error 令牌；RUNNING 中性；
+ * - 7dp 圆角（pi-web 7）、头部内边距 6×10、工具名 mono 11sp 600、参数 mono 11sp、间距 7dp；
+ * - 展开详情 12sp/18sp（pi-web pre 12px/1.5）。
+ * 多级折叠（2026-09-08 用户定：最终回答之外全部可折叠）：
+ * 一级 = 工具卡头部；二级 = 卡内嵌的成对结果区（默认收起 4 行预览，可再展开全量）。
+ * 保留 Pient 特有：RUNNING/完成/失败状态图标与权限演示入口。
+ */
 @Composable
-private fun ToolCallCard(msg: Msg.ToolCall, onRequestPermission: () -> Unit) {
+private fun ToolCallCard(
+    msg: Msg.ToolCall,
+    result: Msg.ToolResult?,
+    onRequestPermission: () -> Unit,
+) {
     var expanded by remember { mutableStateOf(false) }
+    var resultExpanded by remember { mutableStateOf(false) }
+    val isDark = LocalPientIsDark.current
+    val toolGreen = if (isDark) Color(0xFF3FB950) else Color(0xFF1A7F37)
+    val (borderColor, bgColor, nameColor) = when (msg.status) {
+        ToolStatus.DONE -> Triple(
+            toolGreen.copy(alpha = 0.25f),
+            toolGreen.copy(alpha = 0.04f),
+            toolGreen,
+        )
+        ToolStatus.FAILED -> Triple(
+            MaterialTheme.colorScheme.error.copy(alpha = 0.45f),
+            MaterialTheme.colorScheme.error.copy(alpha = 0.05f),
+            MaterialTheme.colorScheme.error,
+        )
+        ToolStatus.RUNNING -> Triple(
+            MaterialTheme.colorScheme.outlineVariant,
+            MaterialTheme.colorScheme.surfaceContainerLow,
+            MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(12.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp)),
+            .background(bgColor, RoundedCornerShape(7.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(7.dp)),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = { expanded = !expanded })
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
             Icon(
                 Icons.Outlined.Build, null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = nameColor,
                 modifier = Modifier.size(14.dp),
             )
             Text(
                 msg.name,
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
                 fontFamily = MonoFont,
+                fontWeight = FontWeight.SemiBold,
+                color = nameColor,
                 modifier = Modifier.padding(start = 6.dp),
             )
             Text(
                 msg.params,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
                 fontFamily = MonoFont,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
-                modifier = Modifier.weight(1f).padding(start = 8.dp),
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(start = 7.dp),
             )
             when (msg.status) {
                 ToolStatus.RUNNING -> CircularProgressIndicator(
@@ -654,20 +788,79 @@ private fun ToolCallCard(msg: Msg.ToolCall, onRequestPermission: () -> Unit) {
                 )
             }
         }
-        if (expanded && msg.detail != null) {
-            Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)) {
+        // 展开态（2026-09-08：任何工具调用都可展开——无 detail 时展示完整参数）
+        if (expanded) {
+            Column(
+                modifier = Modifier
+                    .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
+            ) {
                 Text(
-                    msg.detail,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFont, fontSize = 11.sp, lineHeight = 16.sp),
+                    msg.detail ?: msg.params,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = MonoFont,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                    ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Text(
-                    "演示：权限请求弹窗 →",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                if (msg.detail != null) {
+                    Text(
+                        "演示：权限请求弹窗 →",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .padding(top = 8.dp)
+                            .clickable(onClick = onRequestPermission),
+                    )
+                }
+            }
+        }
+        // 二级折叠：成对结果嵌在工具卡内（默认收起 4 行预览；仅在工具卡展开时可见）
+        if (expanded && result != null) {
+            val shown = if (resultExpanded) result.full ?: result.preview
+            else result.preview.lines().take(4).joinToString("\n")
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.55f))
+                    .border(
+                        BorderStroke(1.dp, borderColor.copy(alpha = 0.5f)),
+                        RoundedCornerShape(bottomStart = 7.dp, bottomEnd = 7.dp),
+                    ),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
-                        .padding(top = 8.dp)
-                        .clickable(onClick = onRequestPermission),
+                        .fillMaxWidth()
+                        .clickable(onClick = { resultExpanded = !resultExpanded })
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        "↳ 结果",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Icon(
+                        if (resultExpanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                        null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text(
+                        if (resultExpanded) "收起" else "展开",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Text(
+                    shown,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = MonoFont,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                    ),
+                    modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
                 )
             }
         }
@@ -683,25 +876,34 @@ private fun ToolResultCard(msg: Msg.ToolResult) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.55f), RoundedCornerShape(7.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(7.dp))
             .padding(12.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // 整行可点切换展开/收起（2026-09-08：任何结果都可折叠；无 full 时展开显示完整预览）
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = { expanded = !expanded }),
+        ) {
             Text(
                 "↳ 结果",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.weight(1f))
-            if (msg.full != null) {
-                Text(
-                    if (expanded) "收起" else "展开",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable(onClick = { expanded = !expanded }),
-                )
-            }
+            Icon(
+                if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp),
+            )
+            Text(
+                if (expanded) "收起" else "展开",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
         }
         Text(
             shown,
@@ -766,34 +968,8 @@ private fun CompactionCard(msg: Msg.Compaction) {
 
 // ───────────────────────────── 分支切换条 ─────────────────────────────
 
-@Composable
-private fun BranchBarCard(msg: Msg.BranchBar) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.07f), RoundedCornerShape(12.dp))
-            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        Icon(
-            Icons.Outlined.SwapHoriz, null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(16.dp),
-        )
-        Text(
-            msg.label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.weight(1f).padding(start = 6.dp),
-        )
-        Text(
-            "${msg.branchCount} 个分支 · 查看",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
-        )
-    }
-}
+// 已移除（2026-09-08 用户定）：会话内分支在 /tree 画布页展示、会话外分支在会话列表展示，
+// 聊天流内不再出现分支卡片。
 
 // ───────────────────────────── 流式输出卡 ─────────────────────────────
 
@@ -805,7 +981,6 @@ private fun locatorPreview(msg: Msg): String = when (msg) {
     is Msg.ToolCall -> "工具 · ${msg.name}"
     is Msg.ToolResult -> "结果 · ${msg.preview.replace('\n', ' ')}"
     is Msg.Compaction -> "上下文已压缩 · 节省 ${msg.saved} tokens"
-    is Msg.BranchBar -> "分支 · ${msg.label}"
 }
 
 @Composable

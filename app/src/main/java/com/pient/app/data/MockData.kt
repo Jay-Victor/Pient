@@ -38,7 +38,13 @@ object MockSessions {
 /** 会话消息内容（mock 会话固定内容，新建会话为空） */
 object MockMessages {
     val fixLoginCrash: List<Msg> = listOf(
-        Msg.User("登录页在 Android 14 上必现崩溃，帮我看看日志定位一下"),
+        Msg.User(
+            "登录页在 Android 14 上必现崩溃，帮我看看日志定位一下",
+            attachments = listOf(
+                Attachment("crash_log.txt", AttachmentKind.FILE),
+                Attachment("screenshot.png", AttachmentKind.IMAGE),
+            ),
+        ),
         Msg.Thinking(
             level = "medium",
             text = "用户报告 Android 14 登录页必现崩溃。计划：先用 bash 抓取 logcat 崩溃堆栈，" +
@@ -61,22 +67,30 @@ object MockMessages {
                 "\tat com.example.LoginActivity.onCreate(LoginActivity.kt:87)",
         ),
         Msg.Assistant(
-            markdown = "已定位根因：**`LoginViewModel.kt:42`** 在首启时 `tokenStorage` 尚未初始化，\n" +
-                "`get()` 调用抛 NPE。\n\n修复方案：\n\n1. 在 `init` 中以 `runCatching` 包裹 token 读取\n" +
+            markdown = "## 根因定位\n\n" +
+                "已定位根因：**`LoginViewModel.kt:42`** 在首启时 `tokenStorage` 尚未初始化，\n" +
+                "`get()` 调用抛 NPE。\n\n" +
+                "## 修复方案\n\n" +
+                "1. 在 `init` 中以 `runCatching` 包裹 token 读取\n" +
                 "2. 对 `tokenStorage` 提供 `emptyToken()` 兜底\n\n" +
                 "```kotlin\n" +
                 "val token = runCatching { tokenStorage.get() }\n" +
                 "    .getOrNull() ?: emptyToken()\n" +
                 "```\n\n" +
-                "> 注：Android 14 首启时序更严格，建议一并核对 `onResume`。",
+                "> 注：Android 14 首启时序更严格，建议一并核对 `onResume`。\n\n" +
+                "*预计 5 分钟改完，需要我继续吗？*",
             usage = Usage(inTokens = 4208, outTokens = 612, cacheTokens = 1873, costUsd = 0.018),
+            model = "claude-sonnet-4-5",
         ),
         Msg.User("好的，按方案 1 修，改完帮我跑一下测试"),
-        Msg.BranchBar(label = "分支 A（修复 NPE 后）", branchCount = 2),
         Msg.Assistant(
-            markdown = "已应用修复并执行 `./gradlew test`：\n\n- ✅ `LoginViewModelTest` 12/12 通过\n" +
-                "- ⚠️ `LoginActivityTest` 1 项与设备旋转相关，与本修复无关\n\n需要我继续处理吗？",
+            markdown = "## 修复完成\n\n" +
+                "已应用修复并执行 `./gradlew test`：\n\n" +
+                "- ✅ `LoginViewModelTest` **12/12** 通过\n" +
+                "- ⚠️ `LoginActivityTest` 1 项与设备旋转相关，与本修复无关\n\n" +
+                "需要我继续处理吗？",
             usage = Usage(inTokens = 5330, outTokens = 288, cacheTokens = 4208, costUsd = 0.021),
+            model = "claude-sonnet-4-5",
         ),
     )
 
@@ -103,7 +117,7 @@ object MockMessages {
 
 /** /tree 画布页演示树（2026-09-02 分支功能设计 §2.2）：
  *  分支 A = 现有 flat mock 内容（活跃）；分支 B = 新增演示分支。
- *  节点 = 用户消息；exchange 不含 BranchBar（导航切换时由 navigateToNode 注入）。 */
+ *  节点 = 用户消息；exchange 为纯消息流（会话内分支在画布页展示，聊天流不注入分支卡片）。 */
 object MockTrees {
     val fixLoginCrash: SessionTreeNode by lazy {
         SessionTreeNode(
@@ -117,7 +131,7 @@ object MockTrees {
                     userText = (MockMessages.fixLoginCrash[5] as Msg.User).text,
                     exchange = listOf(
                         MockMessages.fixLoginCrash[5],
-                        MockMessages.fixLoginCrash[7],
+                        MockMessages.fixLoginCrash[6],
                     ),
                     branchLabel = "分支 A（修复 NPE 后）",
                     active = true,
@@ -138,6 +152,7 @@ object MockTrees {
                                 cacheTokens = 4208,
                                 costUsd = 0.024,
                             ),
+                            model = "claude-sonnet-4-5",
                         ),
                     ),
                     branchLabel = "分支 B（先写回归用例）",
@@ -172,9 +187,27 @@ object MockModels {
 /** mock 流式回复（发送后按字符吐出） */
 object MockReplies {
     val default = listOf(
-        "收到。我先梳理一下任务要点：\n\n- **目标**：$1\n- 已加载当前项目上下文（`my-android-app`）\n\n" +
-            "```bash\npi run \"$1\"\n```\n\n> 原型演示：此处为 mock 流式回复，接入 Pi 运行时后由真实 Agent 输出替换。",
-        "好的，这是一个典型的工程任务。我的思路：\n\n1. 先定位相关代码路径\n2. 分析现有实现\n3. 给出可执行方案\n\n需要我直接动手改代码吗？",
+        "收到。我先梳理一下任务要点：\n\n" +
+            "## 目标\n\n" +
+            "- **任务**：$1\n" +
+            "- 已加载当前项目上下文（`my-android-app`）\n\n" +
+            "## 执行计划\n\n" +
+            "1. 定位相关代码路径\n" +
+            "2. 分析现有实现\n" +
+            "3. 给出可执行方案\n\n" +
+            "```bash\n" +
+            "pi run \"$1\"\n" +
+            "```\n\n" +
+            "> 原型演示：此处为 mock 流式回复，接入 Pi 运行时后由真实 Agent 输出替换。\n\n" +
+            "*需要我直接动手改代码吗？*",
+        "好的，这是一个典型的工程任务。我的思路：\n\n" +
+            "### 第一步：先定位\n\n" +
+            "用 `grep` 找到相关调用点，再通读上下文。\n\n" +
+            "### 第二步：再动手\n\n" +
+            "- 保持行为不变\n" +
+            "- 补充回归用例\n\n" +
+            "> 提示：修改前建议先 `git stash` 保存现场。\n\n" +
+            "**预计 10 分钟完成**，需要我继续吗？",
     )
     private var idx = 0
     fun next(text: String): String {

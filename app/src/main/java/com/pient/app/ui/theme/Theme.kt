@@ -30,6 +30,14 @@ import com.pient.app.data.ThemeScheme
 val LocalPientIsDark = compositionLocalOf { true }
 
 /**
+ * 用户消息气泡底色（2026-09-08 改不透明实底，对齐 Hermes --ui-chat-bubble-background 公式）：
+ * 暗 = accent 46% over surfaceContainer（Hermes .dark --theme-mix-bubble:46% + neutral-card）；
+ * 亮 = accent 22% over background（pi-web #eff6ff / Operit primaryContainer 蓝系 tint 语义）。
+ * 两端均 compositeOver 实底，不透明。
+ */
+val LocalPientUserBubble = compositionLocalOf { Color(0xFF345B88) }
+
+/**
  * Pient 主题：Hermes 令牌同源 ColorScheme 映射（设计计划附录 A）。
  * 用户可在"主题与外观"中修改主色（accent），secondary/userBubble 随主色联动。
  * darkTheme 为必填参数：明暗状态只能来自调用方（状态感知），
@@ -45,8 +53,8 @@ fun PientTheme(
     // 主色联动派生（secondary / userBubble 蓝色系 tint 随主色走）
     val darkSecondary = accent.copy(alpha = 0.14f).compositeOver(scheme.surfaceContainer)
     val lightSecondary = accent.copy(alpha = 0.12f).compositeOver(scheme.surfaceContainer)
-    val darkUserBubble = accent.copy(alpha = 0.16f).compositeOver(scheme.surfaceContainerLow)
-    val lightUserBubble = accent.copy(alpha = 0.18f).compositeOver(scheme.background)
+    val darkUserBubble = accent.copy(alpha = 0.46f).compositeOver(scheme.surfaceContainer)
+    val lightUserBubble = accent.copy(alpha = 0.22f).compositeOver(scheme.background)
 
     val colorScheme = if (darkTheme) {
         darkColorScheme(
@@ -96,7 +104,10 @@ fun PientTheme(
         )
     }
 
-    CompositionLocalProvider(LocalPientIsDark provides darkTheme) {
+    CompositionLocalProvider(
+        LocalPientIsDark provides darkTheme,
+        LocalPientUserBubble provides if (darkTheme) darkUserBubble else lightUserBubble,
+    ) {
         // 字体设置全局生效（2026-08-31）：字体样式 → 全局 FontFamily；字体大小 → 全局缩放
         // （factor = 设置值 / 14sp 基准）。字体解析涉及 assets/filesDir 文件 IO，按设置键 remember 缓存。
         val context = LocalContext.current

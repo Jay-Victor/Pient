@@ -297,6 +297,7 @@ sealed class Msg {
     data class Assistant(
         val markdown: String,
         val usage: Usage? = null,
+        val model: String? = null,   // 消息所用模型（pi-web 助手消息头部模型标签）
     ) : Msg()
 
     data class Thinking(
@@ -321,12 +322,6 @@ sealed class Msg {
         val tokensBefore: Int,
         val saved: Int,
         val summary: String,
-    ) : Msg()
-
-    /** 分支切换条（navigate_tree / fork 入口） */
-    data class BranchBar(
-        val label: String,
-        val branchCount: Int,
     ) : Msg()
 }
 

@@ -197,7 +197,7 @@ class ChatState {
             cacheTokens = 3400,
             costUsd = 0.006,
         )
-        currentMessages += Msg.Assistant(streamDraft, usage)
+        currentMessages += Msg.Assistant(streamDraft, usage, selectedModel.name)
         streamDraft = ""
         isStreaming = false
         markRunning(false)
@@ -230,25 +230,16 @@ class ChatState {
         }
 
     /**
-     * 会话内分支切换（原型；底层 = pi-web navigate_tree 封装命令 / SDK navigateTree()）：
-     * 将当前会话消息流重写为「根 → 目标节点」路径；带分支名的节点在其用户消息后
-     * 注入 BranchBar（label/数量取自树）。返回聊天页后最后一条消息 = 目标节点
-     * 代表的那次对话的末尾消息。
+     * /tree 画布页切到目标节点：把根→目标的路径节点 exchange 展平为当前消息列表
+     * （2026-09-08 起不再向聊天流注入分支切换条——会话内分支在 /tree 画布页展示，
+     * 会话外分支在会话列表展示，聊天流内无分支卡片）。
      */
     fun navigateToNode(nodeId: String): Boolean {
         val tree = branchTree ?: return false
         val path = mutableListOf<SessionTreeNode>()
         if (!collectNodePath(tree, nodeId, path)) return false
         val newMsgs = mutableListOf<Msg>()
-        path.forEachIndexed { i, node ->
-            node.exchange.forEachIndexed { j, m ->
-                newMsgs += m
-                if (j == 0 && node.branchLabel != null) {
-                    val branchCount = if (i > 0) path[i - 1].children.size else 1
-                    newMsgs += Msg.BranchBar(node.branchLabel, branchCount)
-                }
-            }
-        }
+        path.forEach { node -> newMsgs += node.exchange }
         currentSessionId?.let { messagesBySession[it] = newMsgs.toMutableStateList() }
         return true
     }

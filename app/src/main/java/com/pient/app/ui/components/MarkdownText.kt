@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.pient.app.ui.theme.MonoFont
 
@@ -155,20 +156,29 @@ private fun parseInline(text: String, s: InlineStyles): AnnotatedString = buildA
 }
 
 @Composable
-private fun inlineStyles(): InlineStyles = InlineStyles(
-    base = MaterialTheme.typography.bodyMedium,
-    bold = SpanStyle(fontWeight = FontWeight.Bold),
-    italic = SpanStyle(fontStyle = FontStyle.Italic),
-    code = SpanStyle(
-        fontFamily = MonoFont,
-        fontSize = 13.sp,
-        background = MaterialTheme.colorScheme.surfaceContainerHigh,
-    ),
-    link = SpanStyle(
-        color = MaterialTheme.colorScheme.primary,
-        textDecoration = TextDecoration.Underline,
-    ),
-)
+private fun inlineStyles(): InlineStyles {
+    val base = MaterialTheme.typography.bodyMedium
+    val prose = base.copy(
+        // Hermes --conversation-text-font-size 0.8125rem = 13sp / --dt-line-height 1.5；
+        // 字号按全局字号设置等比缩放（基准 14sp）
+        fontSize = base.fontSize * (13f / 14f),
+        lineHeight = 1.5.em,
+    )
+    return InlineStyles(
+        base = prose,
+        bold = SpanStyle(fontWeight = FontWeight.Bold),
+        italic = SpanStyle(fontStyle = FontStyle.Italic),
+        code = SpanStyle(
+            fontFamily = MonoFont,
+            fontSize = 13.sp,
+            background = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+        link = SpanStyle(
+            color = MaterialTheme.colorScheme.primary,
+            textDecoration = TextDecoration.Underline,
+        ),
+    )
+}
 
 @Composable
 fun MarkdownText(
@@ -180,7 +190,7 @@ fun MarkdownText(
     val s = inlineStyles()
 
     Column(modifier) {
-        for (block in blocks) {
+        blocks.forEachIndexed { idx, block ->
             when (block) {
                 is Block.Header -> {
                     val style = when (block.level) {
@@ -192,13 +202,15 @@ fun MarkdownText(
                     Text(
                         annotated,
                         color = MaterialTheme.colorScheme.onBackground, // 显式主题色，杜绝深色文字
-                        modifier = Modifier.padding(top = if (block.level == 1) 10.dp else 8.dp, bottom = 4.dp),
+                        // Hermes 标题间距：margin-block 1rem 0.25rem = 16dp/4dp；首块齐平（first-child flush）
+                        modifier = Modifier.padding(top = if (idx == 0) 0.dp else 16.dp, bottom = 4.dp),
                     )
                 }
                 is Block.Para -> ClickableRichText(
                     block.text, onFileLink,
                     s.base.copy(color = MaterialTheme.colorScheme.onBackground),
-                    modifier = Modifier.padding(vertical = 4.dp),
+                    // Hermes 段落间距：--paragraph-gap 0.7rem ≈ 11dp 上距、0 下距；首块齐平
+                    modifier = Modifier.padding(top = if (idx == 0) 0.dp else 11.dp),
                 )
                 is Block.Code -> CodeBlockView(block.lang, block.code)
                 is Block.Quote -> Row(Modifier.padding(vertical = 4.dp)) {
@@ -214,10 +226,10 @@ fun MarkdownText(
                     )
                 }
                 is Block.ListBlock -> Column(Modifier.padding(vertical = 4.dp)) {
-                    block.items.forEachIndexed { idx, item ->
+                    block.items.forEachIndexed { itemIdx, item ->
                         Row {
                             Text(
-                                if (item.ordered) "${idx + 1}. " else "• ",
+                                if (item.ordered) "${itemIdx + 1}. " else "• ",
                                 style = s.base.copy(color = MaterialTheme.colorScheme.primary),
                                 modifier = Modifier.padding(start = 4.dp),
                             )

@@ -301,8 +301,8 @@ fun ChatInputBar(
     }
 }
 
-/** 附件类型 → 图标（chip 展示；消息气泡仍用 kind.emoji） */
-private fun attachmentIcon(kind: AttachmentKind): ImageVector = when (kind) {
+/** 附件类型 → 图标（chip 展示；消息气泡附件 chip 与输入栏 pill 共用） */
+internal fun attachmentIcon(kind: AttachmentKind): ImageVector = when (kind) {
     AttachmentKind.IMAGE -> Icons.Outlined.Image
     AttachmentKind.FILE -> Icons.Outlined.Description
     AttachmentKind.FOLDER -> Icons.Outlined.Folder
