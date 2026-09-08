@@ -2,9 +2,10 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp"
     android:viewportWidth="24" android:viewportHeight="24">
-    <path android:fillColor="#FFD700" android:fillType="nonZero" android:pathData="M3.428 3.4h3.429v3.428H3.428V3.4zm13.714 0h3.43v3.428h-3.43V3.4z" />
-    <path android:fillColor="#FFAF00" android:fillType="nonZero" android:pathData="M3.428 6.828h6.857v3.429H3.429V6.828zm10.286 0h6.857v3.429h-6.857V6.828z" />
-    <path android:fillColor="#FF8205" android:fillType="nonZero" android:pathData="M3.428 10.258h17.144v3.428H3.428v-3.428z" />
-    <path android:fillColor="#FA500F" android:fillType="nonZero" android:pathData="M3.428 13.686h3.429v3.428H3.428v-3.428zm6.858 0h3.429v3.428h-3.429v-3.428zm6.856 0h3.43v3.428h-3.43v-3.428z" />
-    <path android:fillColor="#E10500" android:fillType="nonZero" android:pathData="M0 17.114h10.286v3.429H0v-3.429zm13.714 0H24v3.429H13.714v-3.429z" />
+    <!-- Mistral 官方五色 M 标 -->
+    <path android:fillColor="#FFFFD700" android:fillType="nonZero" android:pathData="M3.428 3.4h3.429v3.428H3.428V3.4zm13.714 0h3.43v3.428h-3.43V3.4z" />
+    <path android:fillColor="#FFFFAF00" android:fillType="nonZero" android:pathData="M3.428 6.828h6.857v3.429H3.429V6.828zm10.286 0h6.857v3.429h-6.857V6.828z" />
+    <path android:fillColor="#FFFF8205" android:fillType="nonZero" android:pathData="M3.428 10.258h17.144v3.428H3.428v-3.428z" />
+    <path android:fillColor="#FFFA500F" android:fillType="nonZero" android:pathData="M3.428 13.686h3.429v3.428H3.428v-3.428zm6.858 0h3.429v3.428h-3.429v-3.428zm6.856 0h3.43v3.428h-3.43v-3.428z" />
+    <path android:fillColor="#FFE10500" android:fillType="nonZero" android:pathData="M0 17.114h10.286v3.429H0v-3.429zm13.714 0H24v3.429H13.714v-3.429z" />
 </vector>
