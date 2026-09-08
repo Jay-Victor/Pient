@@ -80,6 +80,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.navigation.NavController
+import com.pient.app.data.ChatState
 import com.pient.app.data.ProviderCatalog
 import com.pient.app.data.ProviderInfo
 import com.pient.app.ui.components.DividerLine
@@ -106,7 +107,7 @@ import kotlinx.coroutines.launch
  * 原型期数据为 mock（ProviderCatalog / 页面内存状态）。
  */
 @Composable
-fun ModelConfigScreen(nav: NavController) {
+fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     val scope = rememberCoroutineScope()
     // ── 状态 ──
     // 已配置服务商列表（用户通过"+服务商"添加、删除按钮移除；初始只配置 Anthropic）
@@ -299,7 +300,12 @@ fun ModelConfigScreen(nav: NavController) {
                                     text = "测试连接",
                                     onClick = {
                                         testState = "测试中…"
-                                        scope.launch { delay(900); testState = "✓ 连接成功" }
+                                        scope.launch {
+                                            delay(900)
+                                            testState = "✓ 连接成功"
+                                            // 连接成功 = AI 配置完成（2026-09-08：聊天页首次引导第二步）
+                                            chatState.aiConfigured = true
+                                        }
                                     },
                                 )
                             }

@@ -165,7 +165,7 @@ fun SessionDrawer(
         }
     }
 
-    val projectSessions = chatState.sessionsFor(chatState.currentProject)
+    val projectSessions = chatState.sessionsFor(chatState.currentProject ?: "")
     val allSelected = projectSessions.isNotEmpty() && selectedIds.containsAll(projectSessions.map { it.id })
     val searching = searchOpen && searchQuery.isNotBlank()
     val visibleSessions = if (searching) {
@@ -290,7 +290,14 @@ fun SessionDrawer(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
-                        .clickable(onClick = { chatState.newSession() })
+                        .clickable(onClick = {
+                            // 未绑定项目时引导先创建项目（2026-09-08：无 mock 项目）
+                            if (chatState.currentProject == null) {
+                                Toast.makeText(context, "请先创建项目", Toast.LENGTH_SHORT).show()
+                            } else {
+                                chatState.newSession()
+                            }
+                        })
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                 ) {
                     Icon(
@@ -319,7 +326,7 @@ fun SessionDrawer(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "项目：${chatState.currentProject}",
+                    "项目：${chatState.currentProject ?: "未创建项目"}",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
@@ -421,7 +428,7 @@ fun SessionDrawer(
                                                 modifier = Modifier.size(18.dp),
                                             )
                                         },
-                                        enabled = chatState.projects.size > 1,
+                                        enabled = chatState.projects.isNotEmpty(),
                                         onClick = {
                                             projectMenuFor = null
                                             projectUnbindConfirmFor = p.name
@@ -436,7 +443,7 @@ fun SessionDrawer(
                                                 modifier = Modifier.size(18.dp),
                                             )
                                         },
-                                        enabled = chatState.projects.size > 1,
+                                        enabled = chatState.projects.isNotEmpty(),
                                         onClick = {
                                             projectMenuFor = null
                                             projectDeleteConfirmFor = p.name
@@ -654,7 +661,8 @@ fun SessionDrawer(
                 if (pinned.isEmpty() && groups.isEmpty()) {
                     item {
                         Text(
-                            "暂无会话 · 点右上角 + 新建会话",
+                            if (chatState.currentProject == null) "请先创建项目"
+                            else "暂无会话 · 点右上角 + 新建会话",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(8.dp),
@@ -949,7 +957,7 @@ fun SessionDrawer(
                     selectedIds.toList().forEach { chatState.deleteSession(it) }
                     selectedIds.clear()
                     batchDeleteConfirm = false
-                    if (chatState.sessionsFor(chatState.currentProject).isEmpty()) {
+                    if (chatState.sessionsFor(chatState.currentProject ?: "").isEmpty()) {
                         batchMode = false
                     }
                 },

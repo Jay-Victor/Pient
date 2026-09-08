@@ -24,26 +24,20 @@ enum class Panel { MESSAGES, FILES, TERMINAL, TREE }
 class ChatState {
 
     // ── 会话 ──────────────────────────────────────────────
-    var currentProject by mutableStateOf(MockProjects.list.first().name)
-    var currentSessionId by mutableStateOf<String?>("s-1024")
+    // 2026-09-08：移除全部 mock 项目/会话/消息——初次进入无项目（聊天页显示引导），
+    // 项目由用户经「创建项目（绑定文件夹）」真实创建。
+    var currentProject by mutableStateOf<String?>(null)
+    var currentSessionId by mutableStateOf<String?>(null)
 
     // ── UI 状态（跨导航保活：提升到 NavHost 外层，避免页面往返丢失）──
     // 会话侧栏展开状态。手机端抽屉导航即关闭（无感）；平板压缩模式保持展开，
     // 进入二级页再返回聊天页时侧边栏仍是展开态（持久侧边栏语义）。
     var drawerOpen by mutableStateOf(false)
 
-    val projects = mutableStateListOf<Project>().apply { addAll(MockProjects.list) }
+    val projects = mutableStateListOf<Project>()
 
     val sessions = mutableStateMapOf<String, SnapshotStateList<Session>>()
     val messagesBySession = mutableStateMapOf<String, SnapshotStateList<Msg>>()
-
-    init {
-        MockSessions.byProject.forEach { (proj, list) ->
-            sessions[proj] = list.toMutableStateList()
-        }
-        messagesBySession["s-1024"] = MockMessages.fixLoginCrash.toMutableStateList()
-        messagesBySession["s-1023"] = MockMessages.refactorPermissions.toMutableStateList()
-    }
 
     /**
      * 添加项目（2026-09-02 实现真实功能）：
@@ -65,7 +59,8 @@ class ChatState {
         }
 
     val currentSession: Session?
-        get() = sessions[currentProject].orEmpty().firstOrNull { it.id == currentSessionId }
+        get() = currentProject?.let { sessions[it] }.orEmpty()
+            .firstOrNull { it.id == currentSessionId }
 
     fun sessionsFor(project: String): List<Session> = sessions[project].orEmpty()
 
@@ -85,9 +80,10 @@ class ChatState {
     }
 
     fun newSession(): String {
-        val list = sessions.getOrPut(currentProject) { mutableStateListOf() }
+        val proj = currentProject ?: return "" // 未绑定项目：调用方 Toast 提示
+        val list = sessions.getOrPut(proj) { mutableStateListOf() }
         val id = "s-${System.currentTimeMillis()}"
-        list.add(0, Session(id, "新建会话", currentProject, "刚刚"))
+        list.add(0, Session(id, "新建会话", proj, "刚刚"))
         currentSessionId = id
         messagesBySession[id] = mutableStateListOf()
         activePanel = Panel.MESSAGES
@@ -107,9 +103,10 @@ class ChatState {
     }
 
     fun deleteSession(id: String) {
-        sessions[currentProject]?.removeAll { it.id == id }
+        val proj = currentProject ?: return
+        sessions[proj]?.removeAll { it.id == id }
         messagesBySession.remove(id)
-        if (currentSessionId == id) currentSessionId = sessionsFor(currentProject).firstOrNull()?.id
+        if (currentSessionId == id) currentSessionId = sessionsFor(proj).firstOrNull()?.id
     }
 
     /** 跨项目按 id 删除会话（项目管理页使用；含消息记录与当前会话指针处理） */
@@ -118,14 +115,17 @@ class ChatState {
             if (list.removeAll { it.id == id }) break
         }
         messagesBySession.remove(id)
-        if (currentSessionId == id) currentSessionId = sessionsFor(currentProject).firstOrNull()?.id
+        if (currentSessionId == id) {
+            currentSessionId = sessionsFor(currentProject ?: "").firstOrNull()?.id
+        }
     }
 
     /** 置顶/取消置顶会话 */
     fun togglePin(id: String) {
-        sessions[currentProject].orEmpty().indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { i ->
-            val old = sessions[currentProject]!![i]
-            sessions[currentProject]!![i] = old.copy(pinned = !old.pinned)
+        val list = currentProject?.let { sessions[it] } ?: return
+        list.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { i ->
+            val old = list[i]
+            list[i] = old.copy(pinned = !old.pinned)
         }
     }
 
@@ -150,18 +150,17 @@ class ChatState {
     }
 
     /**
-     * 将项目移出列表（至少保留一个）：连同其会话与消息记录一并移除；
-     * 删除当前项目时切换到第一个剩余项目。
+     * 将项目移出列表：连同其会话与消息记录一并移除。
+     * 删除当前项目时切换到第一个剩余项目；删空后回到未绑定状态（聊天页显示引导）。
      * 「删除项目」= 调用方先删文件夹（ProjectFiles.deleteProjectRoot）再调本方法；
      * 「解绑项目」= 直接调本方法（保留文件夹）。
      */
     fun removeProject(name: String) {
-        if (projects.size <= 1) return
         if (!projects.removeAll { it.name == name }) return
         sessions.remove(name)?.forEach { s -> messagesBySession.remove(s.id) }
         if (currentProject == name) {
-            currentProject = projects.first().name
-            currentSessionId = sessionsFor(currentProject).firstOrNull()?.id
+            currentProject = projects.firstOrNull()?.name
+            currentSessionId = sessionsFor(currentProject ?: "").firstOrNull()?.id
             // 被删项目的文件树不再有效；FileTreePanel 会按新 currentProject 重载
             fileTreeRoot = null
         }
@@ -204,7 +203,8 @@ class ChatState {
     }
 
     private fun markRunning(running: Boolean) {
-        val list = sessions[currentProject] ?: return
+        val proj = currentProject ?: return
+        val list = sessions[proj] ?: return
         val id = currentSessionId ?: return
         val i = list.indexOfFirst { it.id == id }
         if (i >= 0) list[i] = list[i].copy(running = running)
@@ -222,12 +222,8 @@ class ChatState {
 
     // ── 分支（2026-09-02 分支功能设计：/tree 画布页 + fork）──
 
-    /** /tree 画布页会话树（原型：mock 树按会话 id 提供；接入运行时后由会话树数据驱动） */
-    val branchTree: SessionTreeNode?
-        get() = when (currentSessionId) {
-            "s-1024" -> MockTrees.fixLoginCrash
-            else -> null
-        }
+    /** /tree 画布页会话树（2026-09-08 起无 mock 树——原型期无演示会话，接入运行时后由会话树数据驱动） */
+    val branchTree: SessionTreeNode? get() = null
 
     /**
      * /tree 画布页切到目标节点：把根→目标的路径节点 exchange 展平为当前消息列表
@@ -265,13 +261,14 @@ class ChatState {
      * 自动跳转新会话（用户拍板：沿用 pi-web）。
      */
     fun forkSession(entryIndex: Int): String {
+        val proj = currentProject ?: return ""
         val id = currentSessionId ?: return ""
         val src = messagesBySession[id]?.toList() ?: return ""
         if (entryIndex !in src.indices) return ""
         val newId = "s-${System.currentTimeMillis()}"
         val prefix = src.subList(0, entryIndex + 1).toMutableStateList()
-        val list = sessions.getOrPut(currentProject) { mutableStateListOf() }
-        list.add(0, Session(newId, forkTitle(src, entryIndex), currentProject, "刚刚"))
+        val list = sessions.getOrPut(proj) { mutableStateListOf() }
+        list.add(0, Session(newId, forkTitle(src, entryIndex), proj, "刚刚"))
         messagesBySession[newId] = prefix
         currentSessionId = newId
         activePanel = Panel.MESSAGES
@@ -293,6 +290,9 @@ class ChatState {
     var thinkingEnabled by mutableStateOf(false)
     var thinkingLevel by mutableStateOf(ThinkingLevel.MEDIUM)
     var streamingOutputEnabled by mutableStateOf(true) // 流式输出开关（模型选择器"输出"栏）
+    // AI 已配置标记（2026-09-08 用户定：聊天页首次引导第二步）：模型配置页「测试连接」成功即置真；
+    // 与项目一起作为聊天页引导的两个完成条件，两者齐备才显示输入栏。
+    var aiConfigured by mutableStateOf(false)
 
     val selectedModel: AiModel
         get() = MockModels.providers.firstOrNull { it.id == selectedModelId }

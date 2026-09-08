@@ -83,7 +83,6 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.pient.app.data.ChatState
 import com.pient.app.data.FileNode
-import com.pient.app.data.MockFileTree
 import com.pient.app.data.ProjectFiles
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.components.PientDialog
@@ -128,8 +127,8 @@ fun FileTreePanel(
     var searchOpen by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     val context = LocalContext.current
-    // 真实文件树（2026-09-02）：当前项目目录；未加载/目录不存在回退 mock 演示树
-    val root = chatState.fileTreeRoot ?: MockFileTree.root
+    // 真实文件树（2026-09-02）：当前项目目录；null = 未绑定项目或目录不存在（2026-09-08 起无 mock 回退）
+    val root = chatState.fileTreeRoot
 
     // 面板打开/项目切换时加载真实树
     LaunchedEffect(chatState.currentProject) {
@@ -168,9 +167,13 @@ fun FileTreePanel(
     ) { uri: Uri? ->
         if (uri == null || project == null) return@rememberLauncherForActivityResult
         val ok = if (exportSelectMode) {
-            val currentRoot = chatState.fileTreeRoot ?: MockFileTree.root
-            val nodes = collectNodes(currentRoot).filter { it.source in exportSelectedSources }
-            ProjectFiles.exportSelected(context, project, nodes, uri)
+            val currentRoot = chatState.fileTreeRoot
+            if (currentRoot == null) {
+                false // 无文件树无法按选择导出
+            } else {
+                val nodes = collectNodes(currentRoot).filter { it.source in exportSelectedSources }
+                ProjectFiles.exportSelected(context, project, nodes, uri)
+            }
         } else {
             ProjectFiles.exportProject(context, project, uri)
         }
@@ -188,7 +191,7 @@ fun FileTreePanel(
     val searching = searchOpen && searchQuery.isNotBlank()
     val matchedFiles = if (searching) {
         val out = mutableListOf<FileNode>()
-        collectFiles(root.children, out)
+        root?.let { collectFiles(it.children, out) }
         out.filter { it.name.contains(searchQuery.trim(), ignoreCase = true) }
     } else emptyList()
 
@@ -219,7 +222,7 @@ fun FileTreePanel(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         ) {
             Text(
-                root.name,
+                root?.name ?: (chatState.currentProject ?: "未绑定项目"),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
@@ -470,6 +473,17 @@ fun FileTreePanel(
                         )
                     }
                 }
+            } else if (root == null) {
+                // 未绑定项目/目录不存在（2026-09-08 起无 mock 回退）：提示而非空白
+                Text(
+                    "绑定项目后显示文件树",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    textAlign = TextAlign.Center,
+                )
             } else {
                 sortedChildren(root.children, sortMode).forEach { child ->
                     TreeRow(

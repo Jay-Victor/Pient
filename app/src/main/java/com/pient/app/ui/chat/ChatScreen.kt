@@ -68,7 +68,6 @@ import com.pient.app.data.Attachment
 import com.pient.app.data.AttachmentKind
 import com.pient.app.data.ChatState
 import com.pient.app.data.DrawerMode
-import com.pient.app.data.MockFileTree
 import com.pient.app.data.Panel
 import com.pient.app.data.SettingsStore
 import com.pient.app.ui.components.StatusBadge
@@ -102,9 +101,9 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
         mutableStateOf(TextFieldValue(""))
     }
     var mentionOpen by remember { mutableStateOf(false) }
-    // @ 引用文件来源 = 当前项目真实文件树（未加载/目录不存在回退 mock 演示树）
+    // @ 引用文件来源 = 当前项目真实文件树（未绑定项目/未加载时为空列表）
     val mentionFiles = remember(chatState.fileTreeRoot) {
-        buildMentionFiles(chatState.fileTreeRoot ?: MockFileTree.root)
+        chatState.fileTreeRoot?.let { buildMentionFiles(it) } ?: emptyList()
     }
     // 文件树长按菜单「@ 提及插入输入框」：插入文本并展开引用卡
     LaunchedEffect(chatState.mentionInsertRequest) {
@@ -272,14 +271,21 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                         chatState = chatState,
                         scope = scope,
                         onMessageLongPress = { idx, rect -> forkMenuTarget = idx to rect },
+                        onConfigureAi = {
+                            attachSheetOpen = false
+                            nav.navigate("model_config")
+                        },
                     )
                     Panel.FILES -> FilesPanel(chatState)
                     Panel.TERMINAL -> TerminalPanel(chatState, nav)
                     Panel.TREE -> TreeCanvasPanel(chatState)
                 }
             }
-            // 输入栏 dock 仅在消息区显示（文件/终端页有各自交互区）
-            if (chatState.activePanel == Panel.MESSAGES) {
+            // 输入栏 dock 仅在消息区显示（文件/终端页有各自交互区）；
+            // 项目与 AI 配置齐备前不显示（2026-09-08：聊天页引导清单接管）
+            if (chatState.activePanel == Panel.MESSAGES &&
+                chatState.currentProject != null && chatState.aiConfigured
+            ) {
                 ChatInputBar(
                     chatState = chatState,
                     text = inputText,
@@ -295,6 +301,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                     onToggleContextCard = { contextCardOpen = !contextCardOpen },
                     onToggleSystemPrompt = { systemPromptOpen = !systemPromptOpen },
                     onSend = { text ->
+                        // 首条消息自动建会话（2026-09-08：无 mock 会话后，发送即建当前项目首会话）
+                        if (chatState.currentSessionId == null) chatState.newSession()
                         chatState.streamJob = scope.launch { chatState.streamReply(text) }
                     },
                     onAbort = { chatState.abort() },
@@ -528,6 +536,21 @@ private fun ChatTopBar(
             .height(56.dp),
         shape = RoundedCornerShape(0.dp),
     ) {
+        // 未绑定项目（首次进入）：顶栏只保留最左侧侧边栏唤出按键——
+        // 无会话名/状态徽标/分支/终端/文件按键（2026-09-08 用户定）
+        if (chatState.currentProject == null) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 4.dp),
+            ) {
+                IconButton(onClick = onMenu) {
+                    Icon(Icons.Outlined.Menu, "会话侧栏", tint = MaterialTheme.colorScheme.onBackground)
+                }
+            }
+            return@PientPanel
+        }
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -573,11 +596,14 @@ private fun ChatTopBar(
                 } else {
                     StatusBadge("空闲", MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Text(
-                    "  ·  ${chatState.currentProject}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                // 未绑定项目时状态行不显示项目名（2026-09-08：引导页接管）
+                chatState.currentProject?.let { proj ->
+                    Text(
+                        "  ·  $proj",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
         // 右：分支 / 终端 / 文件（顶栏下方区域四态切换入口，激活图标高亮主色）
@@ -616,7 +642,14 @@ private fun MessagesPanel(
     chatState: ChatState,
     scope: kotlinx.coroutines.CoroutineScope,
     onMessageLongPress: (Int, Rect) -> Unit,
+    onConfigureAi: () -> Unit,
 ) {
+    if (chatState.currentProject == null || !chatState.aiConfigured) {
+        // 2026-09-08 用户定：项目与 AI 配置两者齐备前，消息区显示引导清单
+        // （任一未完成即显示，已完成步骤打勾提示）
+        FirstRunGuide(chatState = chatState, onConfigureAi = onConfigureAi)
+        return
+    }
     ChatMessages(
         messages = chatState.currentMessages,
         isStreaming = chatState.isStreaming,

@@ -170,6 +170,8 @@ fun ChatMessages(
                 val msg = messages[idx]
                 // 成对工具结果（ToolCall 紧跟 ToolResult）已并入工具卡渲染，此处跳过
                 if (msg is Msg.ToolResult && idx > 0 && messages[idx - 1] is Msg.ToolCall) return@items
+                // 思考块并入 AI 回答块（其后存在助手回答时跳过独立渲染，由助手卡内折叠行承载）
+                if (msg is Msg.Thinking && followedByAssistant(messages, idx)) return@items
                 // 长按 fork 入口：仅 User/Assistant 气泡响应（2026-09-02 分支功能设计 §4.1）
                 val longPressable = msg is Msg.User || msg is Msg.Assistant
                 Box(
@@ -206,6 +208,7 @@ fun ChatMessages(
                         msg,
                         toolResult = if (msg is Msg.ToolCall && idx + 1 < messages.size)
                             messages[idx + 1] as? Msg.ToolResult else null,
+                        thinking = if (msg is Msg.Assistant) precedingThinking(messages, idx) else null,
                         onRequestPermission = { showPermDemo = true },
                     )
                 }
@@ -412,16 +415,45 @@ fun ChatMessages(
 private fun MessageCard(
     msg: Msg,
     toolResult: Msg.ToolResult? = null,
+    thinking: Msg.Thinking? = null,
     onRequestPermission: () -> Unit,
 ) {
     when (msg) {
         is Msg.User -> UserBubble(msg)
-        is Msg.Assistant -> AssistantCard(msg)
+        is Msg.Assistant -> AssistantCard(msg, thinking)
         is Msg.Thinking -> ThinkingCard(msg)
         is Msg.ToolCall -> ToolCallCard(msg, toolResult, onRequestPermission)
         is Msg.ToolResult -> ToolResultCard(msg)   // 仅未成对的结果走独立卡
         is Msg.Compaction -> CompactionCard(msg)
     }
+}
+
+// ───────────────────────────── 思考并入回答块的判定 ─────────────────────────────
+
+/** idx 之后是否存在助手回答（跨工具卡/结果/压缩条目扫描；遇用户消息或另一思考块即止） */
+private fun followedByAssistant(messages: List<Msg>, idx: Int): Boolean {
+    var i = idx + 1
+    while (i < messages.size) {
+        when (messages[i]) {
+            is Msg.Assistant -> return true
+            is Msg.User, is Msg.Thinking -> return false
+            else -> i++
+        }
+    }
+    return false
+}
+
+/** idx 之前最近的思考块（跨工具卡/结果/压缩条目扫描；遇用户/助手消息即止，无则 null） */
+private fun precedingThinking(messages: List<Msg>, idx: Int): Msg.Thinking? {
+    var i = idx - 1
+    while (i >= 0) {
+        when (val m = messages[i]) {
+            is Msg.Thinking -> return m
+            is Msg.User, is Msg.Assistant -> return null
+            else -> i--
+        }
+    }
+    return null
 }
 
 // ───────────────────────────── 长按消息菜单（fork 入口） ─────────────────────────────
@@ -591,9 +623,11 @@ private fun UserBubble(msg: Msg.User) {
 /**
  * 助手回复（2026-09-08 重设计，对齐 pi / pi-web）：无气泡卡片、纯 Markdown 直排；
  * 头部模型标签行（pi-web：11sp、弱化色、下距 4dp）；底部 usage 行（pi-web 顺序 in·out·cache·$、11sp）。
+ * 2026-09-08 思考并入回答块（用户定）：模型标签下接「思考」+ v/^ 折叠行，展开显示思考文本，
+ * 其下直接接 markdown 正文（思考不再单独成卡）。
  */
 @Composable
-private fun AssistantCard(msg: Msg.Assistant) {
+private fun AssistantCard(msg: Msg.Assistant, thinking: Msg.Thinking? = null) {
     Column(Modifier.fillMaxWidth()) {
         if (!msg.model.isNullOrBlank()) {
             Text(
@@ -602,6 +636,9 @@ private fun AssistantCard(msg: Msg.Assistant) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 4.dp),
             )
+        }
+        if (thinking != null) {
+            ThinkingFold(thinking)
         }
         MarkdownText(msg.markdown, modifier = Modifier.padding(top = 2.dp))
         if (msg.usage != null) {
@@ -613,6 +650,52 @@ private fun AssistantCard(msg: Msg.Assistant) {
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
+    }
+}
+
+/**
+ * 回答内思考折叠行（2026-09-08 用户定）：一行「思考」+ 级别徽标 + v/^ 箭头，
+ * 整行点击折叠/展开；展开后思考文本以弱化色显示，下方直接接回答正文。
+ */
+@Composable
+private fun ThinkingFold(thinking: Msg.Thinking) {
+    var expanded by remember { mutableStateOf(false) }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(onClick = { expanded = !expanded })
+            .padding(vertical = 4.dp),
+    ) {
+        Text(
+            "思考",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            thinking.level,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = MonoFont,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .padding(start = 6.dp)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), CircleShape)
+                .padding(horizontal = 8.dp, vertical = 1.dp),
+        )
+        Icon(
+            if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+            null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 4.dp).size(16.dp),
+        )
+    }
+    if (expanded) {
+        Text(
+            thinking.text,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
     }
 }
 

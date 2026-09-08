@@ -165,6 +165,14 @@ fun MentionFileCard(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
         )
         Column(Modifier.padding(top = 2.dp)) {
+            if (files.isEmpty()) {
+                Text(
+                    "项目文件夹内暂无文件",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
             files.forEach { f ->
                 MentionFileRow(f) { onPick(f.path) }
             }

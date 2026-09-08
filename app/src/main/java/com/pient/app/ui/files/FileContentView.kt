@@ -30,7 +30,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pient.app.data.ChatState
 import com.pient.app.data.FileNode
-import com.pient.app.data.MockFileTree
 import com.pient.app.data.ProjectFiles
 import com.pient.app.ui.components.MarkdownText
 import com.pient.app.ui.theme.MonoFont
@@ -121,10 +120,11 @@ private fun PreviewHint(text: String) {
     }
 }
 
-/** 本地文件链接 → 在当前项目文件树中定位并打开（2026-09-02：真实树优先） */
+/** 本地文件链接 → 在当前项目文件树中定位并打开（2026-09-02：真实树；无树直接忽略） */
 private fun onLocalFileLink(chatState: ChatState, path: String) {
     val name = path.substringAfterLast('/')
-    val found = findNode(chatState.fileTreeRoot ?: MockFileTree.root, name)
+    val tree = chatState.fileTreeRoot ?: return
+    val found = findNode(tree, name)
     if (found != null) {
         chatState.openFile(found)
     }

@@ -198,7 +198,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                                     path = p.path,
                                     selected = p.name == selectedProject,
                                     menuExpanded = projectMenuFor == p.name,
-                                    canRemove = chatState.projects.size > 1,
+                                    canRemove = chatState.projects.isNotEmpty(),
                                     onClick = {
                                         selectedProject = if (selectedProject == p.name) null else p.name
                                     },

@@ -166,7 +166,7 @@ fun PientApp() {
                     SettingsScreen(nav = nav)
                 }
                 composable("model_config") {
-                    ModelConfigScreen(nav = nav)
+                    ModelConfigScreen(nav = nav, chatState = chatState)
                 }
                 composable("theme_settings") {
                     ThemeSettingsScreen(nav = nav)
