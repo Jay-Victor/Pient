@@ -957,9 +957,8 @@ fun SessionDrawer(
                     selectedIds.toList().forEach { chatState.deleteSession(it) }
                     selectedIds.clear()
                     batchDeleteConfirm = false
-                    if (chatState.sessionsFor(chatState.currentProject ?: "").isEmpty()) {
-                        batchMode = false
-                    }
+                    // 2026-09-09：删除最后一个会话后 ChatState 自动新建，批量模式一律退出
+                    batchMode = false
                 },
             ) {
                 Text(
@@ -1006,11 +1005,15 @@ fun SessionDrawer(
     }
 }
 
-/** 会话分组：刚刚/2m → 今天；昨天；更早 */
+/** 会话分组：刚刚/Xm/今天 → 今天；昨天；更早 */
 private fun groupSessions(list: List<Session>): List<Pair<String, List<Session>>> {
-    val today = list.filter { it.relativeTime == "刚刚" || it.relativeTime.endsWith("m") }
+    val today = list.filter {
+        it.relativeTime == "刚刚" || it.relativeTime.endsWith("m") || it.relativeTime == "今天"
+    }
     val yesterday = list.filter { it.relativeTime == "昨天" }
-    val older = list.filter { it.relativeTime !in listOf("刚刚", "昨天") && !it.relativeTime.endsWith("m") }
+    val older = list.filter {
+        it.relativeTime !in listOf("刚刚", "昨天", "今天") && !it.relativeTime.endsWith("m")
+    }
     return buildList {
         if (today.isNotEmpty()) add("今天" to today)
         if (yesterday.isNotEmpty()) add("昨天" to yesterday)

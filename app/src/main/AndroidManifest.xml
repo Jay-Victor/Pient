@@ -12,13 +12,16 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- AI 对话：直连服务商 API（2026-09-09） -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Pient">
+        android:theme="@style/Theme.Pient"
+        android:usesCleartextTraffic="true"><!-- AI 端点允许明文 HTTP：自建/本地端点（Ollama、内网网关、10.0.2.2 调试）常用 http:// -->
 
         <activity
             android:name=".MainActivity"
@@ -37,6 +40,17 @@
             android:exported="false"
             android:theme="@style/Theme.Pient.CropImage"
             tools:replace="android:exported" />
+
+        <!-- 拍照附件（\"+\" 菜单）：FileProvider 暂存相机输出（2026-09-09） -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

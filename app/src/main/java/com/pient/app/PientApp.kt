@@ -27,7 +27,9 @@ import androidx.core.view.WindowCompat
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.pient.app.data.AiConfigStore
 import com.pient.app.data.ChatState
+import com.pient.app.data.ChatStore
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ThemeMode
 import com.pient.app.ui.chat.ChatScreen
@@ -46,6 +48,9 @@ import com.pient.app.ui.skills.SkillsScreen
 import com.pient.app.ui.terminal.TerminalSetupScreen
 import com.pient.app.ui.theme.AppBackgroundLayer
 import com.pient.app.ui.theme.PientTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.withContext
 
 /**
  * 导航骨架：
@@ -68,7 +73,13 @@ fun PientApp() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("pient_prefs", Context.MODE_PRIVATE) }
     var onboarded by remember { mutableStateOf(prefs.getBoolean("onboarded", false)) }
-    val chatState = remember { ChatState() }
+    val chatState = remember {
+        ChatState().also {
+            // 会话记录与 AI 配置恢复（2026-09-09：项目/会话/消息记录跨重启保留）
+            AiConfigStore.load(context)
+            ChatStore.load(context, it)
+        }
+    }
     val nav = rememberNavController()
 
     // 外观模式（深色 / 亮色 / 跟随系统）—— 状态感知，切换即时生效
@@ -113,6 +124,28 @@ fun PientApp() {
                 SettingsStore.customFontPath to SettingsStore.customFontLabel to
                 SettingsStore.fontSize
         }.collect { SettingsStore.saveFont(context) }
+    }
+
+    // AI 配置持久化（2026-09-09：服务商/密钥/模型/参数 + 连接测试标记），重启后保持
+    LaunchedEffect(Unit) {
+        snapshotFlow { AiConfigStore.configs.mapValues { it.value } to AiConfigStore.aiConfigured }
+            .collect { AiConfigStore.save(context) }
+    }
+
+    // 项目会话记录持久化（2026-09-09：项目/会话/消息记录全量落盘），重启后保持。
+    // snapshotFlow 内遍历全部会话与消息：任意增删改都会触发；写盘放 IO 线程防卡 UI。
+    LaunchedEffect(Unit) {
+        snapshotFlow {
+            chatState.projects.toList() to
+                chatState.sessions.mapValues { it.value.toList() } to
+                chatState.messagesBySession.mapValues { it.value.toList() } to
+                (chatState.currentProject to chatState.currentSessionId) to
+                chatState.selectedModelId to
+                (chatState.thinkingEnabled to chatState.thinkingLevel to
+                    chatState.streamingOutputEnabled)
+        }.debounce(800).collect {
+            withContext(Dispatchers.IO) { ChatStore.save(context, chatState) }
+        }
     }
 
     // 系统栏图标明暗 + 窗口底色跟随 App 主题

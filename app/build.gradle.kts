@@ -59,5 +59,6 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.7.1")
     implementation("androidx.media3:media3-effect:1.7.1")
     implementation("com.vanniktech:android-image-cropper:4.5.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

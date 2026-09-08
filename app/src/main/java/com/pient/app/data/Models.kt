@@ -279,7 +279,31 @@ data class Session(
     val relativeTime: String,
     val running: Boolean = false,
     val pinned: Boolean = false,
+    /** 最后活动时间（epoch ms；会话记录持久化与跨重启时间分组依据，0 = 创建时刻） */
+    val updatedAt: Long = 0,
 )
+
+/** 会话最后活动时间 → 侧栏显示标签（跨重启后由 updatedAt 派生） */
+fun relativeTimeLabel(updatedAt: Long, now: Long = System.currentTimeMillis()): String {
+    val t = if (updatedAt <= 0) now else updatedAt
+    val diff = (now - t).coerceAtLeast(0)
+    return when {
+        diff < 2 * 60_000L -> "刚刚"
+        diff < 60 * 60_000L -> "${diff / 60_000L}m"
+        else -> {
+            val cal = java.util.Calendar.getInstance().apply { timeInMillis = t }
+            val nowCal = java.util.Calendar.getInstance().apply { timeInMillis = now }
+            when {
+                cal.get(java.util.Calendar.YEAR) == nowCal.get(java.util.Calendar.YEAR) &&
+                    cal.get(java.util.Calendar.DAY_OF_YEAR) == nowCal.get(java.util.Calendar.DAY_OF_YEAR) -> "今天"
+                // 昨天
+                cal.get(java.util.Calendar.YEAR) == nowCal.get(java.util.Calendar.YEAR) &&
+                    cal.get(java.util.Calendar.DAY_OF_YEAR) == nowCal.get(java.util.Calendar.DAY_OF_YEAR) - 1 -> "昨天"
+                else -> "更早"
+            }
+        }
+    }
+}
 
 /** 附件类型（chip 图标展示与提交语义区分；2026-08-28 菜单扩为五项） */
 enum class AttachmentKind(val emoji: String) {
@@ -289,6 +313,8 @@ enum class AttachmentKind(val emoji: String) {
 data class Attachment(
     val name: String,
     val kind: AttachmentKind = AttachmentKind.FILE,
+    /** 真实位置：本地文件绝对路径（照片/拍照/文件落盘后）或 content URI（文件夹）；null = 无实体 */
+    val path: String? = null,
 )
 
 sealed class Msg {
@@ -298,6 +324,7 @@ sealed class Msg {
         val markdown: String,
         val usage: Usage? = null,
         val model: String? = null,   // 消息所用模型（pi-web 助手消息头部模型标签）
+        val error: Boolean = false,  // 请求失败提示（不进 API 上下文，历史重建时跳过）
     ) : Msg()
 
     data class Thinking(

@@ -195,7 +195,7 @@ fun ChatInputBar(
                     .padding(horizontal = 8.dp, vertical = 5.dp),
             ) {
                 Text(
-                    chatState.selectedModel.name,
+                    chatState.selectedModel?.name ?: "未选择模型",
                     style = MaterialTheme.typography.labelMedium,
                     color = if (streaming) MaterialTheme.colorScheme.onSurfaceVariant
                     else MaterialTheme.colorScheme.primary,

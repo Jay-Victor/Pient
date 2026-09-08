@@ -43,7 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pient.app.data.AiModel
 import com.pient.app.data.ChatState
-import com.pient.app.data.MockModels
+import com.pient.app.data.ProviderCatalog
 import com.pient.app.ui.components.ThinkingLevelSlider
 import com.pient.app.ui.theme.PientPanel
 
@@ -69,7 +69,8 @@ fun ModelSelectorSheet(
     modifier: Modifier = Modifier,
     bottomOffset: Dp = 8.dp, // 弹窗底部到屏幕底的距离（锚定到模型按键上缘）
 ) {
-    val providers = MockModels.providers.groupBy { it.provider }
+    // 模型数据源（2026-09-09 起）= 已配置服务商的模型列表（AiConfigStore）
+    val providers = chatState.availableModels.groupBy { it.provider }
     val screenH = LocalConfiguration.current.screenHeightDp
     var thinkingExpanded by remember { mutableStateOf(false) }
     var outputExpanded by remember { mutableStateOf(false) }
@@ -181,7 +182,7 @@ fun ModelSelectorSheet(
                 modifier = Modifier.padding(start = 8.dp),
             )
             Text(
-                chatState.selectedModel.name,
+                chatState.selectedModel?.name ?: "未选择模型",
                 style = MaterialTheme.typography.bodyMedium.copy(
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
@@ -194,14 +195,22 @@ fun ModelSelectorSheet(
 
         Spacer(Modifier.height(10.dp))
 
-        // ③ 模型列表（Operit config-row 规格；单选展开）
+        // ③ 模型列表（Operit config-row 规格；单选展开；无已配置模型时提示引导）
+        if (providers.isEmpty()) {
+            Text(
+                "暂无可用模型 · 请在「服务商与模型配置」中添加服务商并填写模型列表",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        } else {
         LazyColumn(Modifier.heightIn(max = (screenH * 0.40).dp)) {
             providers.forEach { (providerId, models) ->
                 val isOpen = providerId == expandedProvider
-                val isCurrent = providerId == chatState.selectedModel.provider
+                val isCurrent = providerId == chatState.selectedModel?.provider
                 item(key = "h-$providerId") {
                     ProviderHeader(
-                        name = MockModels.providerNames[providerId] ?: providerId,
+                        name = ProviderCatalog.find(providerId).name,
                         models = models,
                         isOpen = isOpen,
                         isCurrent = isCurrent,
@@ -217,6 +226,7 @@ fun ModelSelectorSheet(
                     }
                 }
             }
+        }
         }
 
         // ④ 管理模型配置（Operit manage-button 同语义）

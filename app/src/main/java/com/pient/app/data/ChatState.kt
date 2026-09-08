@@ -11,7 +11,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 
 /** 顶栏右下方区域内容（消息区 / 文件内容预览区 / 终端页 / 分支画布 四态切换） */
 enum class Panel { MESSAGES, FILES, TERMINAL, TREE }
@@ -52,6 +52,28 @@ class ChatState {
         return true
     }
 
+    /** 会话记录恢复用（ChatStore.load）：仅加入列表，不切换当前项目 */ 
+    fun addProjectSilently(name: String, path: String, uri: String?) {
+        if (name.isBlank() || projects.any { it.name == name }) return
+        projects += Project(name, path, uri)
+        if (name !in sessions) sessions[name] = mutableStateListOf()
+    }
+
+    /** 恢复后归一化：指针字段与已选模型校验（配置被删/记录损坏时回退） */
+    fun normalizeAfterLoad() {
+        if (currentProject != null && projects.none { it.name == currentProject }) {
+            currentProject = projects.firstOrNull()?.name
+        }
+        val proj = currentProject
+        if (currentSessionId != null && sessionsFor(proj ?: "").none { it.id == currentSessionId }) {
+            currentSessionId = sessionsFor(proj ?: "").firstOrNull()?.id
+        }
+        // 已选模型不在当前可用列表：回退第一个可用模型（无可用模型则留空）
+        if (availableModels.none { it.id == selectedModelId }) {
+            selectedModelId = availableModels.firstOrNull()?.id.orEmpty()
+        }
+    }
+
     val currentMessages: SnapshotStateList<Msg>
         get() {
             val id = currentSessionId ?: return mutableStateListOf()
@@ -83,11 +105,30 @@ class ChatState {
         val proj = currentProject ?: return "" // 未绑定项目：调用方 Toast 提示
         val list = sessions.getOrPut(proj) { mutableStateListOf() }
         val id = "s-${System.currentTimeMillis()}"
-        list.add(0, Session(id, "新建会话", proj, "刚刚"))
+        list.add(0, Session(id, "新建会话", proj, "刚刚", updatedAt = System.currentTimeMillis()))
         currentSessionId = id
         messagesBySession[id] = mutableStateListOf()
         activePanel = Panel.MESSAGES
         return id
+    }
+
+    /**
+     * 会话活动打点（发消息时调用）：更新最后活动时间与侧栏时间标签；
+     * 首条用户消息自动命名会话（前 20 字，pi-web 同语义——会话记录友好）。
+     */
+    private fun touchSession(firstUserText: String?) {
+        val proj = currentProject ?: return
+        val id = currentSessionId ?: return
+        val list = sessions[proj] ?: return
+        val i = list.indexOfFirst { it.id == id }
+        if (i < 0) return
+        val old = list[i]
+        val now = System.currentTimeMillis()
+        val autoTitle = if (old.title == "新建会话" && !firstUserText.isNullOrBlank()) {
+            val t = firstUserText.trim().take(20)
+            if (firstUserText.trim().length > 20) "$t…" else t
+        } else old.title
+        list[i] = old.copy(title = autoTitle, relativeTime = relativeTimeLabel(now, now), updatedAt = now)
     }
 
     fun renameSession(id: String, title: String) {
@@ -107,6 +148,8 @@ class ChatState {
         sessions[proj]?.removeAll { it.id == id }
         messagesBySession.remove(id)
         if (currentSessionId == id) currentSessionId = sessionsFor(proj).firstOrNull()?.id
+        // 删除最后一个会话后自动新建（2026-09-09 用户定：侧边栏会话列表恒有会话）
+        if (sessionsFor(proj).isEmpty()) newSession()
     }
 
     /** 跨项目按 id 删除会话（项目管理页使用；含消息记录与当前会话指针处理） */
@@ -166,40 +209,124 @@ class ChatState {
         }
     }
 
-    // ── 流式 mock 发送 ────────────────────────────────────
+    // ── 真实对话发送（2026-09-09 实现 AI 接入，替换 mock 流式回复）──
     var isStreaming by mutableStateOf(false)
     var streamDraft by mutableStateOf("")
     var streamJob: Job? = null
 
+    /**
+     * 发送消息并请求 AI 回复：历史重建 = 当前会话的 User/Assistant（跳过错误消息与
+     * 思考/工具条目），system prompt 走 ChatState.systemPrompt；思考级别/流式开关/
+     * 模型参数均来自输入栏与配置页状态。请求失败以 error 助手消息呈现（不进 API 上下文）。
+     */
     suspend fun streamReply(userText: String) {
         isStreaming = true
         streamDraft = ""
+        // ★ 历史快照必须先于消息上屏：buildApiHistory 读 currentMessages，
+        //   上屏后再取会把本条用户消息算进历史、又被末尾显式追加一次 = 重复（2026-09-09 修复）
+        val historyBefore = buildApiHistory()
         currentMessages += Msg.User(userText, attachments.toList())
         attachments.clear()
-        // 状态徽标：当前会话标记运行中
+        touchSession(userText)
         markRunning(true)
-        delay(600) // “思考中”停顿
-        val reply = MockReplies.next(userText)
-        if (streamingOutputEnabled) {
-            // 流式输出：逐字追加
-            reply.forEach { ch ->
-                streamDraft += ch
-                delay(14)
-            }
-        } else {
-            // 关闭流式：整段输出（原型：仍走同一 draft 通道）
-            streamDraft = reply
+
+        val model = selectedModel
+        val cfg = model?.provider?.let { AiConfigStore.configs[it] }
+        if (cfg == null || model == null) {
+            currentMessages += Msg.Assistant(
+                "⚠️ 尚未配置模型：请先在「服务商与模型配置」中添加服务商并完成连接测试。",
+                error = true,
+            )
+            isStreaming = false
+            streamDraft = ""
+            markRunning(false)
+            return
         }
-        val usage = Usage(
-            inTokens = 1200 + userText.length * 2,
-            outTokens = reply.length / 2,
-            cacheTokens = 3400,
-            costUsd = 0.006,
-        )
-        currentMessages += Msg.Assistant(streamDraft, usage, selectedModel.name)
-        streamDraft = ""
-        isStreaming = false
-        markRunning(false)
+        // 所选模型可能不在配置的模型列表内（列表被改）→ 取配置列表首个
+        val effectiveModel = model.name.takeIf { cfg.models.contains(it) }
+            ?: cfg.models.firstOrNull().orEmpty()
+
+        val history = historyBefore + ("user" to userText)
+        val trimmedHistory = trimToContextBudget(history, cfg.ctxLenK)
+        val thinking = if (thinkingEnabled) thinkingLevel else null
+        try {
+            var usage: Usage? = null
+            if (streamingOutputEnabled) {
+                val sb = StringBuilder()
+                AiBackend.chatStream(
+                    cfg = cfg.copy(modelList = effectiveModel),
+                    systemPrompt = systemPrompt,
+                    history = trimmedHistory,
+                    thinkingLevel = thinking,
+                ).collect { ev ->
+                    when (ev) {
+                        is ChatEvent.TextDelta -> {
+                            sb.append(ev.text)
+                            streamDraft = sb.toString()
+                        }
+                        is ChatEvent.UsageEvent -> usage = ev.usage
+                        is ChatEvent.Failed -> throw AiException(ev.message)
+                        ChatEvent.Done -> Unit
+                    }
+                }
+                currentMessages += Msg.Assistant(sb.toString(), usage, effectiveModel)
+            } else {
+                val result = AiBackend.chat(
+                    cfg = cfg.copy(modelList = effectiveModel),
+                    systemPrompt = systemPrompt,
+                    history = trimmedHistory,
+                    thinkingLevel = thinking,
+                )
+                currentMessages += Msg.Assistant(result.text, result.usage, effectiveModel)
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e // abort：保留 abort() 对 draft 的处理
+        } catch (e: Exception) {
+            currentMessages += Msg.Assistant(
+                "⚠️ 请求失败：${e.message ?: "未知错误"}",
+                error = true,
+            )
+        } finally {
+            streamDraft = ""
+            isStreaming = false
+            markRunning(false)
+        }
+    }
+
+    /** API 上下文重建：仅 User/Assistant 且跳过 error 消息（上限 40 条防过长） */
+    private fun buildApiHistory(): List<Pair<String, String>> {
+        val out = mutableListOf<Pair<String, String>>()
+        currentMessages.forEach { m ->
+            when (m) {
+                is Msg.User -> out += "user" to m.text
+                is Msg.Assistant -> if (!m.error) out += "assistant" to m.markdown
+                else -> Unit // 思考/工具/结果/压缩不参与基本对话上下文
+            }
+        }
+        return out.takeLast(40)
+    }
+
+    /**
+     * 上下文长度预算裁剪（配置页「上下文长度」K Tokens 生效）：
+     * 粗略估算 token ≈ 字符数/2（中英混排折中），超预算丢最旧条目；
+     * 但永远保留最新一条用户消息（本轮提问不可丢）。
+     */
+    private fun trimToContextBudget(
+        history: List<Pair<String, String>>,
+        ctxLenK: String,
+    ): List<Pair<String, String>> {
+        val k = ctxLenK.toIntOrNull() ?: return history
+        if (k <= 0) return history
+        val charBudget = (k * 1000L) * 2 // 1 token ≈ 2 字符（中英折中）
+        var used = history.sumOf { (_, c) -> c.length.toLong() }
+        if (used <= charBudget) return history
+        var start = 0
+        while (start < history.size - 1 && used > charBudget) {
+            used -= history[start].second.length
+            start++
+        }
+        // 若仍超预算（单条超长），至少保留最后一条
+        return if (start <= history.lastIndex) history.subList(start, history.size) else history.takeLast(1)
     }
 
     private fun markRunning(running: Boolean) {
@@ -286,17 +413,31 @@ class ChatState {
     }
 
     // ── 输入栏：模型选择器 ────────────────────────────────
-    var selectedModelId by mutableStateOf("anthropic/claude-sonnet-4-5")
+    // 模型数据源（2026-09-09 起）：已配置服务商的模型列表（AiConfigStore）；
+    // id = "providerId/modelName"。
+    var selectedModelId by mutableStateOf("")
     var thinkingEnabled by mutableStateOf(false)
     var thinkingLevel by mutableStateOf(ThinkingLevel.MEDIUM)
     var streamingOutputEnabled by mutableStateOf(true) // 流式输出开关（模型选择器"输出"栏）
-    // AI 已配置标记（2026-09-08 用户定：聊天页首次引导第二步）：模型配置页「测试连接」成功即置真；
-    // 与项目一起作为聊天页引导的两个完成条件，两者齐备才显示输入栏。
-    var aiConfigured by mutableStateOf(false)
 
-    val selectedModel: AiModel
-        get() = MockModels.providers.firstOrNull { it.id == selectedModelId }
-            ?: MockModels.providers.first()
+    /** 聊天页可用模型 = 已配置服务商模型列表（模型切换数据源） */
+    val availableModels: List<AiModel>
+        get() = AiConfigStore.configs.values.flatMap { cfg ->
+            cfg.models.map { AiModel("${cfg.providerId}/$it", it, cfg.providerId) }
+        }
+
+    val selectedModel: AiModel?
+        get() = availableModels.firstOrNull { it.id == selectedModelId }
+            ?: availableModels.firstOrNull()
+
+    // AI 已配置标记（2026-09-08 用户定：聊天页首次引导第二步）：模型配置页「测试连接」
+    // 成功即置真（持久化于 AiConfigStore，2026-09-09 起）；与项目一起作为聊天页引导的
+    // 两个完成条件，两者齐备才显示输入栏。
+    var aiConfigured: Boolean
+        get() = AiConfigStore.aiConfigured
+        set(value) {
+            AiConfigStore.aiConfigured = value
+        }
 
     // ── 输入栏：上下文指示器（数据源 = get_state 同源口径） ──
     var contextPercent by mutableStateOf(34f)

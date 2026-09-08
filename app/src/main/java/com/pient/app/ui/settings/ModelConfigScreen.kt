@@ -55,7 +55,6 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,8 +79,11 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.navigation.NavController
+import com.pient.app.data.AiBackend
+import com.pient.app.data.AiConfigStore
 import com.pient.app.data.ChatState
 import com.pient.app.data.ProviderCatalog
+import com.pient.app.data.ProviderConfig
 import com.pient.app.data.ProviderInfo
 import com.pient.app.ui.components.DividerLine
 import com.pient.app.ui.components.PientButton
@@ -90,11 +92,10 @@ import com.pient.app.ui.components.SectionHeader
 import com.pient.app.ui.theme.LocalPientIsDark
 import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * 服务商与模型配置（2026-08-30 整体重制）：
+ * 服务商与模型配置（2026-08-30 整体重制；2026-09-09 真实化）：
  * ① 选择服务商卡片：卡内首行标题，第二行服务商展示栏（logo + 名称 + 向下箭头）；
  *    点击弹出选择弹窗（顶部搜索框 + 服务商列表，列表项 = 左侧 logo + 名称）。
  *    服务商清单/名称/默认端点对齐 pi-0.84.2 providers 目录；logo 对齐
@@ -102,21 +103,20 @@ import kotlinx.coroutines.launch
  * ② API设置卡片三块：API端点（输入框默认填入所选服务商端点，可编辑，旁向下箭头
  *    弹窗切换多端点）、API密钥（遮蔽输入）、模型列表（输入框 + 图案按钮弹出
  *    模型选择弹窗：搜索框 + 端点可用模型列表，点选自动填入）。
- * ③ 上下文设置卡片：点击展开，上下文长度 / 最大输出长度（单位 K Tokens）。
- * ④ 模型参数设置卡片：点击展开，温度（开关 + 数值）、Top_P / Top_K（开关 + 数值）。
- * 原型期数据为 mock（ProviderCatalog / 页面内存状态）。
+ * ③ 上下文设置卡片：上下文长度 / 最大输出长度（单位 K Tokens）。
+ * ④ 模型参数设置卡片：温度（开关 + 数值）、Top_P / Top_K（开关 + 数值）。
+ * 2026-09-09 起全部真实化：配置读写 AiConfigStore（自动持久化）、「测试连接」与
+ * 「刷新模型列表」走真实 API（AiBackend.listModels）；成功置 chatState.aiConfigured。
  */
 @Composable
 fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     val scope = rememberCoroutineScope()
     // ── 状态 ──
-    // 已配置服务商列表（用户通过"+服务商"添加、删除按钮移除；初始只配置 Anthropic）
-    val configuredIds = remember { mutableStateListOf("anthropic") }
-    var selectedId by remember { mutableStateOf<String?>("anthropic") }
+    // 已配置服务商列表（AiConfigStore 持久化；2026-09-09 起无预置——用户自行添加）
+    val configuredIds = AiConfigStore.configs.keys.toList()
+    var selectedId by remember { mutableStateOf<String?>(configuredIds.firstOrNull()) }
     val provider = selectedId?.let { ProviderCatalog.find(it) }
-    var endpoint by remember { mutableStateOf(provider?.defaultEndpoint.orEmpty()) }
-    var apiKey by remember { mutableStateOf("sk-ant-****hGt3") }
-    var modelList by remember { mutableStateOf(provider?.models?.firstOrNull().orEmpty()) }
+    val cfg = selectedId?.let { AiConfigStore.configs[it] }
     var providerPickerOpen by remember { mutableStateOf(false) } // +服务商：目录弹窗
     var providerFilter by remember { mutableStateOf("all") }      // 服务商列表筛选：all/added/unadded
     var providerFilterOpen by remember { mutableStateOf(false) }  // 筛选选项弹窗
@@ -125,25 +125,27 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     var endpointPickerOpen by remember { mutableStateOf(false) }
     var modelPickerOpen by remember { mutableStateOf(false) }
     var keyVisible by remember { mutableStateOf(false) }       // API密钥显隐
-    var ctxLen by remember { mutableStateOf("200") }
-    var maxOut by remember { mutableStateOf("64") }
-    var tempEnabled by remember { mutableStateOf(true) }
-    var tempValue by remember { mutableStateOf("1.0") }
-    var topKEnabled by remember { mutableStateOf(false) }
-    var topKValue by remember { mutableStateOf("0") }
-    var topPEnabled by remember { mutableStateOf(false) }
-    var topPValue by remember { mutableStateOf("1.0") }
-    var testState by remember { mutableStateOf<String?>(null) } // 测试连接反馈
+    var testState by remember { mutableStateOf<String?>(null) } // 测试连接/刷新反馈
     var refreshing by remember { mutableStateOf(false) }       // 模型列表刷新中
+
+    /** 更新当前服务商配置（写入 AiConfigStore，自动持久化） */
+    fun updateConfig(transform: (ProviderConfig) -> ProviderConfig) {
+        val id = selectedId ?: return
+        val cur = AiConfigStore.configs[id] ?: return
+        AiConfigStore.configs[id] = transform(cur)
+    }
 
     /** 新增服务商：加入已配置列表并切换为当前；重复添加则仅切换 */
     fun addProvider(id: String) {
-        if (id !in configuredIds) configuredIds.add(id)
         val p = ProviderCatalog.find(id)
+        if (id !in AiConfigStore.configs) {
+            AiConfigStore.configs[id] = ProviderConfig(
+                providerId = id,
+                endpoint = p.defaultEndpoint,
+                modelList = p.models.firstOrNull().orEmpty(),
+            )
+        }
         selectedId = id
-        endpoint = p.defaultEndpoint
-        apiKey = ""
-        modelList = p.models.firstOrNull().orEmpty()
         testState = null
         providerPickerOpen = false
     }
@@ -151,14 +153,30 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     /** 删除当前服务商：从已配置列表移除，切换到剩余第一个（可能为空） */
     fun deleteCurrent() {
         val id = selectedId ?: return
-        configuredIds.remove(id)
-        selectedId = configuredIds.firstOrNull()
-        val p = selectedId?.let { ProviderCatalog.find(it) }
-        endpoint = p?.defaultEndpoint.orEmpty()
-        apiKey = ""
-        modelList = p?.models?.firstOrNull().orEmpty()
+        AiConfigStore.configs.remove(id)
+        selectedId = AiConfigStore.configs.keys.firstOrNull()
         testState = null
         confirmDeleteOpen = false
+    }
+
+    /** 测试连接 / 刷新模型列表共用：GET 服务商模型端点，错误消息进 testState */
+    fun callModels(onSuccess: (List<String>) -> Unit) {
+        val cur = cfg ?: return
+        if (cur.endpoint.isBlank()) {
+            testState = "请先填写 API 端点"
+            return
+        }
+        if (cur.apiKey.isBlank()) {
+            testState = "请先填写 API 密钥"
+            return
+        }
+        scope.launch {
+            try {
+                onSuccess(AiBackend.listModels(cur))
+            } catch (e: Exception) {
+                testState = "连接失败：${e.message ?: "未知错误"}"
+            }
+        }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -269,11 +287,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                             }
                                         },
                                         onClick = {
-                                            val cur = ProviderCatalog.find(id)
                                             selectedId = id
-                                            endpoint = cur.defaultEndpoint
-                                            apiKey = ""
-                                            modelList = cur.models.firstOrNull().orEmpty()
                                             testState = null
                                             configuredMenuOpen = false
                                         },
@@ -300,9 +314,9 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                     text = "测试连接",
                                     onClick = {
                                         testState = "测试中…"
-                                        scope.launch {
-                                            delay(900)
-                                            testState = "✓ 连接成功"
+                                        callModels { models ->
+                                            testState = if (models.isEmpty()) "连接成功（未返回模型）"
+                                            else "✓ 连接成功"
                                             // 连接成功 = AI 配置完成（2026-09-08：聊天页首次引导第二步）
                                             chatState.aiConfigured = true
                                         }
@@ -314,8 +328,14 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                             Text(
                                 testState.orEmpty(),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (testState == "✓ 连接成功") MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = when {
+                                    testState == "✓ 连接成功" || testState == "连接成功（未返回模型）" ->
+                                        MaterialTheme.colorScheme.primary
+                                    testState?.startsWith("连接失败") == true ||
+                                        testState?.startsWith("请先填写") == true ->
+                                        MaterialTheme.colorScheme.error
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                                 modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
                             )
                         }
@@ -324,7 +344,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             }
 
             // ── ② API设置（仅在已选择服务商时显示） ──
-            if (provider != null) {
+            if (provider != null && cfg != null) {
                 item {
                     Column {
                         SectionHeader("API设置", icon = Icons.Outlined.Api)
@@ -333,8 +353,8 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                             ConfigFieldLabel("API端点")
                             FieldHint("服务商 API 地址 · 切换服务商后自动填入，可手动修改")
                             EndpointField(
-                                value = endpoint,
-                                onValueChange = { endpoint = it },
+                                value = cfg.endpoint,
+                                onValueChange = { v -> updateConfig { it.copy(endpoint = v) } },
                                 onOpenPicker = { endpointPickerOpen = true },
                             )
                             DividerLine()
@@ -342,8 +362,8 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                             ConfigFieldLabel("API密钥")
                             FieldHint("仅保存在本机 · 用于请求签名，界面不回显")
                             ApiKeyField(
-                                value = apiKey,
-                                onValueChange = { apiKey = it },
+                                value = cfg.apiKey,
+                                onValueChange = { v -> updateConfig { it.copy(apiKey = v) } },
                                 visible = keyVisible,
                                 onToggleVisible = { keyVisible = !keyVisible },
                             )
@@ -352,8 +372,8 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                             ConfigFieldLabel("模型列表")
                             FieldHint("多个模型用英文分号 ; 分隔 · 点击右侧按钮批量选择")
                             ModelListField(
-                                value = modelList,
-                                onValueChange = { modelList = it },
+                                value = cfg.modelList,
+                                onValueChange = { v -> updateConfig { it.copy(modelList = v) } },
                                 onOpenPicker = { modelPickerOpen = true },
                             )
                         }
@@ -362,7 +382,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             }
 
             // ── ③ 上下文设置（与 API设置 同构：卡外标题行 + 分区块；仅在已选择服务商时显示） ──
-            if (provider != null) {
+            if (provider != null && cfg != null) {
                 item {
                     Column {
                         SectionHeader("上下文设置", icon = Icons.Outlined.MenuBook)
@@ -371,8 +391,10 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                             ConfigFieldLabel("上下文长度")
                             FieldHint("单次会话可用的最大上下文窗口 · 过大可能超出服务商上限")
                             TokenInputField(
-                                value = ctxLen,
-                                onValueChange = { ctxLen = it.filter { c -> c.isDigit() } },
+                                value = cfg.ctxLenK,
+                                onValueChange = { v ->
+                                    updateConfig { it.copy(ctxLenK = v.filter { c -> c.isDigit() }) }
+                                },
                                 placeholder = "200",
                             )
                             DividerLine()
@@ -380,8 +402,10 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                             ConfigFieldLabel("最大输出长度")
                             FieldHint("单次回复最多生成的 token 数")
                             TokenInputField(
-                                value = maxOut,
-                                onValueChange = { maxOut = it.filter { c -> c.isDigit() } },
+                                value = cfg.maxOutK,
+                                onValueChange = { v ->
+                                    updateConfig { it.copy(maxOutK = v.filter { c -> c.isDigit() }) }
+                                },
                                 placeholder = "64",
                             )
                         }
@@ -390,7 +414,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             }
 
             // ── ④ 模型参数设置（与 API设置 同构：卡外标题行 + 开关区块；仅在已选择服务商时显示） ──
-            if (provider != null) {
+            if (provider != null && cfg != null) {
                 item {
                     Column {
                         SectionHeader("模型参数设置", icon = Icons.Outlined.Tune)
@@ -399,13 +423,13 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                             ParamBlock(
                                 label = "温度（Temperature）",
                                 hint = "调节采样随机性 · 关闭时不传该参数",
-                                enabled = tempEnabled,
-                                onToggle = { tempEnabled = !tempEnabled },
+                                enabled = cfg.tempEnabled,
+                                onToggle = { updateConfig { it.copy(tempEnabled = !it.tempEnabled) } },
                             )
-                            if (tempEnabled) {
+                            if (cfg.tempEnabled) {
                                 ParamInputField(
-                                    value = tempValue,
-                                    onValueChange = { tempValue = it },
+                                    value = cfg.tempValue,
+                                    onValueChange = { v -> updateConfig { it.copy(tempValue = v) } },
                                     placeholder = "1.0",
                                     rangeHint = "取值范围 0.0~2.0",
                                 )
@@ -415,13 +439,13 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                             ParamBlock(
                                 label = "Top-K 采样",
                                 hint = "只从概率最高的 K 个 token 中采样 · 关闭时不传该参数",
-                                enabled = topKEnabled,
-                                onToggle = { topKEnabled = !topKEnabled },
+                                enabled = cfg.topKEnabled,
+                                onToggle = { updateConfig { it.copy(topKEnabled = !it.topKEnabled) } },
                             )
-                            if (topKEnabled) {
+                            if (cfg.topKEnabled) {
                                 ParamInputField(
-                                    value = topKValue,
-                                    onValueChange = { topKValue = it },
+                                    value = cfg.topKValue,
+                                    onValueChange = { v -> updateConfig { it.copy(topKValue = v) } },
                                     placeholder = "0",
                                     rangeHint = "取值范围 0~100（整数）",
                                 )
@@ -431,13 +455,13 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                             ParamBlock(
                                 label = "核采样（Top-P采样）",
                                 hint = "从累计概率达到 P 的最小 token 集合中采样 · 关闭时不传该参数",
-                                enabled = topPEnabled,
-                                onToggle = { topPEnabled = !topPEnabled },
+                                enabled = cfg.topPEnabled,
+                                onToggle = { updateConfig { it.copy(topPEnabled = !it.topPEnabled) } },
                             )
-                            if (topPEnabled) {
+                            if (cfg.topPEnabled) {
                                 ParamInputField(
-                                    value = topPValue,
-                                    onValueChange = { topPValue = it },
+                                    value = cfg.topPValue,
+                                    onValueChange = { v -> updateConfig { it.copy(topPValue = v) } },
                                     placeholder = "1.0",
                                     rangeHint = "取值范围 0.0~1.0",
                                 )
@@ -471,7 +495,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
 
     // ── 弹窗：服务商选择列表（+服务商 新增；顶栏筛选 + 底部取消） ──
     if (providerPickerOpen) {
-        val providerEntries = remember(selectedId, configuredIds.toList()) {
+        val providerEntries = remember(selectedId, configuredIds) {
             (listOf(ProviderCatalog.custom) + ProviderCatalog.all).map {
                 PickerEntry(
                     key = it.id,
@@ -524,23 +548,23 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     // ── 弹窗：切换 API 端点 ──
     if (endpointPickerOpen) {
         val endpointEntries = (provider?.endpoints ?: emptyList()).map {
-            PickerEntry(key = it, title = it, mono = true, selected = it == endpoint)
+            PickerEntry(key = it, title = it, mono = true, selected = it == cfg?.endpoint)
         }
         SearchPickerPopup(
             title = "API端点",
             entries = endpointEntries,
             onDismiss = { endpointPickerOpen = false },
             onSelect = { e ->
-                endpoint = e.key
+                updateConfig { it.copy(endpoint = e.key) }
                 endpointPickerOpen = false
             },
         )
     }
 
-    // ── 弹窗：模型列表（多选 + 底部取消/确定） ──
+    // ── 弹窗：模型列表（多选 + 底部取消/确定；顶栏刷新 = 真实拉取服务商模型） ──
     if (modelPickerOpen) {
-        val modelEntries = (provider?.models ?: emptyList()).map {
-            PickerEntry(key = it, title = it, mono = true, selected = it in modelList.split(";"))
+        val modelEntries = (cfg?.models ?: emptyList()).map {
+            PickerEntry(key = it, title = it, mono = true, selected = it in (cfg?.modelList?.split(";") ?: emptyList()))
         }
         SearchPickerPopup(
             topBarTitle = "模型选择列表",
@@ -549,7 +573,14 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                     loading = refreshing,
                     onClick = {
                         refreshing = true
-                        scope.launch { delay(900); refreshing = false }
+                        callModels { models ->
+                            if (models.isEmpty()) {
+                                testState = "未获取到模型列表"
+                            } else {
+                                updateConfig { it.copy(modelList = models.joinToString(";")) }
+                            }
+                            refreshing = false
+                        }
                     },
                 )
             },
@@ -559,7 +590,9 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             onDismiss = { modelPickerOpen = false },
             onConfirmMulti = { keys ->
                 // 多选确认：以英文分号拼接填入输入框
-                modelList = modelEntries.filter { it.key in keys }.joinToString(";") { it.key }
+                updateConfig {
+                    it.copy(modelList = modelEntries.filter { e -> e.key in keys }.joinToString(";") { e -> e.key })
+                }
                 modelPickerOpen = false
             },
         )

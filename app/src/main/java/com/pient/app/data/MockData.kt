@@ -7,61 +7,9 @@ import androidx.compose.runtime.mutableStateListOf
 // 接入运行时后由 get_available_models / SessionManager 等官方机制替换。
 // 2026-09-08：mock 项目/会话/聊天消息/文件树已全部移除——初次进入无项目，
 // 聊天页显示创建项目（绑定文件夹）与配置 AI 引导；项目/会话/文件均真实数据。
+// 2026-09-09：mock 模型/MockReplies 移除——AI 对话走真实服务商 API（AiBackend），
+// 模型来自已配置服务商（AiConfigStore）。剩余 mock：技能/插件/终端。
 // ─────────────────────────────────────────────────────────────
-
-object MockModels {
-    val providers = listOf(
-        AiModel("anthropic/claude-sonnet-4-5", "claude-sonnet-4-5", "anthropic"),
-        AiModel("anthropic/claude-haiku-4-5", "claude-haiku-4-5", "anthropic"),
-        AiModel("anthropic/claude-opus-4-1", "claude-opus-4-1", "anthropic"),
-        AiModel("anthropic/claude-3-5-sonnet", "claude-3-5-sonnet", "anthropic"),
-        AiModel("openai/gpt-5", "gpt-5", "openai"),
-        AiModel("openai/gpt-4o", "gpt-4o", "openai"),
-        AiModel("openai/o3", "o3", "openai"),
-        AiModel("local/mnn-llama-8b", "MNN Llama-3-8B", "local"),
-        AiModel("local/ollama-qwen2.5-7b", "Ollama qwen2.5:7b", "local"),
-        AiModel("local/ollama-deepseek-r1-14b", "Ollama deepseek-r1:14b", "local"),
-    )
-
-    val providerNames = mapOf(
-        "anthropic" to "Anthropic",
-        "openai" to "OpenAI",
-        "local" to "本地 (MNN / Ollama)",
-    )
-}
-
-/** mock 流式回复（发送后按字符吐出） */
-object MockReplies {
-    val default = listOf(
-        "收到。我先梳理一下任务要点：\n\n" +
-            "## 目标\n\n" +
-            "- **任务**：$1\n" +
-            "- 已加载当前项目上下文（`my-android-app`）\n\n" +
-            "## 执行计划\n\n" +
-            "1. 定位相关代码路径\n" +
-            "2. 分析现有实现\n" +
-            "3. 给出可执行方案\n\n" +
-            "```bash\n" +
-            "pi run \"$1\"\n" +
-            "```\n\n" +
-            "> 原型演示：此处为 mock 流式回复，接入 Pi 运行时后由真实 Agent 输出替换。\n\n" +
-            "*需要我直接动手改代码吗？*",
-        "好的，这是一个典型的工程任务。我的思路：\n\n" +
-            "### 第一步：先定位\n\n" +
-            "用 `grep` 找到相关调用点，再通读上下文。\n\n" +
-            "### 第二步：再动手\n\n" +
-            "- 保持行为不变\n" +
-            "- 补充回归用例\n\n" +
-            "> 提示：修改前建议先 `git stash` 保存现场。\n\n" +
-            "**预计 10 分钟完成**，需要我继续吗？",
-    )
-    private var idx = 0
-    fun next(text: String): String {
-        val t = default[idx % default.size]
-        idx++
-        return t.replace("$1", text)
-    }
-}
 
 // ─────────────────────────────────────────────────────────────
 // 技能 / 插件（mock；分段切换 = 全局 ~/.pi/agent/skills、项目 .pi/skills）
