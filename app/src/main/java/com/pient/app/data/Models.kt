@@ -392,11 +392,31 @@ data class SkillItem(
     val fileTree: String? = null,  // 技能目录 ASCII 树（mock；null = 无目录信息）
 )
 
+/** 插件包状态（pi-web PluginPackageInfo.status） */
+enum class PluginStatus { LOADED, INSTALLED, MISSING, DISABLED }
+
+/** 包内资源类型（pi package.json pi 清单四类） */
+enum class PluginResourceKind { EXTENSION, SKILL, PROMPT, THEME }
+
+/** 包内单个资源（pi-web PluginResourceInfo 投影，多一个启用位） */
+data class PluginResource(
+    val kind: PluginResourceKind,
+    val name: String,
+    val relativePath: String,
+    val enabled: Boolean = true,
+)
+
 data class PluginItem(
     val name: String,
     val source: String,
     val enabled: Boolean,
     val global: Boolean = true,
+    val desc: String = "",                    // package.json description（mock）
+    val readmeMd: String? = null,             // README.md 文件内容（mock；null = 无此文件）
+    val version: String? = null,              // 已安装版本（mock；null = 未知）
+    val configuredVersion: String? = null,    // 已配置版本/pinned ref（mock；null = 未配置）
+    val status: PluginStatus = PluginStatus.LOADED,  // 包级状态（enabled=false 时显示「已禁用」）
+    val resources: List<PluginResource> = emptyList(),  // 已解析资源（mock）
 )
 
 // ─────────────────────────────────────────────────────────────

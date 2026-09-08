@@ -313,6 +313,79 @@ object MockStore {
         |    └── migration-notes.md
     """.trimMargin()
 
+    // ── 插件 README（详情弹窗「查看README.md」预览） ──
+    private val GIT_PLUGIN_README = """
+        |# pi-plugin-git
+        |
+        |Git 仓库管理插件：提交、分支、日志一站式操作。
+        |
+        |## 命令
+        |
+        |- `/git-log` — 查看提交历史
+        |- `/git-status` — 工作区状态
+        |- `/git-branch` — 分支切换与合并
+        |
+        |## 安装
+        |
+        |```bash
+        |pi install npm:@x/pi-plugin-git
+        |```
+    """.trimMargin()
+
+    private val WEB_PLUGIN_README = """
+        |# pi-plugin-web
+        |
+        |网页内容抓取与聚合搜索插件。
+        |
+        |## 工具
+        |
+        |- `web_fetch` — 抓取网页正文（自动转 Markdown）
+        |- `web_search` — 聚合多源搜索
+        |
+        |> 需要走代理时在 settings.json 配置 httpProxy。
+        |
+        |## 安装
+        |
+        |```bash
+        |pi install npm:@x/pi-plugin-web
+        |```
+    """.trimMargin()
+
+    private val GREP_PLUGIN_README = """
+        |# pi-plugin-grep
+        |
+        |基于 ripgrep 的高性能代码搜索插件。
+        |
+        |## 使用
+        |
+        |```
+        |/grep <pattern> [path]
+        |```
+        |
+        |## 权限
+        |
+        |- 只读：搜索目录需加入白名单
+    """.trimMargin()
+
+    // ── 插件资源清单（详情弹窗「已解析资源」；pi-web ResourceList 结构） ──
+    // pi-plugin-git：1 扩展 + 2 提示词；loaded、无 pinned
+    private val GIT_PLUGIN_RESOURCES = listOf(
+        PluginResource(PluginResourceKind.EXTENSION, "index.ts", "extensions/index.ts"),
+        PluginResource(PluginResourceKind.PROMPT, "git-commit.md", "prompts/git-commit.md"),
+        PluginResource(PluginResourceKind.PROMPT, "git-release.md", "prompts/git-release.md", enabled = false),
+    )
+    // pi-plugin-web：1 扩展 + 1 技能 + 1 提示词；包级禁用
+    private val WEB_PLUGIN_RESOURCES = listOf(
+        PluginResource(PluginResourceKind.EXTENSION, "index.ts", "extensions/index.ts"),
+        PluginResource(PluginResourceKind.SKILL, "web-fetch", "skills/web-fetch/SKILL.md"),
+        PluginResource(PluginResourceKind.PROMPT, "summarize.md", "prompts/summarize.md"),
+    )
+    // pi-plugin-grep：1 扩展 + 1 提示词；installed（未加载）+ pinned ref 已配置
+    private val GREP_PLUGIN_RESOURCES = listOf(
+        PluginResource(PluginResourceKind.EXTENSION, "grep.ts", "extensions/grep.ts"),
+        PluginResource(PluginResourceKind.PROMPT, "grep-report.md", "prompts/grep-report.md"),
+    )
+
     val globalSkills = mutableStateListOf(
         SkillItem("web-research", "联网检索与资料整理", enabled = true, global = true,
             skillMd = WEB_RESEARCH_MD, fileTree = WEB_RESEARCH_TREE),
@@ -328,11 +401,23 @@ object MockStore {
             skillMd = KMP_MIGRATION_MD, fileTree = KMP_MIGRATION_TREE),
     )
     val globalPlugins = mutableStateListOf(
-        PluginItem("pi-plugin-git", "npm:@x/pi-plugin-git", enabled = true, global = true),
-        PluginItem("pi-plugin-web", "npm:@x/pi-plugin-web", enabled = false, global = true),
+        PluginItem("pi-plugin-git", "npm:@x/pi-plugin-git", enabled = true, global = true,
+            desc = "Git 仓库管理：提交、分支、日志",
+            readmeMd = GIT_PLUGIN_README,
+            version = "1.4.2", status = PluginStatus.LOADED,
+            resources = GIT_PLUGIN_RESOURCES),
+        PluginItem("pi-plugin-web", "npm:@x/pi-plugin-web", enabled = false, global = true,
+            desc = "网页抓取与聚合搜索",
+            readmeMd = WEB_PLUGIN_README,
+            version = "0.9.1", status = PluginStatus.LOADED,
+            resources = WEB_PLUGIN_RESOURCES),
     )
     val projectPlugins = mutableStateListOf(
-        PluginItem("pi-plugin-grep", "git:example/pi-plugin-grep", enabled = true, global = false),
+        PluginItem("pi-plugin-grep", "git:example/pi-plugin-grep", enabled = true, global = false,
+            desc = "项目内高性能代码搜索",
+            readmeMd = GREP_PLUGIN_README,
+            version = "2.1.0", configuredVersion = "2.0.0", status = PluginStatus.INSTALLED,
+            resources = GREP_PLUGIN_RESOURCES),
     )
 
     /** 技能市场搜索 mock（对应 pi-web /api/skills/search → skills.sh） */

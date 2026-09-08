@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.pient.app.data.MockStore
@@ -55,6 +56,8 @@ import kotlinx.coroutines.launch
 fun PluginsScreen(nav: NavController) {
     var segment by remember { mutableStateOf(0) }
     var installOpen by remember { mutableStateOf(false) }
+    var detailFor by remember { mutableStateOf<PluginItem?>(null) }
+    val context = LocalContext.current
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -100,7 +103,7 @@ fun PluginsScreen(nav: NavController) {
                 ),
             ) {
                 items(list.size, key = { i -> list[i].name }) { i ->
-                    PluginRow(list[i])
+                    PluginRow(list[i], onClick = { detailFor = list[i] })
                 }
             }
         }
@@ -132,6 +135,23 @@ fun PluginsScreen(nav: NavController) {
             },
         )
     }
+
+    // 插件详情弹窗（2026-09-08：点插件卡片弹出；删除 = 从列表移除插件及全部文件）
+    detailFor?.let { item ->
+        PluginDetailDialog(
+            item = item,
+            onDismiss = { detailFor = null },
+            onDelete = {
+                if (item.global) MockStore.globalPlugins.remove(item)
+                else MockStore.projectPlugins.remove(item)
+                toast(context, "已删除插件 ${item.name}")
+                detailFor = null
+            },
+            onUpdate = {
+                toast(context, "已更新插件 ${item.name}")
+            },
+        )
+    }
 }
 
 /** 从安装源解析插件名（npm:@x/name、git:host/name、路径尾段） */
@@ -145,8 +165,12 @@ private fun parsePluginName(source: String): String {
     }.ifBlank { "pi-plugin-${s.hashCode().and(0xFFFF)}" }
 }
 
+private fun toast(context: android.content.Context, msg: String) {
+    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+}
+
 @Composable
-private fun PluginRow(item: PluginItem) {
+private fun PluginRow(item: PluginItem, onClick: () -> Unit) {
     var enabled by remember(item.name) { mutableStateOf(item.enabled) }
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -157,7 +181,11 @@ private fun PluginRow(item: PluginItem) {
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
             .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
-        Column(Modifier.weight(1f)) {
+        Column(
+            Modifier
+                .weight(1f)
+                .clickable(onClick = onClick),
+        ) {
             Text(
                 item.name,
                 style = MaterialTheme.typography.labelLarge.copy(fontFamily = MonoFont),
