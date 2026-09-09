@@ -723,6 +723,20 @@ fun SessionDrawer(
                             onDeleteRequest = { deleteConfirmFor = s.id },
                         )
                     }
+                    // 分隔线：置顶会话与下方时间分组列表隔开（2026-09-09 用户要求——
+                    // 置顶段与未置顶会话的视觉分界；仅两侧都有会话时渲染，全置顶时
+                    // 下方无内容可区分，不渲染悬线）
+                    if (groups.isNotEmpty()) {
+                        item(key = "g-pinned-divider") {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp)
+                                    .height(1.dp)
+                                    .background(MaterialTheme.colorScheme.outlineVariant),
+                            )
+                        }
+                    }
                 }
                 groups.forEach { group ->
                     // 头部无标签 run 簇（label=null）不渲染分组头、不可折叠（Hermes 同款：
