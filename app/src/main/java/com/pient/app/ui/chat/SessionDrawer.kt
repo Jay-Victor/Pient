@@ -55,6 +55,8 @@ import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PushPin
@@ -723,29 +725,36 @@ fun SessionDrawer(
                     }
                 }
                 groups.forEach { group ->
-                    // 头部无标签 run 簇（label=null）不渲染分组头
+                    // 头部无标签 run 簇（label=null）不渲染分组头、不可折叠（Hermes 同款：
+                    // 无 divider 的组恒显示）；有标签组：组头整行点击折叠/展开，折叠时组内会话隐藏
                     group.label?.let { label ->
                         item(key = "g-${group.key}") {
-                            TimeGroupHeader(label)
+                            TimeGroupHeader(
+                                label = label,
+                                collapsed = group.key in chatState.collapsedTimeGroups,
+                                onToggle = { chatState.toggleTimeGroup(group.key) },
+                            )
                         }
                     }
-                    items(group.sessions, key = { it.id }) { s ->
-                        SessionRow(
-                            session = s,
-                            active = s.id == chatState.currentSessionId,
-                            batchMode = batchMode,
-                            selected = s.id in selectedIds,
-                            onClick = {
-                                chatState.selectSession(s.id)
-                                onClose()
-                            },
-                            onToggleSelect = {
-                                if (s.id in selectedIds) selectedIds.remove(s.id) else selectedIds.add(s.id)
-                            },
-                            onTogglePin = { chatState.togglePin(s.id) },
-                            onRename = { renameFor = s.id },
-                            onDeleteRequest = { deleteConfirmFor = s.id },
-                        )
+                    if (group.label == null || group.key !in chatState.collapsedTimeGroups) {
+                        items(group.sessions, key = { it.id }) { s ->
+                            SessionRow(
+                                session = s,
+                                active = s.id == chatState.currentSessionId,
+                                batchMode = batchMode,
+                                selected = s.id in selectedIds,
+                                onClick = {
+                                    chatState.selectSession(s.id)
+                                    onClose()
+                                },
+                                onToggleSelect = {
+                                    if (s.id in selectedIds) selectedIds.remove(s.id) else selectedIds.add(s.id)
+                                },
+                                onTogglePin = { chatState.togglePin(s.id) },
+                                onRename = { renameFor = s.id },
+                                onDeleteRequest = { deleteConfirmFor = s.id },
+                            )
+                        }
                     }
                 }
             }
@@ -1016,19 +1025,34 @@ fun SessionDrawer(
     }
 }
 
-/** 时间分组头：分组文字 + 右侧横线（2026-08-30 样式；仅时间分组加线，置顶头保持纯文字） */
+/**
+ * 时间分组头：分组文字 + 折叠箭头 + 右侧横线（2026-08-30 样式；仅时间分组加线，
+ * 置顶头保持纯文字）。2026-09-09 加折叠（Hermes SidebarDateDivider 同款）：
+ * 整行可点切换折叠，箭头右=折叠 / 下=展开（chevron-right rotate-90 语义），
+ * 折叠仅隐藏组内会话、组头保留；无标签组不渲染头（不可折叠）。
+ */
 @Composable
-private fun TimeGroupHeader(label: String) {
+private fun TimeGroupHeader(label: String, collapsed: Boolean, onToggle: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        // 分组标题旁的横线（贯穿至抽屉右缘）
+        Spacer(Modifier.width(4.dp))
+        Icon(
+            if (collapsed) Icons.Outlined.KeyboardArrowRight else Icons.Outlined.KeyboardArrowDown,
+            contentDescription = if (collapsed) "展开" else "收起",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(14.dp),
+        )
+        // 分组标题旁的横线（贯穿至行右缘）
         Box(
             Modifier
                 .weight(1f)

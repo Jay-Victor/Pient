@@ -172,6 +172,14 @@ class ChatState {
         }
     }
 
+    // 时间分组折叠状态（2026-09-09：Hermes 侧栏日历桶折叠同款——组头保留、
+    // 组内会话隐藏；键 = 日历桶 key，缺省展开；跨抽屉开关/导航保活，重启重置）
+    val collapsedTimeGroups = mutableStateSetOf<String>()
+
+    fun toggleTimeGroup(key: String) {
+        if (key in collapsedTimeGroups) collapsedTimeGroups.remove(key) else collapsedTimeGroups.add(key)
+    }
+
     /** 重命名项目：迁移 sessions 键、同步会话 project 字段与 currentProject；空名/重名忽略 */
     fun renameProject(oldName: String, newNameRaw: String) {
         val newName = newNameRaw.trim()
