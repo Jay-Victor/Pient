@@ -765,8 +765,13 @@ fun SessionDrawer(
                     }
                     rendered += g to visible
                 }
+                // 三点只服务「渐进未揭示」：手动折叠（collapsed）的组不挂三点——
+                // 其组头箭头即可恢复，全部揭示后折叠不会让三点诈尸
                 val moreGroup = rendered.lastOrNull()?.let { last ->
-                    if (rendered.size >= 2 && last.second < last.first.sessions.size) last.first else null
+                    val lastCollapsed = last.first.key in chatState.collapsedTimeGroups
+                    if (rendered.size >= 2 && !lastCollapsed && last.second < last.first.sessions.size) {
+                        last.first
+                    } else null
                 }
 
                 rendered.forEach { (group, visible) ->
