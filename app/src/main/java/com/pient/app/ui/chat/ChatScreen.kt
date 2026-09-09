@@ -200,6 +200,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     val drawerOffset = -drawerWidth * (1f - progress)
     val drawerScale = if (use3D) 0.92f + (0.08f * progress) else 1f
     val drawerAlpha = if (use3D) 0.72f + (0.28f * progress) else 1f
+    // 侧栏宽（px）——scrim 关闭判定用：点击 x 超过该值才算「点侧栏之外」
+    val drawerWidthPx = with(LocalDensity.current) { drawerWidth.toPx() }
 
     Box(
         Modifier
@@ -333,10 +335,18 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
             if (chatState.drawerOpen || progress > 0.001f) {
                 Box(Modifier.zIndex(2f)) {
                     if (chatState.drawerOpen && !useCompress) {
+                        // ★ 点外关闭层：只在侧栏宽（296dp）之外的点击才收起。
+                        //   抽屉面板是纯视觉层（无指针处理），其空白区（行间隙/状态栏条/
+                        //   空列表区）的点击会穿透到本层——加 x 判定后这些点击被忽略，
+                        //   抽屉保持展开；侧栏内交互组件自身的点击天然先被消费不受影响。
                         Box(
                             Modifier
                                 .fillMaxSize()
-                                .clickable(onClick = { chatState.drawerOpen = false }),
+                                .pointerInput(Unit) {
+                                    detectTapGestures { offset ->
+                                        if (offset.x > drawerWidthPx) chatState.drawerOpen = false
+                                    }
+                                },
                         )
                     }
                     SessionDrawer(
@@ -370,11 +380,17 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                 //   面板背景从状态栏下开始 + 右侧圆角 → 面板布局盒内无背景的区域
                 //   （状态栏条 / 右上右下圆角缺口）透出全屏 scrim 的压暗效果，罩子才完整。
                 Box {
+                    // ★ 遮罩层全屏铺底 + 点外关闭（x > 侧栏宽 296dp 才收起；侧栏内
+                    //   空白区穿透下来的点击被忽略，修复「点侧栏内某些位置抽屉收起」）
                     Box(
                         Modifier
                             .fillMaxSize()
                             .background(MaterialTheme.colorScheme.scrim)
-                            .clickable(onClick = { chatState.drawerOpen = false }),
+                            .pointerInput(Unit) {
+                                detectTapGestures { offset ->
+                                    if (offset.x > drawerWidthPx) chatState.drawerOpen = false
+                                }
+                            },
                     )
                     SessionDrawer(
                         chatState = chatState,

@@ -550,6 +550,18 @@ fun SessionDrawer(
                         .weight(1f)
                         .padding(start = 8.dp)
                         .focusRequester(focusRequester),
+                    decorationBox = { innerTextField ->
+                        Box {
+                            if (searchQuery.isEmpty()) {
+                                Text(
+                                    "搜索会话标题",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            innerTextField()
+                        }
+                    },
                 )
                 if (searchQuery.isNotEmpty()) {
                     Box(
