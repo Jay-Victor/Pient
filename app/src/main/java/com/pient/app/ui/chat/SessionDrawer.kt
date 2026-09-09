@@ -742,18 +742,16 @@ fun SessionDrawer(
                     }
                 }
                 groups.forEach { group ->
-                    // 头部无标签 run 簇（label=null）不渲染分组头、不可折叠（Hermes 同款：
-                    // 无 divider 的组恒显示）；有标签组：组头整行点击折叠/展开，折叠时组内会话隐藏
-                    group.label?.let { label ->
-                        item(key = "g-${group.key}") {
-                            TimeGroupHeader(
-                                label = label,
-                                collapsed = group.key in chatState.collapsedTimeGroups,
-                                onToggle = { chatState.toggleTimeGroup(group.key) },
-                            )
-                        }
+                    // 每个分组（含头部 run 簇）都有标签：组头整行点击折叠/展开，
+                    // 折叠时组内会话隐藏（2026-09-09 用户要求头部也贴标签，如「今天」）
+                    item(key = "g-${group.key}") {
+                        TimeGroupHeader(
+                            label = group.label,
+                            collapsed = group.key in chatState.collapsedTimeGroups,
+                            onToggle = { chatState.toggleTimeGroup(group.key) },
+                        )
                     }
-                    if (group.label == null || group.key !in chatState.collapsedTimeGroups) {
+                    if (group.key !in chatState.collapsedTimeGroups) {
                         items(group.sessions, key = { it.id }) { s ->
                             SessionRow(
                                 session = s,

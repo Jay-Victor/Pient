@@ -317,8 +317,8 @@ enum class SessionBucketKind { TODAY, YESTERDAY, THIS_WEEK, LAST_WEEK, THIS_MONT
 /** 日历桶：key = 唯一分桶键；at = 会话名义日起点（epoch ms，月份标签格式化用） */
 data class SessionBucket(val key: String, val kind: SessionBucketKind, val at: Long)
 
-/** 侧栏时间分组输出：label = null 表示头部无标签 run 簇（不渲染分组头） */
-data class SessionGroup(val key: String, val label: String?, val sessions: List<Session>)
+/** 侧栏时间分组输出：label 恒非空（2026-09-09 用户要求头部 run 簇也贴标签） */
+data class SessionGroup(val key: String, val label: String, val sessions: List<Session>)
 
 private fun startOfLocalDay(ms: Long): Long {
     val c = java.util.Calendar.getInstance().apply { timeInMillis = ms }
@@ -431,9 +431,17 @@ private fun headRunCutoffMs(times: List<Long>, nowMs: Long): Long {
 }
 
 /**
- * 侧栏时间分组（Hermes groupEntriesByRecency 同款）：列表按最后活动降序；
- * 头部 run 簇不贴标签；其下按日历桶分组，每桶一个分组头，第一个渲染的分组
- * 永不贴标签（头部为空时第一个日历桶即无头）。置顶会话不参与（置顶段独立）。
+ * 头簇标签：头簇是「现在」而非「早些时候」——today 桶显示「今天」，其余桶按常规
+ * 日历标签（跨午夜 run 的最新会话归昨天时显示「昨天」，保证语义准确）。
+ */
+fun sessionBucketHeadLabel(bucket: SessionBucket): String =
+    if (bucket.kind == SessionBucketKind.TODAY) "今天" else sessionBucketLabel(bucket)
+
+/**
+ * 侧栏时间分组：列表按最后活动降序；头部 run 簇贴其最新会话所属日历桶的标签
+ * （2026-09-09 用户要求：最上方会话上方也显示分组标签，如「今天」）；其下按
+ * 日历桶分组、每桶贴标签（不再保留 Hermes「第一个渲染的分组永不贴标签」——
+ * 该规则与头部贴标签矛盾）。置顶会话不参与（置顶段独立）。
  */
 fun groupSessionsByRecency(
     unpinned: List<Session>,
@@ -456,7 +464,8 @@ fun groupSessionsByRecency(
             if (tail != null && tail.key == "__recent__") {
                 groups[groups.lastIndex] = tail.copy(sessions = tail.sessions + s)
             } else {
-                groups += SessionGroup("__recent__", null, listOf(s))
+                val headLabel = sessionBucketHeadLabel(sessionBucket(times[0], nowMs))
+                groups += SessionGroup("__recent__", headLabel, listOf(s))
             }
             continue
         }
@@ -465,8 +474,9 @@ fun groupSessionsByRecency(
             lastKey = bucket.key
             val alreadyEmitted = emitted.contains(bucket.key)
             emitted.add(bucket.key)
-            val label = if (groups.isNotEmpty() && !alreadyEmitted) sessionBucketLabel(bucket) else null
-            groups += SessionGroup(bucket.key, label, emptyList())
+            if (!alreadyEmitted) {
+                groups += SessionGroup(bucket.key, sessionBucketLabel(bucket), emptyList())
+            }
         }
         val tail = groups.last()
         groups[groups.lastIndex] = tail.copy(sessions = tail.sessions + s)
