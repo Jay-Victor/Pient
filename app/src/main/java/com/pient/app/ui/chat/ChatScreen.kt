@@ -187,7 +187,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     )
 
     // ── Operit PhoneLayout 数值逐项对齐（enableNavigationAnimation 分支）──
-    // 主内容：平移 82% 宽 + 下移 12dp + 缩放 0.92 + Y 轴 -7° + 圆角 24dp + 阴影 18dp；
+    // 主内容：平移 82% 宽 + 下移 12dp + 缩放 0.92 + Y 轴 -7° + 圆角 24dp
+    // （Operit 原版还有 18dp 阴影，用户 2026-09-09 定：多余，移除）；
     // 抽屉：-宽→0 滑入 + 缩放 0.92→1 + 透明度 0.72→1；scrim 透明（Operit 同款）。
     val contentTranslationX = when {
         use3D -> drawerWidth * (0.82f * progress)
@@ -198,7 +199,6 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     val contentScale = if (use3D) 1f - (0.08f * progress) else 1f
     val contentRotationY = if (use3D) -7f * progress else 0f
     val contentCornerRadius = if (use3D) 24.dp * progress else 0.dp
-    val contentShadowElevation = if (use3D) 18.dp * progress else 0.dp
     val drawerOffset = -drawerWidth * (1f - progress)
     val drawerScale = if (use3D) 0.92f + (0.08f * progress) else 1f
     val drawerAlpha = if (use3D) 0.72f + (0.28f * progress) else 1f
@@ -257,7 +257,6 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                             transformOrigin = TransformOrigin(0f, 0.5f)
                             clip = true
                             shape = RoundedCornerShape(contentCornerRadius)
-                            shadowElevation = contentShadowElevation.toPx()
                         }
                         useCompress -> Modifier
                             .width(configuration.screenWidthDp.dp - drawerWidth * progress)
