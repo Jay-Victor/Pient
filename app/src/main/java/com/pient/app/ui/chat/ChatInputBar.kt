@@ -27,7 +27,6 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
-import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.OpenInFull
@@ -157,7 +156,7 @@ fun ChatInputBar(
                 decorationBox = { inner ->
                     if (text.text.isEmpty()) {
                         Text(
-                            "给 Agent 派个任务…（支持中文全拼输入）",
+                            "给 Agent 派个任务…",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.9f),
                         )
@@ -310,7 +309,6 @@ fun ChatInputBar(
 internal fun attachmentIcon(kind: AttachmentKind): ImageVector = when (kind) {
     AttachmentKind.IMAGE -> Icons.Outlined.Image
     AttachmentKind.FILE -> Icons.Outlined.Description
-    AttachmentKind.FOLDER -> Icons.Outlined.Folder
     AttachmentKind.URL -> Icons.Outlined.Link
 }
 

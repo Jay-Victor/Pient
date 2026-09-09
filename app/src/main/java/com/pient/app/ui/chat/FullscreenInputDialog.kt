@@ -115,7 +115,7 @@ fun FullscreenInputDialog(
                 decorationBox = { inner ->
                     if (text.text.isEmpty()) {
                         Text(
-                            "给 Agent 派个任务…（支持中文全拼输入）",
+                            "给 Agent 派个任务…",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.9f),
                         )

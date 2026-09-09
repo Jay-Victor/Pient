@@ -305,15 +305,15 @@ fun relativeTimeLabel(updatedAt: Long, now: Long = System.currentTimeMillis()): 
     }
 }
 
-/** 附件类型（chip 图标展示与提交语义区分；2026-08-28 菜单扩为五项） */
+/** 附件类型（chip 图标展示与提交语义区分；2026-09-09 移除「文件夹」项，菜单四项） */
 enum class AttachmentKind(val emoji: String) {
-    IMAGE("🖼 "), FILE("📎 "), FOLDER("📁 "), URL("🔗 ")
+    IMAGE("🖼 "), FILE("📎 "), URL("🔗 ")
 }
 
 data class Attachment(
     val name: String,
     val kind: AttachmentKind = AttachmentKind.FILE,
-    /** 真实位置：本地文件绝对路径（照片/拍照/文件落盘后）或 content URI（文件夹）；null = 无实体 */
+    /** 真实位置：本地文件绝对路径（照片/拍照/文件落盘后）；null = 无实体 */
     val path: String? = null,
 )
 

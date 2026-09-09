@@ -19,7 +19,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AttachFile
-import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.PhotoCamera
@@ -43,7 +42,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
-import androidx.documentfile.provider.DocumentFile
 import com.pient.app.data.Attachment
 import com.pient.app.data.AttachmentKind
 import com.pient.app.data.ChatState
@@ -60,10 +58,10 @@ import java.util.Locale
  * - 位置与模型选择器浮层一致：贴屏幕右侧（右距屏 6dp）、底部锚定到输入栏上缘、
  *   同宽 268.8dp、16dp 圆角 PientPanel，点外关闭（无 scrim）。
  * - 行式菜单（Hermes DropdownMenuItem 规格）：顶部小标签「附加」→
- *   照片 / 拍照 / 文件 / 文件夹 / URL（图标 16dp + 标题 13sp，行高 34dp）→
+ *   照片 / 拍照 / 文件 / URL（图标 16dp + 标题 13sp，行高 34dp）→
  *   分隔线 → 底部提示「提示：输入 @ 以内联引用文件。」（Hermes tipPre+tipPost）。
  * - 2026-09-09：照片 = 系统照片选择器（多选，PickMultipleVisualMedia）；拍照 = 相机
- *   （FileProvider 暂存后落盘）；文件 = 系统文件选择器；文件夹 = SAF 目录选择器；
+ *   （FileProvider 暂存后落盘）；文件 = 系统文件选择器；
  *   选中的照片/文件复制到应用私有目录 filesDir/attachments/ 持久保存（Attachment.path）。
  */
 @Composable
@@ -126,25 +124,6 @@ fun AttachmentSheet(
         onClose()
     }
 
-    // ── 文件夹（SAF 目录选择器；不复制，记录 tree URI 供后续引用） ──
-    val folderPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree(),
-    ) { uri: Uri? ->
-        if (uri == null) return@rememberLauncherForActivityResult // 取消
-        val doc = DocumentFile.fromTreeUri(context, uri)
-        val name = doc?.name ?: uri.lastPathSegment ?: "文件夹"
-        try {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
-            )
-        } catch (e: SecurityException) {
-            // 个别 provider 不支持持久化授权，按本次会话临时授权继续
-        }
-        chatState.attachments += Attachment(name, AttachmentKind.FOLDER, uri.toString())
-        onClose()
-    }
-
     PientPanel(
         modifier = modifier
             .padding(end = 6.dp, bottom = bottomOffset)
@@ -182,9 +161,6 @@ fun AttachmentSheet(
             }
             AttachMenuItem(Icons.Outlined.AttachFile, "文件") {
                 filePicker.launch(arrayOf("*/*"))
-            }
-            AttachMenuItem(Icons.Outlined.Folder, "文件夹") {
-                folderPicker.launch(null)
             }
             AttachMenuItem(Icons.Outlined.Link, "URL") {
                 onOpenUrlDialog()
