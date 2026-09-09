@@ -1,6 +1,9 @@
 package com.pient.app.ui.files
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
@@ -96,23 +99,36 @@ fun FilesPanel(chatState: ChatState) {
             )
         }
 
-        // 右侧文件树浮层（同窗口）：全屏 scrim + 面板浮于其上（聊天页侧栏同款结构）。
-        // ★ scrim 必须全屏铺底——面板左侧圆角弧裁掉的三角区露出的是 scrim 压暗后的
-        // 底层内容；若 scrim 只铺到面板左缘（旧 Row 并排结构），圆角旁会有未压暗的
-        // 「亮缝」（2026-09-02 用户反馈）。
+        // 右侧文件树浮层（同窗口）：遮罩淡入 + 面板从右滑入，两层独立动画同 tween(300ms)
+        // 逐帧同步（聊天页侧栏同款拆层：原同盒 slide 时遮罩随盒从右推出，动画前半程
+        // 左侧屏幕无遮罩）。★ scrim 必须全屏铺底——面板左侧圆角弧裁掉的三角区露出的
+        // 是 scrim 压暗后的底层内容；若 scrim 只铺到面板左缘（旧 Row 并排结构），
+        // 圆角旁会有未压暗的「亮缝」（2026-09-02 用户反馈）。
+        AnimatedVisibility(
+            visible = treeOpen,
+            enter = fadeIn(tween(durationMillis = 300)),
+            exit = fadeOut(tween(durationMillis = 300)),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.scrim)
+                    .clickable(onClick = { treeOpen = false }),
+            )
+        }
         AnimatedVisibility(
             visible = treeOpen,
             // 从右水平滑入/滑出（聊天页侧栏水平滑出模式的镜像转场）
-            enter = slideInHorizontally(initialOffsetX = { it }),
-            exit = slideOutHorizontally(targetOffsetX = { it }),
+            enter = slideInHorizontally(
+                initialOffsetX = { it },
+                animationSpec = tween(durationMillis = 300),
+            ),
+            exit = slideOutHorizontally(
+                targetOffsetX = { it },
+                animationSpec = tween(durationMillis = 300),
+            ),
         ) {
             Box(Modifier.fillMaxSize()) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.scrim)
-                        .clickable(onClick = { treeOpen = false }),
-                )
                 FileTreePanel(
                     chatState,
                     onClose = { treeOpen = false },
