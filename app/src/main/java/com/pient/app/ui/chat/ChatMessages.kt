@@ -35,9 +35,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -120,12 +120,12 @@ fun ChatMessages(
     messages: List<Msg>,
     isStreaming: Boolean,
     streamDraft: String,
+    listState: LazyListState,
+    onOpenLocator: () -> Unit,
     onMessageLongPress: ((Int, Rect) -> Unit)? = null,
 ) {
-    val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var showPermDemo by remember { mutableStateOf(false) }
-    var locatorOpen by remember { mutableStateOf(false) }
 
     // 进入会话（首次组合 / 切换会话）默认滚到消息最底部（2026-09-09 用户定：
     // 恢复会话后视口停在最上方不符合使用习惯）。以列表引用判切换——
@@ -296,17 +296,16 @@ fun ChatMessages(
             val anchorLineColor = MaterialTheme.colorScheme.outlineVariant
             val anchorDotColor = MaterialTheme.colorScheme.primary
             val navigatorBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-            val navigatorShape = RoundedCornerShape(
-                topStart = 14.dp,
-                bottomStart = 14.dp,
-                topEnd = 8.dp,
-                bottomEnd = 8.dp,
-            )
+            // 胶囊形状（2026-09-09 修复不对称）：原 14/14/8/8 左圆角 14dp 使左缘直边
+            // 只有 28dp（右缘 40dp），且 14+8=22dp > 胶囊宽 20dp——上下两角弧在顶/底边
+            // 中段互相交叉出凹口。对称胶囊的圆角上限 = 宽的一半 = 10dp（两端半圆、左右直边
+            // 各 36dp 等长），四角取 10dp。
+            val navigatorShape = RoundedCornerShape(10.dp)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .padding(end = 8.dp)
-                    .clickable(onClick = { locatorOpen = true }),
+                    .clickable(onClick = onOpenLocator),
             ) {
                 // 进度胶囊：竖线 + 圆点
                 Box(
@@ -345,257 +344,6 @@ fun ChatMessages(
         }
     }
 
-    // 消息定位弹窗：定位统计 + 搜索 + 筛选（全部/用户/AI）+ 逐条卡片列表 + 点击跳转
-    if (locatorOpen) {
-        val currentIndex = listState.firstVisibleItemIndex.coerceIn(0, (messages.size - 1).coerceAtLeast(0))
-        var locatorQuery by remember { mutableStateOf("") }
-        var locatorFilter by remember { mutableStateOf(0) } // 0=全部 1=用户 2=AI
-        var filterMenuOpen by remember { mutableStateOf(false) }
-        val filtered = remember(messages, locatorQuery, locatorFilter) {
-            messages.mapIndexedNotNull { i, msg ->
-                val query = locatorQuery.trim()
-                val passFilter = when (locatorFilter) {
-                    1 -> msg is Msg.User
-                    2 -> msg !is Msg.User
-                    else -> true
-                }
-                val passQuery = query.isEmpty() || locatorPreview(msg).contains(query, ignoreCase = true)
-                if (passFilter && passQuery) i to msg else null
-            }
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.scrim)
-                .clickable(onClick = { locatorOpen = false }),
-            contentAlignment = Alignment.Center,
-        ) {
-            PientPanel(
-                modifier = Modifier
-                    .widthIn(max = 400.dp)
-                    .padding(horizontal = 24.dp)
-                    .clickable(
-                        onClick = {},
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() },
-                    ),
-                shape = MaterialTheme.shapes.medium,
-            ) {
-                Column(Modifier.padding(20.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            "消息定位",
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            "当前定位：第${currentIndex + 1}/${messages.size}条",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    // 搜索框 + 筛选器（全部/用户/AI）
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .weight(1f)
-                                .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(10.dp))
-                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                        ) {
-                            Icon(
-                                Icons.Outlined.Search, null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp),
-                            )
-                            BasicTextField(
-                                value = locatorQuery,
-                                onValueChange = { locatorQuery = it },
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onBackground),
-                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                singleLine = true,
-                                modifier = Modifier.weight(1f).padding(start = 8.dp),
-                                decorationBox = { inner ->
-                                    Box {
-                                        if (locatorQuery.isEmpty()) {
-                                            Text(
-                                                "搜索消息",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                        inner()
-                                    }
-                                },
-                            )
-                            if (locatorQuery.isNotEmpty()) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .clickable(onClick = { locatorQuery = "" })
-                                        .padding(4.dp),
-                                ) {
-                                    Icon(
-                                        Icons.Outlined.Close, "清空搜索",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(14.dp),
-                                    )
-                                }
-                            }
-                        }
-                        // 筛选器：图案按键 + 选项列表卡片（全部/用户/AI）
-                        Box {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .background(
-                                        if (locatorFilter != 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
-                                        else MaterialTheme.colorScheme.surfaceContainerLow,
-                                        RoundedCornerShape(10.dp),
-                                    )
-                                    .border(
-                                        1.dp,
-                                        if (locatorFilter != 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-                                        else MaterialTheme.colorScheme.outlineVariant,
-                                        RoundedCornerShape(10.dp),
-                                    )
-                                    .clickable(onClick = { filterMenuOpen = true }),
-                            ) {
-                                Icon(
-                                    Icons.Outlined.FilterList, "筛选消息",
-                                    tint = if (locatorFilter != 0) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                            DropdownMenu(
-                                expanded = filterMenuOpen,
-                                onDismissRequest = { filterMenuOpen = false },
-                            ) {
-                                listOf("全部消息", "用户消息", "AI消息").forEachIndexed { i, label ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                label,
-                                                color = if (i == locatorFilter) MaterialTheme.colorScheme.primary
-                                                else MaterialTheme.colorScheme.onBackground,
-                                            )
-                                        },
-                                        onClick = {
-                                            locatorFilter = i
-                                            filterMenuOpen = false
-                                        },
-                                        leadingIcon = null,
-                                        trailingIcon = if (i == locatorFilter) {
-                                            {
-                                                Icon(
-                                                    Icons.Outlined.Check, null,
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(16.dp),
-                                                )
-                                            }
-                                        } else null,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    // 跳转提示（搜索行下方）
-                    Text(
-                        "点击任意一条消息即可快速跳转",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                    if (filtered.isEmpty()) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier.fillMaxWidth().height(160.dp).padding(top = 8.dp),
-                        ) {
-                            Text(
-                                "无匹配消息",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 10.dp)
-                                .heightIn(max = 340.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            itemsIndexed(filtered, key = { _, p -> p.first }) { _, (idx, msg) ->
-                                val isCurrent = idx == currentIndex
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(44.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(
-                                            if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
-                                            else MaterialTheme.colorScheme.surfaceContainerLow,
-                                        )
-                                        .border(
-                                            1.dp,
-                                            if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-                                            else MaterialTheme.colorScheme.outlineVariant,
-                                            RoundedCornerShape(10.dp),
-                                        )
-                                        .clickable(onClick = {
-                                            locatorOpen = false
-                                            scope.launch { listState.animateScrollToItem(idx) }
-                                        })
-                                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Column(modifier = Modifier.width(32.dp)) {
-                                            Text(
-                                                "${idx + 1}",
-                                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFont),
-                                                color = if (isCurrent) MaterialTheme.colorScheme.primary
-                                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                            Text(
-                                                if (msg is Msg.User) "用户" else "AI",
-                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                        Text(
-                                            locatorPreview(msg),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onBackground,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f).padding(start = 8.dp),
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    PientButton(
-                        "取消",
-                        onClick = { locatorOpen = false },
-                        primary = false,
-                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    )
-                }
-            }
-        }
-    }
-
     // 权限请求弹窗（原型演示：工具调用时的三选授权，设计计划第 7 章）
     if (showPermDemo) {
         Box(Modifier.fillMaxSize()) {
@@ -608,6 +356,271 @@ fun ChatMessages(
                 onDeny = { showPermDemo = false },
                 onDismiss = { showPermDemo = false },
             )
+        }
+    }
+}
+
+// ───────────────────────────── 消息定位弹窗 ─────────────────────────────
+
+/**
+ * 消息定位弹窗：定位统计 + 搜索 + 筛选（全部/用户/AI）+ 逐条卡片列表 + 点击跳转。
+ * 2026-09-09 从 ChatMessages 内部提升为独立组件、由 ChatScreen 根层 zIndex 3 挂载：
+ * 原实现挂在 ChatMessages（顶栏下方消息区 Box）内，弹窗 scrim 的 fillMaxSize 被压到
+ * 消息区范围，只压暗消息列表、盖不住顶栏与系统状态栏；提升到页面根层后 scrim 全屏铺开
+ * （状态栏图标属系统层绘制，仍在 scrim 之上保持可见，这是 Android 的正常行为）。
+ */
+@Composable
+fun MessageLocatorDialog(
+    messages: List<Msg>,
+    listState: LazyListState,
+    onDismiss: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val currentIndex = listState.firstVisibleItemIndex.coerceIn(0, (messages.size - 1).coerceAtLeast(0))
+    var locatorQuery by remember { mutableStateOf("") }
+    var locatorFilter by remember { mutableStateOf(0) } // 0=全部 1=用户 2=AI
+    var filterMenuOpen by remember { mutableStateOf(false) }
+    val filtered = remember(messages, locatorQuery, locatorFilter) {
+        messages.mapIndexedNotNull { i, msg ->
+            val query = locatorQuery.trim()
+            val passFilter = when (locatorFilter) {
+                1 -> msg is Msg.User
+                2 -> msg !is Msg.User
+                else -> true
+            }
+            val passQuery = query.isEmpty() || locatorPreview(msg).contains(query, ignoreCase = true)
+            if (passFilter && passQuery) i to msg else null
+        }
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.scrim)
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center,
+    ) {
+        PientPanel(
+            modifier = Modifier
+                .widthIn(max = 400.dp)
+                .padding(horizontal = 24.dp)
+                .clickable(
+                    onClick = {},
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                ),
+            shape = MaterialTheme.shapes.medium,
+        ) {
+            Column(Modifier.padding(20.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        "消息定位",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        "当前定位：第${currentIndex + 1}/${messages.size}条",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                // 搜索框 + 筛选器（全部/用户/AI）
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .weight(1f)
+                            .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(10.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Search, null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        BasicTextField(
+                            value = locatorQuery,
+                            onValueChange = { locatorQuery = it },
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onBackground),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f).padding(start = 8.dp),
+                            decorationBox = { inner ->
+                                Box {
+                                    if (locatorQuery.isEmpty()) {
+                                        Text(
+                                            "搜索消息",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    inner()
+                                }
+                            },
+                        )
+                        if (locatorQuery.isNotEmpty()) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .clickable(onClick = { locatorQuery = "" })
+                                    .padding(4.dp),
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Close, "清空搜索",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
+                        }
+                    }
+                    // 筛选器：图案按键 + 选项列表卡片（全部/用户/AI）
+                    Box {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(34.dp)
+                                .background(
+                                    if (locatorFilter != 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+                                    else MaterialTheme.colorScheme.surfaceContainerLow,
+                                    RoundedCornerShape(10.dp),
+                                )
+                                .border(
+                                    1.dp,
+                                    if (locatorFilter != 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                                    else MaterialTheme.colorScheme.outlineVariant,
+                                    RoundedCornerShape(10.dp),
+                                )
+                                .clickable(onClick = { filterMenuOpen = true }),
+                        ) {
+                            Icon(
+                                Icons.Outlined.FilterList, "筛选消息",
+                                tint = if (locatorFilter != 0) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = filterMenuOpen,
+                            onDismissRequest = { filterMenuOpen = false },
+                        ) {
+                            listOf("全部消息", "用户消息", "AI消息").forEachIndexed { i, label ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            label,
+                                            color = if (i == locatorFilter) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onBackground,
+                                        )
+                                    },
+                                    onClick = {
+                                        locatorFilter = i
+                                        filterMenuOpen = false
+                                    },
+                                    leadingIcon = null,
+                                    trailingIcon = if (i == locatorFilter) {
+                                        {
+                                            Icon(
+                                                Icons.Outlined.Check, null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                        }
+                                    } else null,
+                                )
+                            }
+                        }
+                    }
+                }
+                // 跳转提示（搜索行下方）
+                Text(
+                    "点击任意一条消息即可快速跳转",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                if (filtered.isEmpty()) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.fillMaxWidth().height(160.dp).padding(top = 8.dp),
+                    ) {
+                        Text(
+                            "无匹配消息",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp)
+                            .heightIn(max = 340.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        itemsIndexed(filtered, key = { _, p -> p.first }) { _, (idx, msg) ->
+                            val isCurrent = idx == currentIndex
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(44.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                                        else MaterialTheme.colorScheme.surfaceContainerLow,
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                                        else MaterialTheme.colorScheme.outlineVariant,
+                                        RoundedCornerShape(10.dp),
+                                    )
+                                    .clickable(onClick = {
+                                        onDismiss()
+                                        scope.launch { listState.animateScrollToItem(idx) }
+                                    })
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(modifier = Modifier.width(32.dp)) {
+                                        Text(
+                                            "${idx + 1}",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFont),
+                                            color = if (isCurrent) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        Text(
+                                            if (msg is Msg.User) "用户" else "AI",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Text(
+                                        locatorPreview(msg),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onBackground,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f).padding(start = 8.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                PientButton(
+                    "取消",
+                    onClick = onDismiss,
+                    primary = false,
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                )
+            }
         }
     }
 }

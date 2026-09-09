@@ -16,6 +16,8 @@ import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -92,6 +94,10 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     var contextCardOpen by remember { mutableStateOf(false) }
     var systemPromptOpen by remember { mutableStateOf(false) }
     var urlDialogOpen by remember { mutableStateOf(false) }
+    // 消息定位弹窗与消息区滚动状态（2026-09-09 提升到 ChatScreen 根层：弹窗 scrim 需全屏
+    // 覆盖顶栏与系统状态栏；listState 提升后 ChatMessages 与定位弹窗共享同一滚动状态）
+    var locatorOpen by remember { mutableStateOf(false) }
+    val messagesListState = rememberLazyListState()
     // 长按消息 → fork 上下文菜单（2026-09-02 分支功能设计 §4）：目标消息下标 + 气泡根坐标
     var forkMenuTarget by remember { mutableStateOf<Pair<Int, Rect>?>(null) }
     // 输入框文本与 @ 引用状态（提升到 ChatScreen：引用卡为悬浮浮层）。
@@ -131,7 +137,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     // 仅当聊天主页无任何浮层/抽屉打开时拦截；浮层打开时返回键维持原默认行为。
     val overlaysClosed = !modelSheetOpen && !attachSheetOpen && !contextCardOpen &&
         !systemPromptOpen && !urlDialogOpen && forkMenuTarget == null && !mentionOpen &&
-        !chatState.drawerOpen
+        !chatState.drawerOpen && !locatorOpen
     var lastBackPress by remember { mutableStateOf(0L) }
     BackHandler(enabled = overlaysClosed) {
         val now = System.currentTimeMillis()
@@ -270,6 +276,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                     Panel.MESSAGES -> MessagesPanel(
                         chatState = chatState,
                         scope = scope,
+                        listState = messagesListState,
+                        onOpenLocator = { locatorOpen = true },
                         onMessageLongPress = { idx, rect -> forkMenuTarget = idx to rect },
                         onConfigureAi = {
                             attachSheetOpen = false
@@ -517,6 +525,16 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                 )
             }
         }
+        // ── 消息定位弹窗（2026-09-09 从消息区提升到页面根层：scrim 全屏覆盖顶栏与状态栏） ──
+        if (locatorOpen) {
+            Box(Modifier.fillMaxSize().zIndex(3f)) {
+                MessageLocatorDialog(
+                    messages = chatState.currentMessages,
+                    listState = messagesListState,
+                    onDismiss = { locatorOpen = false },
+                )
+            }
+        }
     }
 }
 
@@ -641,6 +659,8 @@ private fun ChatTopBar(
 private fun MessagesPanel(
     chatState: ChatState,
     scope: kotlinx.coroutines.CoroutineScope,
+    listState: LazyListState,
+    onOpenLocator: () -> Unit,
     onMessageLongPress: (Int, Rect) -> Unit,
     onConfigureAi: () -> Unit,
 ) {
@@ -654,6 +674,8 @@ private fun MessagesPanel(
         messages = chatState.currentMessages,
         isStreaming = chatState.isStreaming,
         streamDraft = chatState.streamDraft,
+        listState = listState,
+        onOpenLocator = onOpenLocator,
         onMessageLongPress = onMessageLongPress,
     )
 }
