@@ -7,6 +7,8 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -369,38 +371,50 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                 }
             }
         } else {
-            // 水平滑出（默认）：现状 AnimatedVisibility 不变
+            // 水平滑出（默认）：抽屉滑动与遮罩淡入拆为两层、同规格 tween(300ms) 同步——
+            // 遮罩固定全屏铺底（覆盖顶栏/输入 dock 全区域）只做透明度 0→1 淡入，
+            // 抽屉从左滑入；抽屉滑出到位时遮罩恰好完全显现（原实现两者同盒滑动，
+            // 遮罩随盒从左边推出：动画前半程右侧屏幕无遮罩）。
             AnimatedVisibility(
                 visible = chatState.drawerOpen,
-                enter = slideInHorizontally(initialOffsetX = { -it }),
-                exit = slideOutHorizontally(targetOffsetX = { -it }),
+                enter = fadeIn(tween(durationMillis = 300)),
+                exit = fadeOut(tween(durationMillis = 300)),
                 modifier = Modifier.zIndex(2f),
             ) {
-                // ★ 遮罩层必须全屏铺底（Operit 同款：scrim zIndex 1.5 全屏、面板 zIndex 2 在其上）：
-                //   面板背景从状态栏下开始 + 右侧圆角 → 面板布局盒内无背景的区域
-                //   （状态栏条 / 右上右下圆角缺口）透出全屏 scrim 的压暗效果，罩子才完整。
-                Box {
-                    // ★ 遮罩层全屏铺底 + 点外关闭（x > 侧栏宽 296dp 才收起；侧栏内
-                    //   空白区穿透下来的点击被忽略，修复「点侧栏内某些位置抽屉收起」）
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.scrim)
-                            .pointerInput(Unit) {
-                                detectTapGestures { offset ->
-                                    if (offset.x > drawerWidthPx) chatState.drawerOpen = false
-                                }
-                            },
-                    )
-                    SessionDrawer(
-                        chatState = chatState,
-                        onClose = { chatState.drawerOpen = false },
-                        onNavigate = { route ->
-                            chatState.drawerOpen = false
-                            nav.navigate(route)
+                // ★ 遮罩层全屏铺底 + 点外关闭（x > 侧栏宽 296dp 才收起；侧栏内
+                //   空白区穿透下来的点击被忽略，修复「点侧栏内某些位置抽屉收起」）。
+                //   淡入淡出不改变布局位置——x 判定基于未偏移的布局坐标，始终有效。
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.scrim)
+                        .pointerInput(Unit) {
+                            detectTapGestures { offset ->
+                                if (offset.x > drawerWidthPx) chatState.drawerOpen = false
+                            }
                         },
-                    )
-                }
+                )
+            }
+            AnimatedVisibility(
+                visible = chatState.drawerOpen,
+                enter = slideInHorizontally(
+                    initialOffsetX = { -it },
+                    animationSpec = tween(durationMillis = 300),
+                ),
+                exit = slideOutHorizontally(
+                    targetOffsetX = { -it },
+                    animationSpec = tween(durationMillis = 300),
+                ),
+                modifier = Modifier.zIndex(2f),
+            ) {
+                SessionDrawer(
+                    chatState = chatState,
+                    onClose = { chatState.drawerOpen = false },
+                    onNavigate = { route ->
+                        chatState.drawerOpen = false
+                        nav.navigate(route)
+                    },
+                )
             }
         }
 
