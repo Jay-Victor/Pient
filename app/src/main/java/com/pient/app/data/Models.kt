@@ -276,33 +276,202 @@ data class Session(
     val id: String,
     val title: String,
     val project: String,
-    val relativeTime: String,
     val running: Boolean = false,
     val pinned: Boolean = false,
-    /** 最后活动时间（epoch ms；会话记录持久化与跨重启时间分组依据，0 = 创建时刻） */
+    /** 最后活动时间（epoch ms；会话记录持久化与侧栏相对时间/时间分组依据，0 = 创建时刻） */
     val updatedAt: Long = 0,
 )
 
-/** 会话最后活动时间 → 侧栏显示标签（跨重启后由 updatedAt 派生） */
+// ─────────────────────────────────────────────────────────────
+// 侧栏双重时间编码（2026-09-09 对齐 Hermes 桌面端 lib/time.ts + session-date-groups.ts）：
+// 行级 = 相对时长标签（coarseElapsed 最粗单位 floor：刚刚 / N分 / N时 / N天）；
+// 分组 = 日历桶（4AM 日界；头部最新活动 run 簇无标签，其下依次 今天早些时候 / 昨天 /
+// 本周 / 上周 / 本月 / N月 / YYYY年N月，每桶一个分组头，第一个渲染的分组永不贴标签）。
+// ─────────────────────────────────────────────────────────────
+
+const val MINUTE_MS = 60_000L
+const val HOUR_MS = 3_600_000L
+const val DAY_MS = 86_400_000L
+
+/** 人一天不以午夜为界——凌晨活动归前一天晚上（睡眠追踪器同款 4AM 日界） */
+private const val DAY_ROLLOVER_HOUR = 4
+
+/**
+ * 会话最后活动时间 → 侧栏行相对时间标签（Hermes session-row formatAge 同口径：
+ * coarseElapsed 最粗单位、floor 取整；不足 1 分钟一律「刚刚」——秒级粒度不进侧栏）。
+ */
 fun relativeTimeLabel(updatedAt: Long, now: Long = System.currentTimeMillis()): String {
     val t = if (updatedAt <= 0) now else updatedAt
     val diff = (now - t).coerceAtLeast(0)
     return when {
-        diff < 2 * 60_000L -> "刚刚"
-        diff < 60 * 60_000L -> "${diff / 60_000L}m"
-        else -> {
-            val cal = java.util.Calendar.getInstance().apply { timeInMillis = t }
-            val nowCal = java.util.Calendar.getInstance().apply { timeInMillis = now }
-            when {
-                cal.get(java.util.Calendar.YEAR) == nowCal.get(java.util.Calendar.YEAR) &&
-                    cal.get(java.util.Calendar.DAY_OF_YEAR) == nowCal.get(java.util.Calendar.DAY_OF_YEAR) -> "今天"
-                // 昨天
-                cal.get(java.util.Calendar.YEAR) == nowCal.get(java.util.Calendar.YEAR) &&
-                    cal.get(java.util.Calendar.DAY_OF_YEAR) == nowCal.get(java.util.Calendar.DAY_OF_YEAR) - 1 -> "昨天"
-                else -> "更早"
+        diff < MINUTE_MS -> "刚刚"
+        diff < HOUR_MS -> "${diff / MINUTE_MS}分"
+        diff < DAY_MS -> "${diff / HOUR_MS}时"
+        else -> "${diff / DAY_MS}天"
+    }
+}
+
+/** 时间分组桶类型（Hermes SessionBucketKind 同款） */
+enum class SessionBucketKind { TODAY, YESTERDAY, THIS_WEEK, LAST_WEEK, THIS_MONTH, MONTH, MONTH_YEAR }
+
+/** 日历桶：key = 唯一分桶键；at = 会话名义日起点（epoch ms，月份标签格式化用） */
+data class SessionBucket(val key: String, val kind: SessionBucketKind, val at: Long)
+
+/** 侧栏时间分组输出：label = null 表示头部无标签 run 簇（不渲染分组头） */
+data class SessionGroup(val key: String, val label: String?, val sessions: List<Session>)
+
+private fun startOfLocalDay(ms: Long): Long {
+    val c = java.util.Calendar.getInstance().apply { timeInMillis = ms }
+    c.set(java.util.Calendar.HOUR_OF_DAY, 0)
+    c.set(java.util.Calendar.MINUTE, 0)
+    c.set(java.util.Calendar.SECOND, 0)
+    c.set(java.util.Calendar.MILLISECOND, 0)
+    return c.timeInMillis
+}
+
+/** 名义日起点：4AM 日界（周六凌晨 1 点 → 归周五） */
+private fun nominalDayStart(ms: Long): Long = startOfLocalDay(ms - DAY_ROLLOVER_HOUR * HOUR_MS)
+
+/** 本地日历周起点（weekStartsOn 用 JS getDay 惯例 0=周日…6=周六；中文环境周一=1） */
+private fun startOfLocalWeek(ms: Long, weekStartsOn: Int): Long {
+    val c = java.util.Calendar.getInstance().apply { timeInMillis = startOfLocalDay(ms) }
+    val jsDow = c.get(java.util.Calendar.DAY_OF_WEEK) - 1 // Calendar 1=周日…7=周六 → JS 0=周日…6=周六
+    val back = (jsDow - weekStartsOn + 7) % 7
+    c.add(java.util.Calendar.DAY_OF_YEAR, -back)
+    return c.timeInMillis
+}
+
+/**
+ * 粗日历桶（Hermes calendarBucket 同款，周起点默认周一）：今天 → 昨天 → 本周 →
+ * 上周 → 本月 → 月 → 月+年。粒度随年龄变粗；空区间不产生桶。
+ */
+fun sessionBucket(ms: Long, nowMs: Long, weekStartsOn: Int = 1): SessionBucket {
+    val nominal = nominalDayStart(ms)
+    val todayNominal = nominalDayStart(nowMs)
+    val dayDiff = Math.round((todayNominal - nominal).toDouble() / DAY_MS)
+
+    if (dayDiff <= 0) return SessionBucket("today", SessionBucketKind.TODAY, nominal)
+    if (dayDiff == 1L) return SessionBucket("yesterday", SessionBucketKind.YESTERDAY, nominal)
+
+    val weekStart = startOfLocalWeek(todayNominal, weekStartsOn)
+    if (nominal >= weekStart) return SessionBucket("this-week", SessionBucketKind.THIS_WEEK, nominal)
+
+    val prevWeekStart = java.util.Calendar.getInstance().apply { timeInMillis = weekStart }
+        .apply { add(java.util.Calendar.DAY_OF_YEAR, -7) }.timeInMillis
+    if (nominal >= prevWeekStart) return SessionBucket("last-week", SessionBucketKind.LAST_WEEK, nominal)
+
+    val d = java.util.Calendar.getInstance().apply { timeInMillis = nominal }
+    val now = java.util.Calendar.getInstance().apply { timeInMillis = todayNominal }
+    val sameYear = d.get(java.util.Calendar.YEAR) == now.get(java.util.Calendar.YEAR)
+    if (sameYear && d.get(java.util.Calendar.MONTH) == now.get(java.util.Calendar.MONTH)) {
+        return SessionBucket("this-month", SessionBucketKind.THIS_MONTH, nominal)
+    }
+
+    val ym = "${d.get(java.util.Calendar.YEAR)}-${d.get(java.util.Calendar.MONTH)}"
+    return if (sameYear) SessionBucket("m-$ym", SessionBucketKind.MONTH, nominal)
+    else SessionBucket("my-$ym", SessionBucketKind.MONTH_YEAR, nominal)
+}
+
+private val MONTH_NAMES = arrayOf(
+    "一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"
+)
+
+/** 桶的本地化分组标签（Hermes sessionBucketLabel 同款；固定相对文案 + 中文月份名） */
+fun sessionBucketLabel(bucket: SessionBucket): String = when (bucket.kind) {
+    SessionBucketKind.TODAY -> "今天早些时候"
+    SessionBucketKind.YESTERDAY -> "昨天"
+    SessionBucketKind.THIS_WEEK -> "本周"
+    SessionBucketKind.LAST_WEEK -> "上周"
+    SessionBucketKind.THIS_MONTH -> "本月"
+    SessionBucketKind.MONTH -> {
+        val c = java.util.Calendar.getInstance().apply { timeInMillis = bucket.at }
+        MONTH_NAMES[c.get(java.util.Calendar.MONTH)]
+    }
+    SessionBucketKind.MONTH_YEAR -> {
+        val c = java.util.Calendar.getInstance().apply { timeInMillis = bucket.at }
+        "${c.get(java.util.Calendar.YEAR)}年${MONTH_NAMES[c.get(java.util.Calendar.MONTH)]}"
+    }
+}
+
+private const val TARGET_HEAD_SESSIONS = 5
+private const val MIN_RUN_BREAK_MS = 30 * MINUTE_MS
+private const val MAX_RUN_GAP_MS = 8 * HOUR_MS
+
+/**
+ * 头部无标签 run 簇切割点（Hermes headRunCutoffMs 同款；times 降序）：
+ * 候选切点 = ≥30min 的活动间隙（>8h 的间隙强制断 run 并停止向后搜索），
+ * 选「头部会话数（log 尺度）最接近 5」的切点；run 结束处与下方会话同日历桶时
+ * 头部溶解。返回头内最老时间戳；Long.MIN_VALUE = 全列表一个 run（无组头）；
+ * Long.MAX_VALUE = 无头簇（日历桶全接管）。
+ */
+private fun headRunCutoffMs(times: List<Long>, nowMs: Long): Long {
+    var bestIdx = -1
+    var bestScore = Double.POSITIVE_INFINITY
+    var runEnded = false
+    for (i in 1 until times.size) {
+        val gap = times[i - 1] - times[i]
+        val endsRun = gap > MAX_RUN_GAP_MS
+        if (gap >= MIN_RUN_BREAK_MS || endsRun) {
+            val score = Math.abs(Math.log(i.toDouble() / TARGET_HEAD_SESSIONS))
+            if (score < bestScore) {
+                bestScore = score
+                bestIdx = i
+                runEnded = endsRun
             }
         }
+        if (endsRun) break
     }
+    if (bestIdx == -1) return Long.MIN_VALUE
+    if (runEnded) {
+        val headBucket = sessionBucket(times[0], nowMs)
+        val belowBucket = sessionBucket(times[bestIdx], nowMs)
+        if (headBucket.key == belowBucket.key) return Long.MAX_VALUE
+    }
+    return times[bestIdx - 1]
+}
+
+/**
+ * 侧栏时间分组（Hermes groupEntriesByRecency 同款）：列表按最后活动降序；
+ * 头部 run 簇不贴标签；其下按日历桶分组，每桶一个分组头，第一个渲染的分组
+ * 永不贴标签（头部为空时第一个日历桶即无头）。置顶会话不参与（置顶段独立）。
+ */
+fun groupSessionsByRecency(
+    unpinned: List<Session>,
+    nowMs: Long = System.currentTimeMillis(),
+): List<SessionGroup> {
+    val sorted = unpinned.sortedByDescending { if (it.updatedAt <= 0) nowMs else it.updatedAt }
+    if (sorted.isEmpty()) return emptyList()
+    val times = sorted.map { if (it.updatedAt <= 0) nowMs else it.updatedAt }
+    val cutoff = headRunCutoffMs(times, nowMs)
+
+    val groups = mutableListOf<SessionGroup>()
+    var lastKey: String? = null
+    val emitted = mutableSetOf<String>()
+
+    for ((idx, s) in sorted.withIndex()) {
+        val ms = times[idx]
+        if (ms >= cutoff) {
+            lastKey = "__recent__"
+            val tail = groups.lastOrNull()
+            if (tail != null && tail.key == "__recent__") {
+                groups[groups.lastIndex] = tail.copy(sessions = tail.sessions + s)
+            } else {
+                groups += SessionGroup("__recent__", null, listOf(s))
+            }
+            continue
+        }
+        val bucket = sessionBucket(ms, nowMs)
+        if (bucket.key != lastKey) {
+            lastKey = bucket.key
+            val alreadyEmitted = emitted.contains(bucket.key)
+            emitted.add(bucket.key)
+            val label = if (groups.isNotEmpty() && !alreadyEmitted) sessionBucketLabel(bucket) else null
+            groups += SessionGroup(bucket.key, label, emptyList())
+        }
+        val tail = groups.last()
+        groups[groups.lastIndex] = tail.copy(sessions = tail.sessions + s)
+    }
+    return groups
 }
 
 /** 附件类型（chip 图标展示与提交语义区分；2026-09-09 移除「文件夹」项，菜单四项） */

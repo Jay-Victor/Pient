@@ -105,7 +105,7 @@ class ChatState {
         val proj = currentProject ?: return "" // 未绑定项目：调用方 Toast 提示
         val list = sessions.getOrPut(proj) { mutableStateListOf() }
         val id = "s-${System.currentTimeMillis()}"
-        list.add(0, Session(id, "新建会话", proj, "刚刚", updatedAt = System.currentTimeMillis()))
+        list.add(0, Session(id, "新建会话", proj, updatedAt = System.currentTimeMillis()))
         currentSessionId = id
         messagesBySession[id] = mutableStateListOf()
         activePanel = Panel.MESSAGES
@@ -128,7 +128,7 @@ class ChatState {
             val t = firstUserText.trim().take(20)
             if (firstUserText.trim().length > 20) "$t…" else t
         } else old.title
-        list[i] = old.copy(title = autoTitle, relativeTime = relativeTimeLabel(now, now), updatedAt = now)
+        list[i] = old.copy(title = autoTitle, updatedAt = now)
     }
 
     fun renameSession(id: String, title: String) {
@@ -395,7 +395,7 @@ class ChatState {
         val newId = "s-${System.currentTimeMillis()}"
         val prefix = src.subList(0, entryIndex + 1).toMutableStateList()
         val list = sessions.getOrPut(proj) { mutableStateListOf() }
-        list.add(0, Session(newId, forkTitle(src, entryIndex), proj, "刚刚"))
+        list.add(0, Session(newId, forkTitle(src, entryIndex), proj, updatedAt = System.currentTimeMillis()))
         messagesBySession[newId] = prefix
         currentSessionId = newId
         activePanel = Panel.MESSAGES

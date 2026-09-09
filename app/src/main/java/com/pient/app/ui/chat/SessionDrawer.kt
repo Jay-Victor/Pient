@@ -96,6 +96,8 @@ import com.pient.app.data.ChatState
 import com.pient.app.data.Project
 import com.pient.app.data.ProjectFiles
 import com.pient.app.data.Session
+import com.pient.app.data.groupSessionsByRecency
+import com.pient.app.data.relativeTimeLabel
 import com.pient.app.ui.components.DetailRow
 import com.pient.app.ui.components.PientDialog
 import com.pient.app.ui.components.ProjectInfo
@@ -680,7 +682,7 @@ fun SessionDrawer(
             } else {
                 val pinned = projectSessions.filter { it.pinned }
                 val unpinned = projectSessions.filter { !it.pinned }
-                val groups = groupSessions(unpinned)
+                val groups = groupSessionsByRecency(unpinned)
                 if (pinned.isEmpty() && groups.isEmpty()) {
                     item {
                         Text(
@@ -720,28 +722,14 @@ fun SessionDrawer(
                         )
                     }
                 }
-                groups.forEach { (group, list) ->
-                    item(key = "g-$group") {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                        ) {
-                            Text(
-                                group,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            // 分组标题旁的横线（2026-08-30）
-                            Box(
-                                Modifier
-                                    .weight(1f)
-                                    .padding(start = 8.dp)
-                                    .height(1.dp)
-                                    .background(MaterialTheme.colorScheme.outlineVariant),
-                            )
+                groups.forEach { group ->
+                    // 头部无标签 run 簇（label=null）不渲染分组头
+                    group.label?.let { label ->
+                        item(key = "g-${group.key}") {
+                            TimeGroupHeader(label)
                         }
                     }
-                    items(list, key = { it.id }) { s ->
+                    items(group.sessions, key = { it.id }) { s ->
                         SessionRow(
                             session = s,
                             active = s.id == chatState.currentSessionId,
@@ -1028,19 +1016,26 @@ fun SessionDrawer(
     }
 }
 
-/** 会话分组：刚刚/Xm/今天 → 今天；昨天；更早 */
-private fun groupSessions(list: List<Session>): List<Pair<String, List<Session>>> {
-    val today = list.filter {
-        it.relativeTime == "刚刚" || it.relativeTime.endsWith("m") || it.relativeTime == "今天"
-    }
-    val yesterday = list.filter { it.relativeTime == "昨天" }
-    val older = list.filter {
-        it.relativeTime !in listOf("刚刚", "昨天", "今天") && !it.relativeTime.endsWith("m")
-    }
-    return buildList {
-        if (today.isNotEmpty()) add("今天" to today)
-        if (yesterday.isNotEmpty()) add("昨天" to yesterday)
-        if (older.isNotEmpty()) add("更早" to older)
+/** 时间分组头：分组文字 + 右侧横线（2026-08-30 样式；仅时间分组加线，置顶头保持纯文字） */
+@Composable
+private fun TimeGroupHeader(label: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        // 分组标题旁的横线（贯穿至抽屉右缘）
+        Box(
+            Modifier
+                .weight(1f)
+                .padding(start = 8.dp)
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant),
+        )
     }
 }
 
@@ -1156,9 +1151,9 @@ private fun SessionRow(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        // 最后聊天时间（参考 Hermes 会话列表时间统计）
+        // 最后活动相对时间（Hermes 会话行口径：刚刚/N分/N时/N天，渲染时由 updatedAt 派生）
         Text(
-            session.relativeTime,
+            relativeTimeLabel(session.updatedAt),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(end = 4.dp),

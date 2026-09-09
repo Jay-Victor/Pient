@@ -102,7 +102,6 @@ object ChatStore {
                             id = s.optString("id"),
                             title = s.optString("title", "新建会话"),
                             project = s.optString("project", key),
-                            relativeTime = relativeTimeLabel(updatedAt),
                             running = false, // 运行态不跨重启
                             pinned = s.optBoolean("pinned", false),
                             updatedAt = updatedAt,
