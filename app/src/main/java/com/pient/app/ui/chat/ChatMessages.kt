@@ -1,11 +1,14 @@
 package com.pient.app.ui.chat
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -37,6 +40,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Check
@@ -44,11 +48,15 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.ForkRight
 import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Summarize
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -69,7 +77,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.input.pointer.pointerInput
@@ -136,7 +144,7 @@ fun ChatMessages(
     // 长按超时配置（消息长按 fork 检测用）
     val viewConfig = LocalViewConfiguration.current
 
-    // 定位器显示时机（Operit 参考）：用户滑动（含惯性滚动）时显示，停止滚动 1.2s 后隐藏
+    // 定位器显示时机（Operit 参考）：用户滑动（含惯性滚动）时显示，停止滚动 2s 后隐藏
     var navigatorVisible by remember { mutableStateOf(false) }
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }
@@ -144,7 +152,7 @@ fun ChatMessages(
                 if (inProgress) {
                     navigatorVisible = true
                 } else {
-                    delay(1200)
+                    delay(2000)
                     navigatorVisible = false
                 }
             }
@@ -276,8 +284,14 @@ fun ChatMessages(
             }
         }
 
-        // 消息定位器（Operit 参考：右缘胶囊 + 进度线点；滑动即显示，停止 1.2s 后隐藏）
-        if (navigatorVisible) {
+        // 消息定位器（Operit 参考：右缘胶囊 + 进度线点；滑动即显示，停止 1.2s 后隐藏。
+        // 2026-09-09：①离右缘留 8dp 空隙防误触；②出现=从右缘滑出、消失=滑回右缘）
+        AnimatedVisibility(
+            visible = navigatorVisible,
+            modifier = Modifier.align(Alignment.CenterEnd),
+            enter = slideInHorizontally(initialOffsetX = { it }),
+            exit = slideOutHorizontally(targetOffsetX = { it }),
+        ) {
             val bubbleColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f)
             val anchorLineColor = MaterialTheme.colorScheme.outlineVariant
             val anchorDotColor = MaterialTheme.colorScheme.primary
@@ -291,23 +305,9 @@ fun ChatMessages(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
+                    .padding(end = 8.dp)
                     .clickable(onClick = { locatorOpen = true }),
             ) {
-                // 指向右缘的小三角箭头
-                Canvas(
-                    modifier = Modifier
-                        .offset(x = (-1).dp)
-                        .size(width = 8.dp, height = 16.dp),
-                ) {
-                    val arrowPath = Path().apply {
-                        moveTo(0f, 0f)
-                        lineTo(size.width, size.height / 2f)
-                        lineTo(0f, size.height)
-                        close()
-                    }
-                    drawPath(path = arrowPath, color = bubbleColor)
-                }
                 // 进度胶囊：竖线 + 圆点
                 Box(
                     modifier = Modifier
@@ -345,9 +345,24 @@ fun ChatMessages(
         }
     }
 
-    // 消息定位弹窗：列表预览 + 点击跳转
+    // 消息定位弹窗：定位统计 + 搜索 + 筛选（全部/用户/AI）+ 逐条卡片列表 + 点击跳转
     if (locatorOpen) {
-        val currentIndex = listState.firstVisibleItemIndex
+        val currentIndex = listState.firstVisibleItemIndex.coerceIn(0, (messages.size - 1).coerceAtLeast(0))
+        var locatorQuery by remember { mutableStateOf("") }
+        var locatorFilter by remember { mutableStateOf(0) } // 0=全部 1=用户 2=AI
+        var filterMenuOpen by remember { mutableStateOf(false) }
+        val filtered = remember(messages, locatorQuery, locatorFilter) {
+            messages.mapIndexedNotNull { i, msg ->
+                val query = locatorQuery.trim()
+                val passFilter = when (locatorFilter) {
+                    1 -> msg is Msg.User
+                    2 -> msg !is Msg.User
+                    else -> true
+                }
+                val passQuery = query.isEmpty() || locatorPreview(msg).contains(query, ignoreCase = true)
+                if (passFilter && passQuery) i to msg else null
+            }
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -367,51 +382,206 @@ fun ChatMessages(
                 shape = MaterialTheme.shapes.medium,
             ) {
                 Column(Modifier.padding(20.dp)) {
-                    Text(
-                        "消息定位",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 12.dp)
-                            .heightIn(max = 340.dp),
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        itemsIndexed(messages, key = { i, _ -> i }) { idx, msg ->
-                            val isCurrent = idx == currentIndex
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(
-                                        if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
-                                        else Color.Transparent,
-                                    )
-                                    .clickable(onClick = {
-                                        locatorOpen = false
-                                        scope.launch {
-                                            listState.animateScrollToItem(idx)
+                        Text(
+                            "消息定位",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            "当前定位：第${currentIndex + 1}/${messages.size}条",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    // 搜索框 + 筛选器（全部/用户/AI）
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(10.dp))
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                        ) {
+                            Icon(
+                                Icons.Outlined.Search, null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            BasicTextField(
+                                value = locatorQuery,
+                                onValueChange = { locatorQuery = it },
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onBackground),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                singleLine = true,
+                                modifier = Modifier.weight(1f).padding(start = 8.dp),
+                                decorationBox = { inner ->
+                                    Box {
+                                        if (locatorQuery.isEmpty()) {
+                                            Text(
+                                                "搜索消息",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
                                         }
-                                    })
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        inner()
+                                    }
+                                },
+                            )
+                            if (locatorQuery.isNotEmpty()) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .clickable(onClick = { locatorQuery = "" })
+                                        .padding(4.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Close, "清空搜索",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                }
+                            }
+                        }
+                        // 筛选器：图案按键 + 选项列表卡片（全部/用户/AI）
+                        Box {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .background(
+                                        if (locatorFilter != 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+                                        else MaterialTheme.colorScheme.surfaceContainerLow,
+                                        RoundedCornerShape(10.dp),
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (locatorFilter != 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                                        else MaterialTheme.colorScheme.outlineVariant,
+                                        RoundedCornerShape(10.dp),
+                                    )
+                                    .clickable(onClick = { filterMenuOpen = true }),
                             ) {
-                                Text(
-                                    "${idx + 1}",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFont),
-                                    color = if (isCurrent) MaterialTheme.colorScheme.primary
+                                Icon(
+                                    Icons.Outlined.FilterList, "筛选消息",
+                                    tint = if (locatorFilter != 0) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.width(30.dp),
+                                    modifier = Modifier.size(18.dp),
                                 )
-                                Text(
-                                    locatorPreview(msg),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (isCurrent) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onBackground,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f).padding(start = 6.dp),
-                                )
+                            }
+                            DropdownMenu(
+                                expanded = filterMenuOpen,
+                                onDismissRequest = { filterMenuOpen = false },
+                            ) {
+                                listOf("全部消息", "用户消息", "AI消息").forEachIndexed { i, label ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                label,
+                                                color = if (i == locatorFilter) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.onBackground,
+                                            )
+                                        },
+                                        onClick = {
+                                            locatorFilter = i
+                                            filterMenuOpen = false
+                                        },
+                                        leadingIcon = null,
+                                        trailingIcon = if (i == locatorFilter) {
+                                            {
+                                                Icon(
+                                                    Icons.Outlined.Check, null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(16.dp),
+                                                )
+                                            }
+                                        } else null,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    // 跳转提示（搜索行下方）
+                    Text(
+                        "点击任意一条消息即可快速跳转",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    if (filtered.isEmpty()) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.fillMaxWidth().height(160.dp).padding(top = 8.dp),
+                        ) {
+                            Text(
+                                "无匹配消息",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp)
+                                .heightIn(max = 340.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            itemsIndexed(filtered, key = { _, p -> p.first }) { _, (idx, msg) ->
+                                val isCurrent = idx == currentIndex
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(44.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                                            else MaterialTheme.colorScheme.surfaceContainerLow,
+                                        )
+                                        .border(
+                                            1.dp,
+                                            if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                                            else MaterialTheme.colorScheme.outlineVariant,
+                                            RoundedCornerShape(10.dp),
+                                        )
+                                        .clickable(onClick = {
+                                            locatorOpen = false
+                                            scope.launch { listState.animateScrollToItem(idx) }
+                                        })
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Column(modifier = Modifier.width(32.dp)) {
+                                            Text(
+                                                "${idx + 1}",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFont),
+                                                color = if (isCurrent) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                            Text(
+                                                if (msg is Msg.User) "用户" else "AI",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                        Text(
+                                            locatorPreview(msg),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onBackground,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f).padding(start = 8.dp),
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
