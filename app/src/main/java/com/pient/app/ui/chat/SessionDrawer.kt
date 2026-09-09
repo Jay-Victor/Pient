@@ -58,6 +58,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.LinkOff
+import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
@@ -98,6 +99,7 @@ import com.pient.app.data.ChatState
 import com.pient.app.data.Project
 import com.pient.app.data.ProjectFiles
 import com.pient.app.data.Session
+import com.pient.app.data.SessionGroup
 import com.pient.app.data.groupSessionsByRecency
 import com.pient.app.data.relativeTimeLabel
 import com.pient.app.ui.components.DetailRow
@@ -741,18 +743,52 @@ fun SessionDrawer(
                         }
                     }
                 }
-                groups.forEach { group ->
-                    // 每个分组（含头部 run 簇）都有标签：组头整行点击折叠/展开，
-                    // 折叠时组内会话隐藏（2026-09-09 用户要求头部也贴标签，如「今天」）
+                // ── 渐进揭示（2026-09-09 用户要求）──
+                // 默认仅显示最近分组（展开）+ 次新分组（折叠，内容空）；折叠组下方右侧
+                // 横向三点按键，每点揭示 5 个会话；组完全揭示后下一更老分组解锁接替；
+                // 全部组揭示完三点消失。组头点击仍可手动全展开/折叠（展开 = 全揭示）。
+                val rendered = mutableListOf<Pair<SessionGroup, Int>>() // (组, 可见会话数)
+                for ((i, g) in groups.withIndex()) {
+                    val collapsed = g.key in chatState.collapsedTimeGroups
+                    val visible = when {
+                        collapsed -> 0
+                        i == 0 -> g.sessions.size // 最近组恒全显示
+                        else -> minOf(chatState.timeGroupRevealed[g.key] ?: 0, g.sessions.size)
+                    }
+                    if (i >= 2) {
+                        // 更老组：前一渲染组完全揭示才解锁
+                        val prev = rendered.last().first
+                        val prevCollapsed = prev.key in chatState.collapsedTimeGroups
+                        val prevRevealed = chatState.timeGroupRevealed[prev.key] ?: 0
+                        val prevComplete = !prevCollapsed && prevRevealed >= prev.sessions.size
+                        if (!prevComplete) break
+                    }
+                    rendered += g to visible
+                }
+                val moreGroup = rendered.lastOrNull()?.let { last ->
+                    if (rendered.size >= 2 && last.second < last.first.sessions.size) last.first else null
+                }
+
+                rendered.forEach { (group, visible) ->
+                    // 内容隐藏 = 手动折叠或渐进未揭示（visible=0）；箭头与点击行为按此统一
+                    val hidden = group.key in chatState.collapsedTimeGroups || visible == 0
                     item(key = "g-${group.key}") {
                         TimeGroupHeader(
                             label = group.label,
-                            collapsed = group.key in chatState.collapsedTimeGroups,
-                            onToggle = { chatState.toggleTimeGroup(group.key) },
+                            collapsed = hidden,
+                            onToggle = {
+                                if (hidden) {
+                                    // 展开 = 全揭示（渐进三点与组头点击互不打架）
+                                    chatState.collapsedTimeGroups.remove(group.key)
+                                    chatState.timeGroupRevealed[group.key] = group.sessions.size
+                                } else {
+                                    chatState.collapsedTimeGroups.add(group.key)
+                                }
+                            },
                         )
                     }
-                    if (group.key !in chatState.collapsedTimeGroups) {
-                        items(group.sessions, key = { it.id }) { s ->
+                    if (visible > 0) {
+                        items(group.sessions.take(visible), key = { it.id }) { s ->
                             SessionRow(
                                 session = s,
                                 active = s.id == chatState.currentSessionId,
@@ -768,6 +804,26 @@ fun SessionDrawer(
                                 onTogglePin = { chatState.togglePin(s.id) },
                                 onRename = { renameFor = s.id },
                                 onDeleteRequest = { deleteConfirmFor = s.id },
+                            )
+                        }
+                    }
+                }
+                // 横向三点「显示更多」按键（挂在最后一个折叠渐进组下方靠右；整行可点）
+                moreGroup?.let { mg ->
+                    item(key = "g-more-${mg.key}") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { chatState.revealMoreTimeGroup(mg.key, mg.sessions.size) }
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            Icon(
+                                Icons.Outlined.MoreHoriz, "显示更多会话",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .padding(horizontal = 20.dp, vertical = 6.dp)
+                                    .size(18.dp),
                             )
                         }
                     }

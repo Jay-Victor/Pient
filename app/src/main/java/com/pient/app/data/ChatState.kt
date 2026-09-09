@@ -180,6 +180,16 @@ class ChatState {
         if (key in collapsedTimeGroups) collapsedTimeGroups.remove(key) else collapsedTimeGroups.add(key)
     }
 
+    // 时间分组渐进揭示（2026-09-09 用户要求）：三点按键每点揭示 5 个会话；
+    // 组完全揭示后下一更老分组解锁为新的折叠渐进组。揭示即自动展开该组。
+    val timeGroupRevealed = mutableStateMapOf<String, Int>()
+
+    fun revealMoreTimeGroup(key: String, groupSize: Int) {
+        collapsedTimeGroups.remove(key)
+        val cur = timeGroupRevealed[key] ?: 0
+        timeGroupRevealed[key] = minOf(cur + 5, groupSize)
+    }
+
     /** 重命名项目：迁移 sessions 键、同步会话 project 字段与 currentProject；空名/重名忽略 */
     fun renameProject(oldName: String, newNameRaw: String) {
         val newName = newNameRaw.trim()
