@@ -697,44 +697,47 @@ fun SessionDrawer(
                     }
                 }
                 if (pinned.isNotEmpty()) {
+                    // 置顶分组头：与时间分组头同款（文字 + 折叠箭头 + 横线，2026-09-09 用户要求
+                    // 统一视觉；折叠键 = "pinned" 进 collapsedTimeGroups，与其他日历桶同机制）
                     item(key = "g-pinned") {
-                        Text(
-                            "置顶",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        TimeGroupHeader(
+                            label = "置顶",
+                            collapsed = "pinned" in chatState.collapsedTimeGroups,
+                            onToggle = { chatState.toggleTimeGroup("pinned") },
                         )
                     }
-                    items(pinned, key = { it.id }) { s ->
-                        SessionRow(
-                            session = s,
-                            active = s.id == chatState.currentSessionId,
-                            batchMode = batchMode,
-                            selected = s.id in selectedIds,
-                            onClick = {
-                                chatState.selectSession(s.id)
-                                onClose()
-                            },
-                            onToggleSelect = {
-                                if (s.id in selectedIds) selectedIds.remove(s.id) else selectedIds.add(s.id)
-                            },
-                            onTogglePin = { chatState.togglePin(s.id) },
-                            onRename = { renameFor = s.id },
-                            onDeleteRequest = { deleteConfirmFor = s.id },
-                        )
-                    }
-                    // 分隔线：置顶会话与下方时间分组列表隔开（2026-09-09 用户要求——
-                    // 置顶段与未置顶会话的视觉分界；仅两侧都有会话时渲染，全置顶时
-                    // 下方无内容可区分，不渲染悬线）
-                    if (groups.isNotEmpty()) {
-                        item(key = "g-pinned-divider") {
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 6.dp)
-                                    .height(1.dp)
-                                    .background(MaterialTheme.colorScheme.outlineVariant),
+                    if ("pinned" !in chatState.collapsedTimeGroups) {
+                        items(pinned, key = { it.id }) { s ->
+                            SessionRow(
+                                session = s,
+                                active = s.id == chatState.currentSessionId,
+                                batchMode = batchMode,
+                                selected = s.id in selectedIds,
+                                onClick = {
+                                    chatState.selectSession(s.id)
+                                    onClose()
+                                },
+                                onToggleSelect = {
+                                    if (s.id in selectedIds) selectedIds.remove(s.id) else selectedIds.add(s.id)
+                                },
+                                onTogglePin = { chatState.togglePin(s.id) },
+                                onRename = { renameFor = s.id },
+                                onDeleteRequest = { deleteConfirmFor = s.id },
                             )
+                        }
+                        // 分隔线：置顶会话与下方时间分组列表隔开（2026-09-09 用户要求——
+                        // 置顶段与未置顶会话的视觉分界；仅两侧都有会话且置顶段展开时渲染，
+                        // 全置顶或置顶折叠时无内容可区分，不渲染悬线）
+                        if (groups.isNotEmpty()) {
+                            item(key = "g-pinned-divider") {
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 6.dp)
+                                        .height(1.dp)
+                                        .background(MaterialTheme.colorScheme.outlineVariant),
+                                )
+                            }
                         }
                     }
                 }
@@ -1040,10 +1043,10 @@ fun SessionDrawer(
 }
 
 /**
- * 时间分组头：分组文字 + 折叠箭头 + 右侧横线（2026-08-30 样式；仅时间分组加线，
- * 置顶头保持纯文字）。2026-09-09 加折叠（Hermes SidebarDateDivider 同款）：
- * 整行可点切换折叠，箭头右=折叠 / 下=展开（chevron-right rotate-90 语义），
- * 折叠仅隐藏组内会话、组头保留；无标签组不渲染头（不可折叠）。
+ * 时间/置顶分组头：分组文字 + 折叠箭头 + 右侧横线（2026-08-30 样式）。
+ * 2026-09-09 加折叠（Hermes SidebarDateDivider 同款）：整行可点切换折叠，
+ * 箭头右=折叠 / 下=展开（chevron-right rotate-90 语义），折叠仅隐藏组内会话、
+ * 组头保留；无标签组不渲染头（不可折叠）。置顶分组复用本组件（键 "pinned"）。
  */
 @Composable
 private fun TimeGroupHeader(label: String, collapsed: Boolean, onToggle: () -> Unit) {
