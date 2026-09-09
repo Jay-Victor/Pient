@@ -1,9 +1,11 @@
 package com.pient.app.data
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -101,17 +103,21 @@ object AiBackend {
             authHeaders(cfg, this)
         }.build()
         val resp = execute(req)
-        resp.use { r ->
-            val body = r.body?.string().orEmpty()
-            if (!r.isSuccessful) throw AiException(httpError(r.code, body))
-            val root = JSONObject(body)
-            val arr = root.optJSONArray("data") ?: return emptyList()
-            val out = mutableListOf<String>()
-            for (i in 0 until arr.length()) {
-                val id = arr.optJSONObject(i)?.optString("id")?.trim()
-                if (!id.isNullOrEmpty() && id !in out) out += id
+        // ★ 响应体读取与 JSON 解析必须在 IO 线程：execute 恢复后协程继续跑在 Main 上，
+        //   慢网络/大响应会把整段下载+解析塞进主线程 → 卡顿/ANR（2026-09-09 修复）
+        return withContext(Dispatchers.IO) {
+            resp.use { r ->
+                val body = r.body?.string().orEmpty()
+                if (!r.isSuccessful) throw AiException(httpError(r.code, body))
+                val root = JSONObject(body)
+                val arr = root.optJSONArray("data") ?: return@withContext emptyList()
+                val out = mutableListOf<String>()
+                for (i in 0 until arr.length()) {
+                    val id = arr.optJSONObject(i)?.optString("id")?.trim()
+                    if (!id.isNullOrEmpty() && id !in out) out += id
+                }
+                out
             }
-            return out
         }
     }
 
@@ -130,13 +136,17 @@ object AiBackend {
             authHeaders(cfg, this)
         }.build()
         val resp = execute(req)
-        resp.use { r ->
-            val text = r.body?.string().orEmpty()
-            if (!r.isSuccessful) throw AiException(httpError(r.code, text))
-            return if (isAnthropicProtocol(cfg.endpoint)) {
-                parseAnthropicFull(JSONObject(text))
-            } else {
-                parseOpenAiFull(JSONObject(text))
+        // ★ 响应体读取与 JSON 解析必须在 IO 线程（同 listModels，2026-09-09 修复）：
+        //   非流式 = 一次性读完整个响应，慢网络/长回答下在主线程做会卡死 UI → ANR/退出
+        return withContext(Dispatchers.IO) {
+            resp.use { r ->
+                val text = r.body?.string().orEmpty()
+                if (!r.isSuccessful) throw AiException(httpError(r.code, text))
+                if (isAnthropicProtocol(cfg.endpoint)) {
+                    parseAnthropicFull(JSONObject(text))
+                } else {
+                    parseOpenAiFull(JSONObject(text))
+                }
             }
         }
     }

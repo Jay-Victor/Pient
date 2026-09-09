@@ -199,6 +199,11 @@ fun ChatInputBar(
                     style = MaterialTheme.typography.labelMedium,
                     color = if (streaming) MaterialTheme.colorScheme.onSurfaceVariant
                     else MaterialTheme.colorScheme.primary,
+                    // 模型名过长时截断：Text 无上限会按固有宽度把 chip 撑到整行，
+                    // 挤掉右侧上下文指示器/发送键（2026-09-09 修复）
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 120.dp),
                 )
                 // 箭头用 Material 图标（与模型弹窗卡片内一致）并可上下指示开合；
                 // 之前用文本字符 " ▾"，字形与弹窗内图标不一致（2026-08-27 修复）

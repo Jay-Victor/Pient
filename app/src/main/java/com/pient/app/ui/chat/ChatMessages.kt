@@ -62,6 +62,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -117,6 +118,19 @@ fun ChatMessages(
     val scope = rememberCoroutineScope()
     var showPermDemo by remember { mutableStateOf(false) }
     var locatorOpen by remember { mutableStateOf(false) }
+
+    // 进入会话（首次组合 / 切换会话）默认滚到消息最底部（2026-09-09 用户定：
+    // 恢复会话后视口停在最上方不符合使用习惯）。以列表引用判切换——
+    // 同一会话内的消息增删由下方跟随滚动 effect 处理，这里只认列表换新。
+    var lastList by remember { mutableStateOf<List<Msg>?>(null) }
+    LaunchedEffect(messages) {
+        if (messages !== lastList) {
+            lastList = messages
+            withFrameNanos { } // 等一帧布局完成再取 total（否则是旧值）
+            val total = listState.layoutInfo.totalItemsCount
+            if (total > 0) listState.scrollToItem(total - 1)
+        }
+    }
     // 各消息气泡的根坐标（长按菜单锚点；LazyColumn 回收后需重新上报）
     val bubbleBounds = remember { mutableStateMapOf<Int, Rect>() }
     // 长按超时配置（消息长按 fork 检测用）
@@ -140,7 +154,13 @@ fun ChatMessages(
         derivedStateOf {
             val info = listState.layoutInfo
             val last = info.totalItemsCount - 1
-            info.visibleItemsInfo.lastOrNull()?.index ?: 0 >= last - 1
+            val lastVisible = info.visibleItemsInfo.lastOrNull()
+            // 旧判定（lastVisible.index >= last-1）在最后一条消息比视口高时恒真：
+            // 视口无论停在哪，最后可见条目都是它 → 回到底部按钮永不出现（2026-09-09 修复）。
+            // 新判定 = 最后可见条目是列表末条（含 4dp 尾 spacer）且其底边贴近视口底（容差 16px）。
+            if (lastVisible == null) info.totalItemsCount <= 1
+            else lastVisible.index >= last - 1 &&
+                lastVisible.offset + lastVisible.size <= info.viewportEndOffset + 16
         }
     }
 
@@ -153,10 +173,21 @@ fun ChatMessages(
         }
     }
 
-    // 流式 / 新消息：位于底部时自动跟随（不打断用户上滚浏览）
-    LaunchedEffect(messages.size, streamDraft.length) {
-        if (atBottom && listState.layoutInfo.totalItemsCount > 0) {
-            listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1)
+    // 流式 / 新消息跟随滚动。2026-09-09 三轮修复（用户报障「发送后页面不上滑」）：
+    // 1. LaunchedEffect 在新条目完成布局前启动，layoutInfo 还是上一帧旧值——
+    //    先 withFrameNanos 等一帧布局完成，再取新 total 滚到底（旧实现滚到旧末尾=不动）；
+    // 2. 必须用 scrollToItem 瞬时滚动：animateScrollToItem 会被下一次重启（每个流式增量
+    //    都重启 effect）取消在半途 → 视口越拖越落后，回复完成时已不在底部、不再跟随；
+    // 3. 用户主动发送 = 无条件滚到底（用户想看自己的消息与回复；且 IME 弹出会把视口
+    //    压矮、让发送瞬间的 atBottom 变 false）；被动到达的回复才遵守「不打断上滚浏览」。
+    var prevCount by remember { mutableStateOf(messages.size) }
+    LaunchedEffect(messages.size, streamDraft.length, isStreaming) {
+        val userJustSent = messages.size > prevCount && messages.lastOrNull() is Msg.User
+        prevCount = messages.size
+        if (userJustSent || atBottom) {
+            withFrameNanos { }
+            val total = listState.layoutInfo.totalItemsCount
+            if (total > 0) listState.scrollToItem(total - 1)
         }
     }
 
@@ -219,7 +250,7 @@ fun ChatMessages(
             item { Spacer(Modifier.height(4.dp)) }
         }
 
-        // 回到底部（滚动中才出现）
+        // 回到底部（未在底部时出现；2026-09-09 用户定：图标用向下箭头 ↓）
         if (!atBottom) {
             Box(
                 modifier = Modifier
@@ -239,7 +270,7 @@ fun ChatMessages(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    Icons.Outlined.ExpandLess, "回到底部",
+                    Icons.Outlined.ExpandMore, "回到底部",
                     tint = MaterialTheme.colorScheme.primary,
                 )
             }
