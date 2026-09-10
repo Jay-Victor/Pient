@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="24dp" android:height="24dp"
     android:viewportWidth="24" android:viewportHeight="24">
-    <!-- simple-icons anthropic 官方品牌标(mono) -->
-    <path android:fillColor="#FF000000" android:fillType="nonZero" android:pathData="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z" />
+    <!-- 源：@lobehub/icons@5.6.0 Anthropic Mono（pi-web anthropic 映射；Mono 单色 tint）。路径已归一化为绝对命令。 -->
+    <path android:pathData="M 13.827 3.52 L 17.43 3.52 L 24 20 L 20.397 20 L 13.827 3.52 L 13.827 3.52 M 6.569 3.52 L 10.336 3.52 L 16.906 20 L 13.232 20 L 11.889 16.539 L 5.017 16.539 L 3.673 19.999 L 0 19.999 L 6.57 3.522 L 6.569 3.52 M 10.701 13.479 L 8.453 7.687 L 6.205 13.48 L 10.7 13.48 L 10.701 13.479" android:fillColor="#FF000000" android:fillType="evenOdd" />
 </vector>

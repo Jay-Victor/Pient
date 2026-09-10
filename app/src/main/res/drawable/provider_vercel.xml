@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="24dp" android:height="24dp"
     android:viewportWidth="24" android:viewportHeight="24">
-    <!-- simple-icons vercel 官方品牌标(mono) -->
-    <path android:fillColor="#FF000000" android:fillType="nonZero" android:pathData="m12 1.608 12 20.784H0Z" />
+    <!-- 源：@lobehub/icons@5.6.0 Vercel Mono（pi-web vercel-ai-gateway 映射；Mono 单色 tint）。路径已归一化为绝对命令。 -->
+    <path android:pathData="M 12 0 L 24 20.785 L 0 20.785 L 12 0" android:fillColor="#FF000000" android:fillType="evenOdd" />
 </vector>

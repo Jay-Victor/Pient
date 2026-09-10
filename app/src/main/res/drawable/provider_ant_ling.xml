@@ -3,38 +3,38 @@
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="24dp" android:height="24dp"
     android:viewportWidth="24" android:viewportHeight="24">
-    <!-- pi-web AntGroupColorIcon：translate(3,0) 已应用，渐变按 objectBoundingBox 精确映射 -->
-    <path android:pathData="M12.797 6.282a.451.451 0 01-.336-.315 1.019 1.019 0 010-.505c.156-.86.3-1.725.501-2.577.14-.7.42-1.367.823-1.96.305-.431.75-.746 1.262-.89.877-.217 1.24.629.937 1.348-.259.593-.877.914-1.334 1.348-.835.795-1.096 2.14-1.336 3.212a.427.427 0 01-.186.277.437.437 0 01-.331.062z" android:fillType="nonZero">
-            <aapt:attr name="android:fillColor">
-                <gradient android:type="linear"
-                    android:startX="13.577" android:startY="6.012"
-                    android:endX="14.675" android:endY="-0.022"
-                    android:startColor="#FF0066FF"
-                    android:centerColor="#FF1677FF"
-                    android:endColor="#FF04A6FF"
-                />
-            </aapt:attr>
+    <!-- 源：@lobehub/icons@5.6.0 AntGroup Color（pi-web PROVIDER_ICONS 的 ant-ling 映射；translate(3) 已应用、objectBoundingBox 渐变已换算到 viewport 坐标）。路径已归一化为绝对命令。 -->
+    <path android:pathData="M 12.797 6.282 A 0.451 0.451 0 0 1 12.461 5.967 A 1.019 1.019 0 0 1 12.461 5.462 C 12.617 4.602 12.761 3.737 12.962 2.885 C 13.102 2.185 13.382 1.518 13.785 0.925 C 14.09 0.494 14.535 0.179 15.047 0.035 C 15.924 -0.182 16.287 0.664 15.984 1.383 C 15.725 1.976 15.107 2.297 14.65 2.731 C 13.815 3.526 13.554 4.871 13.314 5.943 A 0.427 0.427 0 0 1 13.128 6.22 A 0.437 0.437 0 0 1 12.797 6.282" android:fillType="nonZero">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear"
+                android:startX="13.577" android:startY="6.012"
+                android:endX="14.675" android:endY="-0.022"
+                android:startColor="#FF0066FF"
+                android:centerColor="#FF1677FF"
+                android:endColor="#FF04A6FF"
+            />
+        </aapt:attr>
     </path>
-    <path android:pathData="M9.334 4.672c.33-.121.682.146.946.297.278.145.587.219.901.214.231.01.466 0 .688.018 4.098.176 7.484 3.22 8.05 7.237.565 4.016-1.852 7.859-5.745 9.134-3.894 1.276-8.153-.38-10.126-3.935A8.339 8.339 0 013.133 7.081c.348-.278.716-.53 1.102-.755a8.404 8.404 0 001.318-.79c.28-.243.45-.742.781-.864zm4.406 2.15c-2.841.003-4.898 2.533-4.628 5.642.27 3.109 2.781 5.641 5.613 5.665 2.832.024 4.932-2.512 4.658-5.644-.273-3.133-2.802-5.666-5.643-5.663zm.357.57a4.707 4.707 0 013.304 1.446 5.703 5.703 0 011.643 3.49 4.841 4.841 0 01-1.141 3.705v.015a3.923 3.923 0 01-2.808 1.303 4.664 4.664 0 01-3.367-1.387 5.678 5.678 0 01-1.71-3.518 4.832 4.832 0 011.14-3.753 3.923 3.923 0 012.813-1.3h.126z" android:fillType="nonZero">
-            <aapt:attr name="android:fillColor">
-                <gradient android:type="linear"
-                    android:startX="3.744" android:startY="16.095"
-                    android:endX="19.042" android:endY="10.355"
-                    android:startColor="#FF0066FF"
-                    android:centerColor="#FF1677FF"
-                    android:endColor="#FF04A6FF"
-                />
-            </aapt:attr>
+    <path android:pathData="M 9.334 4.672 C 9.664 4.551 10.016 4.818 10.28 4.969 C 10.558 5.114 10.867 5.188 11.181 5.183 C 11.412 5.193 11.647 5.183 11.869 5.201 C 15.967 5.377 19.353 8.421 19.919 12.438 C 20.484 16.454 18.067 20.297 14.174 21.572 C 10.28 22.848 6.021 21.192 4.048 17.637 A 8.339 8.339 0 0 1 6.133 7.081 C 6.481 6.803 6.849 6.551 7.235 6.326 A 8.404 8.404 0 0 0 8.553 5.536 C 8.833 5.293 9.003 4.794 9.334 4.672 L 9.334 4.672 M 13.74 6.822 C 10.899 6.825 8.842 9.355 9.112 12.464 C 9.382 15.573 11.893 18.105 14.725 18.129 C 17.557 18.153 19.657 15.617 19.383 12.485 C 19.11 9.352 16.581 6.819 13.74 6.822 L 13.74 6.822 M 14.097 7.392 A 4.707 4.707 0 0 1 17.401 8.838 A 5.703 5.703 0 0 1 19.044 12.328 A 4.841 4.841 0 0 1 17.903 16.033 L 17.903 16.048 A 3.923 3.923 0 0 1 15.095 17.351 A 4.664 4.664 0 0 1 11.728 15.964 A 5.678 5.678 0 0 1 10.018 12.446 A 4.832 4.832 0 0 1 11.158 8.693 A 3.923 3.923 0 0 1 13.971 7.393 L 14.097 7.393 L 14.097 7.392" android:fillType="nonZero">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear"
+                android:startX="3.744" android:startY="16.095"
+                android:endX="19.042" android:endY="10.355"
+                android:startColor="#FF0066FF"
+                android:centerColor="#FF1677FF"
+                android:endColor="#FF04A6FF"
+            />
+        </aapt:attr>
     </path>
-    <path android:pathData="M5.346 2.054a1.26 1.26 0 01.384-.594.842.842 0 011.165.11c.694.82.169 2.078.142 3.02.013.805.208 1.597.57 2.318.084.134.147.279.186.43a.539.539 0 01-.3.577c-.345.17-.568-.19-.709-.446-.324-.6-.617-1.216-.877-1.846a8.698 8.698 0 01-.618-1.987 7.523 7.523 0 01-.051-.37 3.717 3.717 0 01-.024-.34 2.506 2.506 0 01.132-.872z" android:fillType="nonZero">
-            <aapt:attr name="android:fillColor">
-                <gradient android:type="linear"
-                    android:startX="6.669" android:startY="7.909"
-                    android:endX="6.403" android:endY="1.368"
-                    android:startColor="#FF0066FF"
-                    android:centerColor="#FF1677FF"
-                    android:endColor="#FF04A6FF"
-                />
-            </aapt:attr>
+    <path android:pathData="M 5.346 2.054 A 1.26 1.26 0 0 1 5.73 1.46 A 0.842 0.842 0 0 1 6.895 1.57 C 7.589 2.39 7.064 3.648 7.037 4.59 C 7.05 5.395 7.245 6.187 7.607 6.908 C 7.691 7.042 7.754 7.187 7.793 7.338 A 0.539 0.539 0 0 1 7.493 7.915 C 7.148 8.085 6.925 7.725 6.784 7.469 C 6.46 6.869 6.167 6.253 5.907 5.623 A 8.698 8.698 0 0 1 5.289 3.636 A 7.523 7.523 0 0 1 5.238 3.266 A 3.717 3.717 0 0 1 5.214 2.926 A 2.506 2.506 0 0 1 5.346 2.054 L 5.346 2.054" android:fillType="nonZero">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear"
+                android:startX="6.669" android:startY="7.909"
+                android:endX="6.403" android:endY="1.368"
+                android:startColor="#FF0066FF"
+                android:centerColor="#FF1677FF"
+                android:endColor="#FF04A6FF"
+            />
+        </aapt:attr>
     </path>
 </vector>
