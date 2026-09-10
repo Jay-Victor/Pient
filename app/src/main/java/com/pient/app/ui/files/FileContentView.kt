@@ -1,6 +1,9 @@
 package com.pient.app.ui.files
 
+import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.Canvas
@@ -63,6 +66,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -159,12 +163,13 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
         tooLarge -> PaddedHint("文件超过 2MB，暂不支持预览")
         unreadable -> PaddedHint("二进制文件，暂不支持预览")
         node.imageHint != null -> ImagePlaceholder(node)
-        isMd && !chatState.sourceEditMode -> PaddedScroll {
+        isMd && !chatState.sourceEditMode -> PaddedScroll(horizontal = 32.dp, vertical = 24.dp) {
             MarkdownText(
                 chatState.fileDrafts[key] ?: textContent ?: "",
-                onFileLink = { path -> onLocalFileLink(chatState, path) },
+                onFileLink = { path -> onPreviewLink(context, chatState, path) },
                 modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                filePreview = true,   // 文件预览口径：pi-web .markdown-file-preview 标题字号
+                filePreview = true,   // 文件预览口径：pi-web .markdown-file-preview 标题字号 + 段落间距
+                imageResolver = { src -> resolveMarkdownImage(chatState, node, src) },
             )
         }
         // 文本/代码：可编辑；行号槽仅非纯文本显示（txt 无行号）
@@ -699,10 +704,14 @@ private fun DrawScope.drawEditorLineNumbers(
 
 // ───────────────────────────── 占位 / 容器 ─────────────────────────────
 
-/** 带页面留白的滚动容器（Markdown 渲染共用） */
+/** 带页面留白的滚动容器（Markdown 渲染共用；文件预览取 pi-web 的 24px 32px 内边距） */
 @Composable
-private fun PaddedScroll(content: @Composable () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 8.dp)) { content() }
+private fun PaddedScroll(
+    horizontal: Dp = 14.dp,
+    vertical: Dp = 8.dp,
+    content: @Composable () -> Unit,
+) {
+    Column(Modifier.fillMaxSize().padding(horizontal = horizontal, vertical = vertical)) { content() }
 }
 
 /** 提示占位（居中 + 页面留白） */
@@ -718,6 +727,46 @@ private fun PaddedHint(text: String) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+/** 预览页链接：http(s)/mailto 交系统浏览器；其余按项目文件树定位打开 */
+private fun onPreviewLink(context: Context, chatState: ChatState, path: String) {
+    val target = path.trim()
+    if (target.startsWith("http://") || target.startsWith("https://") || target.startsWith("mailto:")) {
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target))) }
+        return
+    }
+    onLocalFileLink(chatState, target)
+}
+
+/**
+ * Markdown 图片解析：相对路径（`./a.png`、`img/a.png`）按「当前 md 文件所在目录」逐级下钻文件树；
+ * 远端地址（http/https/data）与上跳路径（`..`）暂不支持（无图片加载库 / 需父级树）。
+ */
+private fun resolveMarkdownImage(chatState: ChatState, node: FileNode, src: String): FileNode? {
+    val clean = src.substringBefore('#').substringBefore('?').trim()
+    if (clean.isEmpty() || clean.startsWith("http://") || clean.startsWith("https://") ||
+        clean.startsWith("data:") || clean.startsWith("/")
+    ) {
+        return null
+    }
+    val segments = clean.split('/').filter { it.isNotEmpty() && it != "." }
+    if (segments.isEmpty() || segments.any { it == ".." }) return null
+    val root = chatState.fileTreeRoot ?: return null
+    var current = findParentNode(root, node) ?: return null
+    for (segment in segments) {
+        current = current.children.firstOrNull { it.name == segment } ?: return null
+    }
+    return current.takeIf { !it.isDir && it.ext in PREVIEW_IMAGE_EXTS }
+}
+
+/** 在文件树中定位某个节点的父目录 */
+private fun findParentNode(node: FileNode, target: FileNode): FileNode? {
+    for (child in node.children) {
+        if (child.name == target.name && child.source == target.source) return node
+        findParentNode(child, target)?.let { return it }
+    }
+    return null
 }
 
 /** 本地文件链接 → 在当前项目文件树中定位并打开（2026-09-02：真实树；无树直接忽略） */
