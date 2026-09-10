@@ -561,6 +561,13 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                     messages = chatState.currentMessages,
                     listState = messagesListState,
                     onDismiss = { locatorOpen = false },
+                    onJump = { idx ->
+                        // 跳转必须用 ChatScreen 根层的 scope：弹窗内 own scope 会随
+                        // onDismiss 一起被取消，animateScrollToItem 启动即中止（点条目不跳转的根因）。
+                        // 先关弹窗再滚动，跳转动画在聊天列表上完整可见。
+                        locatorOpen = false
+                        scope.launch { messagesListState.animateScrollToItem(idx) }
+                    },
                 )
             }
         }

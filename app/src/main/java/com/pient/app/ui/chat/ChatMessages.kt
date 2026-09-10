@@ -374,8 +374,8 @@ fun MessageLocatorDialog(
     messages: List<Msg>,
     listState: LazyListState,
     onDismiss: () -> Unit,
+    onJump: (Int) -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
     val currentIndex = listState.firstVisibleItemIndex.coerceIn(0, (messages.size - 1).coerceAtLeast(0))
     var locatorQuery by remember { mutableStateOf("") }
     var locatorFilter by remember { mutableStateOf(0) } // 0=全部 1=用户 2=AI
@@ -581,10 +581,7 @@ fun MessageLocatorDialog(
                                         else MaterialTheme.colorScheme.outlineVariant,
                                         RoundedCornerShape(10.dp),
                                     )
-                                    .clickable(onClick = {
-                                        onDismiss()
-                                        scope.launch { listState.animateScrollToItem(idx) }
-                                    })
+                                    .clickable(onClick = { onJump(idx) })
                                     .padding(horizontal = 10.dp, vertical = 6.dp),
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
