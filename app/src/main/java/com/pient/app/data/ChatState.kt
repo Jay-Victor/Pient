@@ -190,6 +190,16 @@ class ChatState {
         timeGroupRevealed[key] = minOf(cur + 5, groupSize)
     }
 
+    /**
+     * 一次性展开全部时间分组（批量模式进入时调用，2026-09-10 用户要求）：
+     * 清掉手动折叠 + 把每组的渐进揭示数拉满（揭示数缺省 0 = 渐进折叠，所以必须逐组写满，
+     * 不能 clear 掉 map）。批量勾选时不应有会话被折叠或渐进隐藏挡在列表外。
+     */
+    fun expandAllTimeGroups(groups: List<SessionGroup>) {
+        collapsedTimeGroups.clear()
+        groups.forEach { timeGroupRevealed[it.key] = it.sessions.size }
+    }
+
     /** 重命名项目：迁移 sessions 键、同步会话 project 字段与 currentProject；空名/重名忽略 */
     fun renameProject(oldName: String, newNameRaw: String) {
         val newName = newNameRaw.trim()

@@ -183,6 +183,9 @@ fun SessionDrawer(
     }
 
     val projectSessions = chatState.sessionsFor(chatState.currentProject ?: "")
+    // 时间分组（普通模式列表用；批量模式进入时也要用它把列表一次性全展开，故提到这里）
+    val pinnedSessions = projectSessions.filter { it.pinned }
+    val sessionGroups = groupSessionsByRecency(projectSessions.filter { !it.pinned })
     val allSelected = projectSessions.isNotEmpty() && selectedIds.containsAll(projectSessions.map { it.id })
     val searching = searchOpen && searchQuery.isNotBlank()
     val visibleSessions = if (searching) {
@@ -293,6 +296,9 @@ fun SessionDrawer(
                             selectedIds.clear()
                             searchOpen = false
                             searchQuery = ""
+                            // 批量模式：列表一次性全部展开——折叠组与渐进未揭示的会话
+                            // 也要可见可选（否则全选/勾选前得先手动展开，用户要求 2026-09-10）
+                            chatState.expandAllTimeGroups(sessionGroups)
                         })
                         .padding(6.dp),
                 ) {
@@ -684,9 +690,8 @@ fun SessionDrawer(
                     )
                 }
             } else {
-                val pinned = projectSessions.filter { it.pinned }
-                val unpinned = projectSessions.filter { !it.pinned }
-                val groups = groupSessionsByRecency(unpinned)
+                val pinned = pinnedSessions
+                val groups = sessionGroups
                 if (pinned.isEmpty() && groups.isEmpty()) {
                     item {
                         Text(
