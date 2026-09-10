@@ -17,7 +17,8 @@ import org.xmlpull.v1.XmlPullParser
  *
  * 与 Operit 的差异只在取字节的方式：Operit 走 Apache POI（`XWPFWordExtractor`，Android 上需 StAX/awt 兼容层），
  * 这里直接解 docx 的 `word/document.xml`（zip + XmlPullParser），零第三方依赖。
- * 同 Operit：只取正文顶层段落，表格内容不取（POI 的 `getParagraphs()` 不含表格）。
+ * 表格为 Pient 增补（Operit 的 docx 分支经 POI `getParagraphs()` 取不到表格单元格，表格内容不显示）：
+ * `w:tbl` → HTML `<table>`（`w:tr`/`w:tc` → `<tr><td>`，单元格内段落取文本），外壳补了表格边框样式。
  */
 object DocxConverter {
 
@@ -26,6 +27,9 @@ object DocxConverter {
     private const val HTML_HEAD =
         "<!DOCTYPE html>\n<html><head><meta charset=\"UTF-8\"><title>%s</title><style>" +
             "body { font-family: Arial, sans-serif; margin: 40px; }" +
+            // 表格为 Pient 增补（Operit 的 docx 分支经 POI 取不到表格），补边框样式保证可读
+            "table { border-collapse: collapse; }" +
+            "td, th { border: 1px solid #999999; padding: 4px 8px; vertical-align: top; }" +
             "</style></head><body>\n"
 
     /** 转成可渲染的 HTML；失败 / 非 docx 返回 null */
@@ -70,13 +74,17 @@ object DocxConverter {
         var run: Run? = null                    // 当前 run
         var inRunProps = false
         var inText = false
+        var table: StringBuilder? = null   // 当前表格 / 行 / 单元格（w:tbl → <table> 等）
+        var row: StringBuilder? = null
+        var cell: StringBuilder? = null
 
         var event = parser.eventType
         while (event != XmlPullParser.END_DOCUMENT) {
             when (event) {
                 XmlPullParser.START_TAG -> when (parser.localName()) {
-                    // 表格：Operit 口径不取（POI getParagraphs 不含表格单元格），整段跳过
-                    "tbl" -> skipElement(parser)
+                    "tbl" -> table = StringBuilder("<table>")
+                    "tr" -> row = StringBuilder("<tr>")
+                    "tc" -> cell = StringBuilder("<td>")
                     "p" -> runs = ArrayList()
                     "r" -> runs?.let { run = Run().also(it::add) }
                     "rPr" -> inRunProps = true
@@ -93,8 +101,26 @@ object DocxConverter {
                     "rPr" -> inRunProps = false
                     "t" -> inText = false
                     "r" -> run = null
-                    "p" -> runs?.let { out.add(paragraphHtml(it)) }
-                        .also { runs = null }
+                    "p" -> {
+                        val html = runs?.let { paragraphHtml(it) }.orEmpty()
+                        runs = null
+                        when {
+                            cell != null -> cell.append(html)          // 单元格内段落 → 该单元格
+                            table == null -> out.add(html)              // 正文段落
+                        }
+                    }
+                    "tc" -> {
+                        row?.append(cell?.append("</td>"))
+                        cell = null
+                    }
+                    "tr" -> {
+                        table?.append(row?.append("</tr>"))
+                        row = null
+                    }
+                    "tbl" -> {
+                        out.add(table?.append("</table>")?.toString().orEmpty())
+                        table = null
+                    }
                     "body" -> return out
                 }
             }
@@ -124,15 +150,6 @@ object DocxConverter {
     private fun onOff(parser: XmlPullParser): Boolean {
         val v = parser.getAttributeValue(null, "w:val") ?: return true
         return !(v == "0" || v.equals("false", ignoreCase = true) || v.equals("off", ignoreCase = true))
-    }
-
-    private fun skipElement(parser: XmlPullParser) {
-        val target = parser.depth
-        var event = parser.next()
-        while (event != XmlPullParser.END_DOCUMENT) {
-            if (event == XmlPullParser.END_TAG && parser.depth == target) return
-            event = parser.next()
-        }
     }
 
     private fun XmlPullParser.localName(): String = name.substringAfterLast(':')

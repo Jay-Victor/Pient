@@ -7,8 +7,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,18 +18,22 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -62,6 +68,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.pient.app.data.ChatState
+import com.pient.app.data.DocumentConverter
 import com.pient.app.data.DocxConverter
 import com.pient.app.data.FileNode
 import com.pient.app.data.ProjectFiles
@@ -89,7 +96,11 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
     val isVideo = node.ext in PREVIEW_VIDEO_EXTS
     val isAudio = node.ext in PREVIEW_AUDIO_EXTS
     val isMedia = isVideo || isAudio
-    val isDocx = node.ext in DOCX_EXTS
+    val isDocx = node.ext == "docx"
+    val isDoc = node.ext == "doc"
+    val isSheet = node.ext in SHEET_EXTS
+    val isPdf = node.ext == "pdf"
+    val isDocument = isDocx || isDoc || isSheet || isPdf
     val key = chatState.fileKey(node)
 
     // ── 真实文件读取（source 节点；mock 节点直接用 node.content）──
@@ -106,7 +117,7 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
             bitmap = ProjectFiles.readBitmap(context, node)
             return@LaunchedEffect
         }
-        if (isMedia || isDocx) return@LaunchedEffect   // 媒体 / docx 走各自预览，不做文本读取
+        if (isMedia || isDocument) return@LaunchedEffect   // 媒体 / 文档 / PDF 走各自预览，不做文本读取
         val t = ProjectFiles.readText(context, node)
         if (t == null) {
             if (node.size > 2L * 1024 * 1024) tooLarge = true else unreadable = true
@@ -119,8 +130,12 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
     when {
         // 视频 / 音频播放（ExoPlayer）
         isMedia && node.source != null -> MediaPreview(node, isVideo)
-        // docx 文档预览（HTML → WebView）
-        isDocx && node.source != null -> DocxPreview(node)
+        // 文档预览：docx 自解析；doc / xls / xlsx 走 POI（均与 Operit 同口径）→ HTML → WebView
+        isDocx && node.source != null -> HtmlPreview(node) { ctx, n -> DocxConverter.toHtml(ctx, n) }
+        isDoc && node.source != null -> HtmlPreview(node) { ctx, n -> DocumentConverter.docToHtml(ctx, n) }
+        isSheet && node.source != null -> HtmlPreview(node) { ctx, n -> DocumentConverter.spreadsheetToHtml(ctx, n) }
+        // PDF 预览（PdfRenderer 逐页位图）
+        isPdf && node.source != null -> PdfPreview(node)
         // 真实图片预览（可缩放/拖动）
         isImage && node.source != null -> ZoomableImage(bitmap, node.name)
         tooLarge -> PaddedHint("文件超过 2MB，暂不支持预览")
@@ -145,20 +160,20 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
 // ───────────────────────────── docx 文档预览 ─────────────────────────────
 
 /**
- * docx 预览：DocxConverter 转 HTML → WebView 渲染。
- * WebView 设置与 Operit `ReadOnlyHtmlWebView` 逐项一致（javaScript/domStorage/wideViewport/
- * overview/builtInZoomControls 开、displayZoomControls 关、allowFileAccess 开），
- * 基准 URL 亦取 Operit 同款 `https://workspace-preview.local/`（本地 loadData，不联网）。
+ * 文档预览容器：转换为预览 HTML（docx 自解析；doc / xls / xlsx 走 POI，均与 Operit 同口径）
+ * → WebView 渲染。设置与 Operit `ReadOnlyHtmlWebView` 逐项一致（javaScript/domStorage/
+ * wideViewport/overview/builtInZoomControls 开、displayZoomControls 关、allowFileAccess 开），
+ * 基准 URL 亦取 Operit 同款 `https://workspace-preview.local/`（本地 loadData，不联网）；
  * 失败文案取 Operit 口径「无法打开文件: X」。
  */
 @Composable
-private fun DocxPreview(node: FileNode) {
+private fun HtmlPreview(node: FileNode, load: suspend (android.content.Context, FileNode) -> String?) {
     val context = LocalContext.current
     var html by remember(node.source) { mutableStateOf<String?>(null) }
     var loading by remember(node.source) { mutableStateOf(true) }
     LaunchedEffect(node.source) {
         loading = true
-        html = withContext(Dispatchers.IO) { DocxConverter.toHtml(context, node) }
+        html = withContext(Dispatchers.IO) { load(context, node) }
         loading = false
     }
 
@@ -193,6 +208,62 @@ private fun DocxPreview(node: FileNode) {
 
 /** Operit ReadOnlyHtmlWebView 同款基准 URL */
 private const val HTML_BASE_URL = "https://workspace-preview.local/"
+
+// ───────────────────────────── PDF 预览 ─────────────────────────────
+
+/**
+ * PDF 预览：`PdfRenderer` 逐页渲成位图（Operit `WorkspacePdfPreview` 同款——灰底 #E5E7EB 上
+ * 12dp 间距、16dp 内边距的页面卡片，页面 2 倍分辨率、白底、RENDER_MODE_FOR_DISPLAY）。
+ */
+@Composable
+private fun PdfPreview(node: FileNode) {
+    val context = LocalContext.current
+    var pageCount by remember(node.source) { mutableStateOf(-1) }
+    LaunchedEffect(node.source) {
+        pageCount = withContext(Dispatchers.IO) { DocumentConverter.pdfPageCount(context, node) }
+    }
+
+    when {
+        pageCount < 0 -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        pageCount == 0 -> PaddedHint("无法打开文件: ${node.name}")
+        else -> LazyColumn(
+            modifier = Modifier.fillMaxSize().background(Color(0xFFE5E7EB)),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(16.dp),
+        ) {
+            items(pageCount) { pageIndex -> PdfPage(node, pageIndex) }
+        }
+    }
+}
+
+@Composable
+private fun PdfPage(node: FileNode, pageIndex: Int) {
+    val context = LocalContext.current
+    val bmp by produceState<Bitmap?>(initialValue = null, node.source, pageIndex) {
+        value = withContext(Dispatchers.IO) { DocumentConverter.renderPdfPage(context, node, pageIndex) }
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Color.White,
+        shadowElevation = 2.dp,
+    ) {
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            val page = bmp
+            if (page != null) {
+                Image(
+                    bitmap = page.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxWidth(),
+                    contentScale = ContentScale.FillWidth,
+                )
+            } else {
+                CircularProgressIndicator(modifier = Modifier.padding(24.dp))
+            }
+        }
+    }
+}
 
 // ───────────────────────────── 视频 / 音频播放 ─────────────────────────────
 
@@ -364,8 +435,8 @@ private val PREVIEW_AUDIO_EXTS = setOf("mp3", "wav", "m4a", "aac", "ogg", "opus"
 /** 无行号的纯文本（用户 2026-09-10 定：txt 侧边不加行号） */
 private val PLAIN_TEXT_EXTS = setOf("txt", "text")
 
-/** docx 文档预览（Operit isWordDocument 口径；.doc 老二进制格式需 POI，暂不支持） */
-private val DOCX_EXTS = setOf("docx")
+/** 表格文档（Operit isSpreadsheetDocument 口径；xls/xlsx 走 POI WorkbookFactory） */
+private val SHEET_EXTS = setOf("xls", "xlsx")
 
 /**
  * 文本编辑区（所有非媒体/非图片文本文件的唯一入口）：等宽正文 + 可选行号槽，输入即改缓冲。

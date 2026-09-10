@@ -60,5 +60,9 @@ dependencies {
     implementation("androidx.media3:media3-effect:1.7.1")
     implementation("com.vanniktech:android-image-cropper:4.5.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // 文档预览（Operit 同款：.doc = poi-scratchpad HWPF、.xls/.xlsx = poi/poi-ooxml WorkbookFactory）
+    implementation("org.apache.poi:poi:5.2.3")
+    implementation("org.apache.poi:poi-ooxml:5.2.3")
+    implementation("org.apache.poi:poi-scratchpad:5.2.3")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
