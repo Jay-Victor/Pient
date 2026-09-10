@@ -65,9 +65,11 @@ private fun parseBlocks(markdown: String): List<Block> {
                 blocks += Block.Code(lang, sb.toString().trimEnd('\n'))
                 i++
             }
-            line.startsWith("### ") -> blocks += Block.Header(3, line.removePrefix("### "))
-            line.startsWith("## ") -> blocks += Block.Header(2, line.removePrefix("## "))
-            line.startsWith("# ") -> blocks += Block.Header(1, line.removePrefix("# "))
+            // ATX 标题：1~6 级（原实现只认 # / ## / ###，`####` 会掉进普通段落被原样显示成源码样）
+            atxLevel(line) > 0 -> {
+                val level = atxLevel(line)
+                blocks += Block.Header(level, line.drop(level).trimStart())
+            }
             line.startsWith("> ") || line == ">" ->
                 blocks += Block.Quote(line.removePrefix("> ").trim())
             line.matches(Regex("-{3,}")) -> blocks += Block.Hr
@@ -104,8 +106,15 @@ private fun parseBlocks(markdown: String): List<Block> {
     return blocks
 }
 
+/** ATX 标题级别（1~6，需 `#` 后跟空格）；非标题返回 0。
+ *  ★ 原实现只认 `# ` / `## ` / `### ` 三种前缀，`####` 及更深会掉进普通段落被原样显示成源码样。 */
+private fun atxLevel(line: String): Int {
+    val hashes = line.takeWhile { it == '#' }.length
+    return if (hashes in 1..6 && hashes < line.length && line[hashes] == ' ') hashes else 0
+}
+
 private fun isBlockStart(line: String): Boolean =
-    line.startsWith("#") || line.startsWith("```") || line.startsWith("> ") ||
+    atxLevel(line) > 0 || line.startsWith("```") || line.startsWith("> ") ||
         line.startsWith("- ") || line.startsWith("* ") ||
         line.matches(Regex("\\d+\\.\\s+.*")) || line.matches(Regex("-{3,}"))
 
@@ -185,6 +194,9 @@ fun MarkdownText(
     markdown: String,
     onFileLink: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
+    /** 文件预览口径：标题字号按 pi-web `.markdown-file-preview`（h1 1.8em / h2 1.4em / h3 1.15em，
+     *  h4~h6 未覆盖 → 继承 `.markdown-body` 的 font-weight 600 + 浏览器默认 1em/0.83em/0.67em） */
+    filePreview: Boolean = false,
 ) {
     val blocks = remember(markdown) { parseBlocks(markdown) }
     val s = inlineStyles()
@@ -193,7 +205,16 @@ fun MarkdownText(
         blocks.forEachIndexed { idx, block ->
             when (block) {
                 is Block.Header -> {
-                    val style = when (block.level) {
+                    // 字号：文件预览按 pi-web `.markdown-file-preview`（h1 1.8em / h2 1.4em / h3 1.15em；
+                    // h4~h6 未覆盖 → 浏览器默认 1em/0.83em/0.67em，字重取 `.markdown-body` 的 600）；
+                    // 对话/弹窗沿用既有 Material 排版（本次只修「#### 被当普通段落」的解析缺陷）
+                    val style = if (filePreview) s.base.copy(
+                        fontSize = s.base.fontSize * when (block.level) {
+                            1 -> 1.8f; 2 -> 1.4f; 3 -> 1.15f; 4 -> 1f; 5 -> 0.83f; else -> 0.67f
+                        },
+                        fontWeight = FontWeight.SemiBold,
+                        lineHeight = 1.35.em,
+                    ) else when (block.level) {
                         1 -> MaterialTheme.typography.titleLarge
                         2 -> MaterialTheme.typography.titleMedium
                         else -> MaterialTheme.typography.labelLarge

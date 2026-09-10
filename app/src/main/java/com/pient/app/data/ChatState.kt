@@ -585,7 +585,7 @@ class ChatState {
             openTabs.add(node)
             activeTabIndex = openTabs.lastIndex
         }
-        if (node.ext == "md" || node.ext == "html" || node.ext == "htm") sourceEditMode = false
+        if (node.ext in SOURCE_TOGGLE_EXTS) sourceEditMode = false   // markdown / html 一律从渲染模式进入
     }
 
     fun closeTab(index: Int) {

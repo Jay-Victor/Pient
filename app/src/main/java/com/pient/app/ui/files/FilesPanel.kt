@@ -48,6 +48,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pient.app.data.ChatState
 import com.pient.app.data.FileNode
+import com.pient.app.data.SOURCE_TOGGLE_EXTS
 import com.pient.app.ui.components.PientDialog
 import com.pient.app.ui.theme.PientPanel
 import com.pient.app.ui.theme.MonoFont
@@ -302,9 +303,6 @@ private fun FileTabBar(chatState: ChatState, onSave: (FileNode) -> Unit) {
         }
     }
 }
-
-/** 带「渲染/源码」切换键的扩展名（markdown 与 html 同款交互） */
-private val SOURCE_TOGGLE_EXTS = setOf("md", "html", "htm")
 
 /** 按扩展名区分文件图标（细线 Outlined 风格） */
 fun fileIcon(ext: String): ImageVector = when (ext) {

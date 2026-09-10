@@ -72,6 +72,8 @@ import com.pient.app.data.ChatState
 import com.pient.app.data.DocumentConverter
 import com.pient.app.data.DocxConverter
 import com.pient.app.data.FileNode
+import com.pient.app.data.HTML_EXTS
+import com.pient.app.data.MARKDOWN_EXTS
 import com.pient.app.data.ProjectFiles
 import com.pient.app.ui.components.MarkdownText
 import com.pient.app.ui.theme.MonoFont
@@ -93,7 +95,7 @@ import kotlin.math.roundToInt
 @Composable
 fun FileContentView(chatState: ChatState, node: FileNode) {
     val context = LocalContext.current
-    val isMd = node.ext == "md"
+    val isMd = node.ext in MARKDOWN_EXTS
     val isImage = node.ext in PREVIEW_IMAGE_EXTS
     val isVideo = node.ext in PREVIEW_VIDEO_EXTS
     val isAudio = node.ext in PREVIEW_AUDIO_EXTS
@@ -155,6 +157,7 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
                 chatState.fileDrafts[key] ?: textContent ?: "",
                 onFileLink = { path -> onLocalFileLink(chatState, path) },
                 modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                filePreview = true,   // 文件预览口径：pi-web .markdown-file-preview 标题字号
             )
         }
         // 文本/代码：可编辑；行号槽仅非纯文本显示（txt 无行号）
@@ -492,9 +495,6 @@ private val PLAIN_TEXT_EXTS = setOf("txt", "text")
 
 /** 表格文档（Operit isSpreadsheetDocument 口径；xls/xlsx 走 POI WorkbookFactory） */
 private val SHEET_EXTS = setOf("xls", "xlsx")
-
-/** HTML（Operit isHtml 口径：.html / .htm；带「渲染/源码」切换键） */
-private val HTML_EXTS = setOf("html", "htm")
 
 /**
  * 文本编辑区（所有非媒体/非图片文本文件的唯一入口）：等宽正文 + 可选行号槽，输入即改缓冲。

@@ -640,7 +640,8 @@ class FileNode(
     val source: String? = null,           // 真实位置（本地绝对路径 / SAF 文档 URI）；null = mock 节点
 ) {
     val ext: String
-        get() = if (isDir) "" else name.substringAfterLast('.', "")
+        // 统一小写：扩展名判定一律忽略大小写（Operit `endsWith(..., ignoreCase = true)` 口径）
+        get() = if (isDir) "" else name.substringAfterLast('.', "").lowercase()
 
     // 注意：不要给 FileNode 实现 equals/hashCode——fileTreeRoot 是 mutableStateOf，
     // 结构相等会让 refreshFileTree 的新树根与旧树根「相等」而静默跳过状态更新，
