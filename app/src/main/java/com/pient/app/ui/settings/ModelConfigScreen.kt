@@ -1,6 +1,7 @@
 package com.pient.app.ui.settings
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -55,6 +56,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -67,19 +69,13 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntRect
-import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupPositionProvider
-import androidx.compose.ui.window.PopupProperties
 import androidx.navigation.NavController
 import com.pient.app.data.AiBackend
 import com.pient.app.data.AiConfigStore
@@ -1051,8 +1047,14 @@ private fun TokenInputField(
 // ───────────────────────────── 弹窗 ─────────────────────────────
 
 /**
- * 居中选择弹窗（全屏 scrim + 居中卡片，Popup 方案，见 overlay-dialog-pitfalls §4）：
+ * 居中选择浮层（页面内全屏 scrim + 居中卡片，与 PientDialog / 聊天页浮层同构）：
  * 顶部 = 标题（可选）或搜索框；下方 = LazyColumn 列表；点外/返回键关闭。
+ *
+ * **不用平台 Popup 窗口**（2026-09-10 修）：Popup 是独立窗口，窗口高度取自
+ * 「可见显示区 − IME」——键盘抬起时打开浮层，窗口只有 1080×1454px（正常 1080×2274），
+ * 于是 fillMaxSize 的 scrim 只铺到键盘上沿、页面下半截没有变暗；且键盘随后收起
+ * （Popup focusable 抢走焦点）窗口也不会再长回去（实测 3s 后仍 1454）。
+ * 页面内浮层随应用窗口（全屏、不随 IME 缩放）布局，天然不受键盘影响。
  */
 /** 弹窗选择项（服务商 / 端点 / 模型统一数据） */
 private data class PickerEntry(
@@ -1088,114 +1090,104 @@ private fun SearchPickerPopup(
             entries.filter { it.selected }.forEach { put(it.key, true) }
         }
     }
-    Popup(
-        onDismissRequest = onDismiss,
-        popupPositionProvider = object : PopupPositionProvider {
-            override fun calculatePosition(
-                anchorBounds: IntRect, windowSize: IntSize,
-                layoutDirection: LayoutDirection, popupContentSize: IntSize,
-            ): IntOffset = IntOffset.Zero
-        },
-        properties = PopupProperties(
-            focusable = true,
-            dismissOnBackPress = true,
-            dismissOnClickOutside = true,
-        ),
+    // 浮层本体：页面内全屏 scrim + 居中卡片（与 PientDialog / 聊天页浮层同构，不另开平台窗口）。
+    // 打开即收起键盘：浮层内除搜索框外无输入需求，也避免面板被键盘遮住。
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(Unit) { focusManager.clearFocus() }
+    BackHandler { onDismiss() }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.scrim)
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.scrim)
-                .clickable(onClick = onDismiss),
-            contentAlignment = Alignment.Center,
+        PientPanel(
+            modifier = Modifier
+                .widthIn(max = 360.dp)
+                .padding(horizontal = 16.dp)
+                .clickable(
+                    onClick = {},
+                    indication = null,
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                ),
+            shape = RoundedCornerShape(16.dp),
         ) {
-            PientPanel(
-                modifier = Modifier
-                    .widthIn(max = 360.dp)
-                    .padding(horizontal = 16.dp)
-                    .clickable(
-                        onClick = {},
-                        indication = null,
-                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                    ),
-                shape = RoundedCornerShape(16.dp),
-            ) {
-                Column {
-                    // 顶栏（标题 + 右侧操作，如模型弹窗"模型选择列表" + 刷新）
-                    if (topBarTitle != null) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 16.dp, top = 10.dp, end = 12.dp, bottom = 4.dp),
-                        ) {
-                            Text(
-                                topBarTitle,
-                                style = MaterialTheme.typography.titleSmall,
-                                modifier = Modifier.weight(1f),
-                            )
-                            topBarAction?.invoke()
-                        }
-                    }
-                    // 标题（无搜索弹窗，如端点弹窗）
-                    if (title != null) {
-                        Text(
-                            title,
-                            style = MaterialTheme.typography.titleSmall,
-                            modifier = Modifier.padding(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 10.dp),
-                        )
-                    }
-                    if (searchPlaceholder != null) {
-                        SearchBar(
-                            placeholder = searchPlaceholder,
-                            query = query,
-                            onQueryChange = { query = it },
-                        )
-                    }
-                    LazyColumn(
+            Column {
+                // 顶栏（标题 + 右侧操作，如模型弹窗"模型选择列表" + 刷新）
+                if (topBarTitle != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 380.dp),
-                        contentPadding = PaddingValues(vertical = 8.dp),
+                            .padding(start = 16.dp, top = 10.dp, end = 12.dp, bottom = 4.dp),
                     ) {
-                        items(filtered, key = { it.key }) { e ->
-                            PickerRow(
-                                entry = if (multiSelect) e.copy(selected = selMap[e.key] == true) else e,
-                                onClick = {
-                                    if (multiSelect) {
-                                        if (selMap[e.key] == true) selMap.remove(e.key) else selMap[e.key] = true
-                                    } else {
-                                        onSelect(e)
-                                    }
-                                },
-                            )
-                        }
-                    }
-                    // 底部按钮区：单选弹窗"取消"；多选弹窗"取消 + 确定"
-                    if (showCancel || multiSelect) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                        Text(
+                            topBarTitle,
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.weight(1f),
                         )
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
+                        topBarAction?.invoke()
+                    }
+                }
+                // 标题（无搜索弹窗，如端点弹窗）
+                if (title != null) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 10.dp),
+                    )
+                }
+                if (searchPlaceholder != null) {
+                    SearchBar(
+                        placeholder = searchPlaceholder,
+                        query = query,
+                        onQueryChange = { query = it },
+                    )
+                }
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 380.dp),
+                    contentPadding = PaddingValues(vertical = 8.dp),
+                ) {
+                    items(filtered, key = { it.key }) { e ->
+                        PickerRow(
+                            entry = if (multiSelect) e.copy(selected = selMap[e.key] == true) else e,
+                            onClick = {
+                                if (multiSelect) {
+                                    if (selMap[e.key] == true) selMap.remove(e.key) else selMap[e.key] = true
+                                } else {
+                                    onSelect(e)
+                                }
+                            },
+                        )
+                    }
+                }
+                // 底部按钮区：单选弹窗"取消"；多选弹窗"取消 + 确定"
+                if (showCancel || multiSelect) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        PientButton(
+                            "取消",
+                            onClick = onDismiss,
+                            primary = false,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (multiSelect) {
                             PientButton(
-                                "取消",
-                                onClick = onDismiss,
-                                primary = false,
+                                "确定",
+                                onClick = { onConfirmMulti(selMap.filterValues { it }.keys) },
                                 modifier = Modifier.weight(1f),
                             )
-                            if (multiSelect) {
-                                PientButton(
-                                    "确定",
-                                    onClick = { onConfirmMulti(selMap.filterValues { it }.keys) },
-                                    modifier = Modifier.weight(1f),
-                                )
-                            }
                         }
                     }
                 }
