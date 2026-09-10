@@ -231,19 +231,19 @@ object MockStore {
         PluginItem("pi-plugin-git", "npm:@x/pi-plugin-git", enabled = true, global = true,
             desc = "Git 仓库管理：提交、分支、日志",
             readmeMd = GIT_PLUGIN_README,
-            version = "1.4.2", status = PluginStatus.LOADED,
+            version = "1.4.2", latestVersion = "1.5.0", status = PluginStatus.LOADED,  // 有更新（演示「检查更新 → 更新」分支）
             resources = GIT_PLUGIN_RESOURCES),
         PluginItem("pi-plugin-web", "npm:@x/pi-plugin-web", enabled = false, global = true,
             desc = "网页抓取与聚合搜索",
             readmeMd = WEB_PLUGIN_README,
-            version = "0.9.1", status = PluginStatus.LOADED,
+            version = "0.9.1", latestVersion = "0.9.1", status = PluginStatus.LOADED,  // 已是最新（演示提示分支）
             resources = WEB_PLUGIN_RESOURCES),
     )
     val projectPlugins = mutableStateListOf(
         PluginItem("pi-plugin-grep", "git:example/pi-plugin-grep", enabled = true, global = false,
             desc = "项目内高性能代码搜索",
             readmeMd = GREP_PLUGIN_README,
-            version = "2.1.0", configuredVersion = "2.0.0", status = PluginStatus.INSTALLED,
+            version = "2.1.0", latestVersion = "2.1.0", configuredVersion = "2.0.0", status = PluginStatus.INSTALLED,
             resources = GREP_PLUGIN_RESOURCES),
     )
 

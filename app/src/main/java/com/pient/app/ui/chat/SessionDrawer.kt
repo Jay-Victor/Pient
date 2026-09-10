@@ -8,12 +8,6 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -78,16 +72,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -102,6 +91,7 @@ import com.pient.app.data.Session
 import com.pient.app.data.SessionGroup
 import com.pient.app.data.groupSessionsByRecency
 import com.pient.app.data.relativeTimeLabel
+import com.pient.app.ui.components.ArcSpinner
 import com.pient.app.ui.components.DetailRow
 import com.pient.app.ui.components.PientDialog
 import com.pient.app.ui.components.ProjectInfo
@@ -1131,38 +1121,6 @@ private fun TimeGroupHeader(label: String, collapsed: Boolean, onToggle: () -> U
 }
 
 /**
- * 会话运行中指示（pi-web SessionSidebar RunningSessionIndicator 逐值对齐）：
- * 14×14 容器、accent 色 305.1° 大弧（viewBox 24 内半径 9、stroke 2.8 圆帽、
- * 0.9s/圈绕中心无限旋转）——path M21 12a9 9 0 1 1-3.8-7.4 换算：半径 0.75×、
- * 弧圆 topLeft 0.125×、stroke 2.8/24×14=1.63dp。
- */
-@Composable
-private fun RunningArcIndicator() {
-    val angle by rememberInfiniteTransition(label = "runningArc").animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(durationMillis = 900, easing = LinearEasing)),
-        label = "runningArcAngle",
-    )
-    val arcColor = MaterialTheme.colorScheme.primary
-    Canvas(
-        Modifier
-            .size(14.dp)
-            .rotate(angle),
-    ) {
-        drawArc(
-            color = arcColor,
-            startAngle = 0f,
-            sweepAngle = 305.1f,
-            useCenter = false,
-            topLeft = Offset(size.width * 0.125f, size.height * 0.125f),
-            size = Size(size.width * 0.75f, size.height * 0.75f),
-            style = Stroke(width = 1.63.dp.toPx(), cap = StrokeCap.Round),
-        )
-    }
-}
-
-/**
  * 会话行：名称 + 最后聊天时间（参考 Hermes）+ 竖直三点（菜单：置顶/重命名/删除）。
  * 批量模式：前导圆形勾选 + 名称，点击行切换选择，三点菜单禁用。
  * 会话运行中（session.running）时行首显示旋转圆弧指示。
@@ -1202,7 +1160,7 @@ private fun SessionRow(
             )
             if (session.running) {
                 Spacer(Modifier.width(6.dp))
-                RunningArcIndicator()
+                ArcSpinner()
             }
             Text(
                 session.title,
@@ -1231,7 +1189,7 @@ private fun SessionRow(
             .padding(horizontal = 12.dp, vertical = 9.dp),
     ) {
         if (session.running) {
-            RunningArcIndicator()
+            ArcSpinner()
             Spacer(Modifier.width(6.dp))
         }
         Text(

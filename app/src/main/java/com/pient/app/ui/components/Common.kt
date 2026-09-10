@@ -1,5 +1,10 @@
 package com.pient.app.ui.components
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -37,12 +42,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
@@ -55,6 +63,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pient.app.ui.theme.DarkBrandPurple
@@ -464,6 +473,7 @@ fun PientButton(
     modifier: Modifier = Modifier,
     primary: Boolean = true,
     enabled: Boolean = true,
+    loading: Boolean = false,
     height: Int = 40,
 ) {
     val shape = RoundedCornerShape(12.dp)
@@ -484,12 +494,53 @@ fun PientButton(
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (enabled) fg else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        // 加载态：文字位置换成旋转圆弧（2026-09-10 插件弹窗「检查更新」首用）
+        if (loading) {
+            ArcSpinner(size = 16.dp, color = fg)
+        } else {
+            Text(
+                text,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (enabled) fg else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 旋转圆弧加载指示（pi-web RunningSessionIndicator 逐值对齐；2026-09-09 会话行「运行中」首用，
+// 2026-09-10 提取为公共组件供按钮加载态复用）：14dp 画布、sweep 305.1°、stroke 1.63dp 圆头、
+// 900ms 线性旋转一圈。颜色默认主色，填入式按钮上传 onPrimary。
+// ─────────────────────────────────────────────────────────────
+@Composable
+fun ArcSpinner(
+    modifier: Modifier = Modifier,
+    size: Dp = 14.dp,
+    color: Color = MaterialTheme.colorScheme.primary,
+) {
+    val angle by rememberInfiniteTransition(label = "arcSpinner").animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(durationMillis = 900, easing = LinearEasing)),
+        label = "arcSpinnerAngle",
+    )
+    Canvas(
+        modifier
+            .size(size)
+            .rotate(angle),
+    ) {
+        val w = this.size.width
+        val h = this.size.height
+        drawArc(
+            color = color,
+            startAngle = 0f,
+            sweepAngle = 305.1f,
+            useCenter = false,
+            topLeft = Offset(w * 0.125f, h * 0.125f),
+            size = Size(w * 0.75f, h * 0.75f),
+            style = Stroke(width = 1.63.dp.toPx(), cap = StrokeCap.Round),
         )
     }
 }

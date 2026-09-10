@@ -1,5 +1,6 @@
 package com.pient.app.ui.plugins
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -34,6 +36,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pient.app.data.PluginItem
@@ -75,6 +79,15 @@ fun PluginDetailDialog(
     var updating by remember { mutableStateOf(false) }
     var resources by remember(item.name) { mutableStateOf(item.resources) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    // 「检查更新 → 更新」状态机（2026-09-10 用户要求）：默认「检查更新」；检查中按钮文字换成旋转圆弧；
+    // 有更新 → 按钮变「更新」；无更新 → 文案不变 + Toast「已是最新版本 x」
+    var checking by remember(item.name) { mutableStateOf(false) }
+    var updateAvailable by remember(item.name) { mutableStateOf(false) }
+    val busy = checking || updating   // 任一进行中：三个按键全部禁用，避免并发
+    // 卡片最大高度 = 屏幕高 70%（与技能详情弹窗同款，2026-09-10）：资源清单/README 展开后
+    // 内容会高于屏幕，超出的部分由内容区滚动承接（原先无上限，卡片会顶到屏幕上下缘）
+    val maxCardHeight = (LocalConfiguration.current.screenHeightDp * 0.7f).dp
 
     Box(
         modifier = Modifier
@@ -86,6 +99,7 @@ fun PluginDetailDialog(
         PientPanel(
             modifier = Modifier
                 .widthIn(max = 400.dp)
+                .heightIn(max = maxCardHeight)
                 .padding(horizontal = 24.dp)
                 .clickable(
                     onClick = {},
@@ -94,11 +108,7 @@ fun PluginDetailDialog(
                 ),
             shape = MaterialTheme.shapes.medium,
         ) {
-            Column(
-                Modifier
-                    .padding(20.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
+            Column(Modifier.padding(20.dp)) {
                 // ① 插件名称
                 Text(
                     item.name,
@@ -106,204 +116,232 @@ fun PluginDetailDialog(
                     color = MaterialTheme.colorScheme.onBackground,
                 )
 
-                // ② 描述（无描述不显示）
-                if (item.desc.isNotBlank()) {
+                // 中间内容（描述 / README / 状态 / 版本 / 资源 / 来源路径 / 已解析资源）——
+                // 唯一可滚动区：卡片到达最大高度时只滚这里，名称与底部按键保持固定
+                Column(
+                    Modifier
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    // ② 描述（无描述不显示）
+                    if (item.desc.isNotBlank()) {
+                        Text(
+                            "描述",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                        Text(
+                            item.desc,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                lineHeight = MaterialTheme.typography.bodyMedium.lineHeight * 1.4,
+                            ),
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+
+                    // ③ 查看README.md 按键（无文件时禁用）
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .padding(top = 12.dp)
+                            .clickable(enabled = item.readmeMd != null) { showReadme = !showReadme },
+                    ) {
+                        Text(
+                            "查看README.md",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (item.readmeMd != null) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        )
+                        Icon(
+                            if (showReadme) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
+                            "展开/收起",
+                            tint = if (item.readmeMd != null) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+
+                    // README.md 预览窗口（Markdown 渲染；点击「查看README.md」后出现）
+                    if (showReadme && item.readmeMd != null) {
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 8.dp)
+                                .fillMaxWidth()
+                                .height(240.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.surfaceContainerLow,
+                                    RoundedCornerShape(10.dp),
+                                )
+                                .border(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.outlineVariant,
+                                    RoundedCornerShape(10.dp),
+                                ),
+                        ) {
+                            MarkdownText(
+                                markdown = item.readmeMd,
+                                modifier = Modifier
+                                    .padding(12.dp)
+                                    .verticalScroll(rememberScrollState()),
+                            )
+                        }
+                    }
+
+                    // ④ 状态（pi-web statusColor；包禁用时显示「已禁用」）
                     Text(
-                        "描述",
+                        "状态",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
                     )
                     Text(
-                        item.desc,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = MaterialTheme.typography.bodyMedium.lineHeight * 1.4,
-                        ),
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-
-                // ③ 查看README.md 按键（无文件时禁用）
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .padding(top = 12.dp)
-                        .clickable(enabled = item.readmeMd != null) { showReadme = !showReadme },
-                ) {
-                    Text(
-                        "查看README.md",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (item.readmeMd != null) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                    )
-                    Icon(
-                        if (showReadme) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
-                        "展开/收起",
-                        tint = if (item.readmeMd != null) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
-
-                // README.md 预览窗口（Markdown 渲染；点击「查看README.md」后出现）
-                if (showReadme && item.readmeMd != null) {
-                    Box(
-                        modifier = Modifier
-                            .padding(top = 8.dp)
-                            .fillMaxWidth()
-                            .height(240.dp)
-                            .background(
-                                MaterialTheme.colorScheme.surfaceContainerLow,
-                                RoundedCornerShape(10.dp),
-                            )
-                            .border(
-                                1.dp,
-                                MaterialTheme.colorScheme.outlineVariant,
-                                RoundedCornerShape(10.dp),
-                            ),
-                    ) {
-                        MarkdownText(
-                            markdown = item.readmeMd,
-                            modifier = Modifier
-                                .padding(12.dp)
-                                .verticalScroll(rememberScrollState()),
-                        )
-                    }
-                }
-
-                // ④ 状态（pi-web statusColor；包禁用时显示「已禁用」）
-                Text(
-                    "状态",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 12.dp),
-                )
-                Text(
-                    statusText(item),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = statusColor(item),
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-
-                // ⑤ 版本（pi-web versionSummary：已安装 x · 已配置 y；均无显示「未知」）
-                Text(
-                    "版本",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 12.dp),
-                )
-                Text(
-                    versionSummary(item),
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFont),
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-
-                // ⑥ 资源摘要（pi-web resourceSummary：N扩展 · N技能 · N提示词 · N主题）
-                Text(
-                    "资源",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 12.dp),
-                )
-                Text(
-                    resourceSummary(resources),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-
-                // ⑦ 来源（安装源 spec）
-                Text(
-                    "来源",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 12.dp),
-                )
-                Text(
-                    item.source,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFont),
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-
-                // ⑧ 安装路径
-                Text(
-                    "路径",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 12.dp),
-                )
-                Text(
-                    pluginPath(item),
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFont),
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-
-                // ⑨ 已解析资源（pi-web ResourceList 分组清单 + 逐项启停）
-                Text(
-                    "已解析资源",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 12.dp),
-                )
-                if (resources.isEmpty()) {
-                    Text(
-                        if (!item.enabled) "包已禁用。" else "没有已解析资源",
+                        statusText(item),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = statusColor(item),
                         modifier = Modifier.padding(top = 4.dp),
                     )
-                } else {
-                    // pi-web ResourceList 分组顺序：扩展 → 技能 → 提示词 → 主题（仅非空组）
-                    PluginResourceKind.entries.forEach { kind ->
-                        val indexed = resources.mapIndexed { i, r -> i to r }
-                            .filter { it.second.kind == kind }
-                        if (indexed.isNotEmpty()) {
-                            Text(
-                                kindLabel(kind),
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
-                            )
-                            indexed.forEach { (i, r) ->
-                                ResourceRow(
-                                    resource = r,
-                                    enabled = r.enabled,
-                                    onToggle = {
-                                        resources = resources.toMutableList().also { list ->
-                                            list[i] = list[i].copy(enabled = !list[i].enabled)
-                                        }
-                                    },
-                                    modifier = Modifier.padding(vertical = 2.dp),
+
+                    // ⑤ 版本（pi-web versionSummary：已安装 x · 已配置 y；均无显示「未知」）
+                    Text(
+                        "版本",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                    Text(
+                        versionSummary(item),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFont),
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+
+                    // ⑥ 资源摘要（pi-web resourceSummary：N扩展 · N技能 · N提示词 · N主题）
+                    Text(
+                        "资源",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                    Text(
+                        resourceSummary(resources),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+
+                    // ⑦ 来源（安装源 spec）
+                    Text(
+                        "来源",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                    Text(
+                        item.source,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFont),
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+
+                    // ⑧ 安装路径
+                    Text(
+                        "路径",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                    Text(
+                        pluginPath(item),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFont),
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+
+                    // ⑨ 已解析资源（pi-web ResourceList 分组清单 + 逐项启停）
+                    Text(
+                        "已解析资源",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                    if (resources.isEmpty()) {
+                        Text(
+                            if (!item.enabled) "包已禁用。" else "没有已解析资源",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    } else {
+                        // pi-web ResourceList 分组顺序：扩展 → 技能 → 提示词 → 主题（仅非空组）
+                        PluginResourceKind.entries.forEach { kind ->
+                            val indexed = resources.mapIndexed { i, r -> i to r }
+                                .filter { it.second.kind == kind }
+                            if (indexed.isNotEmpty()) {
+                                Text(
+                                    kindLabel(kind),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
                                 )
+                                indexed.forEach { (i, r) ->
+                                    ResourceRow(
+                                        resource = r,
+                                        enabled = r.enabled,
+                                        onToggle = {
+                                            resources = resources.toMutableList().also { list ->
+                                                list[i] = list[i].copy(enabled = !list[i].enabled)
+                                            }
+                                        },
+                                        modifier = Modifier.padding(vertical = 2.dp),
+                                    )
+                                }
                             }
                         }
                     }
                 }
 
-                // ⑩ 更新 / 删除 / 关闭
+                // ⑩ 检查更新 / 更新 · 删除 · 关闭
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     PientButton(
-                        "更新",
-                        enabled = !updating,
+                        text = if (updateAvailable) "更新" else "检查更新",
+                        enabled = !busy,
+                        loading = busy,   // 检查中 / 更新中：文字位置都换成旋转圆弧
                         primary = false,
                         onClick = {
-                            updating = true
-                            scope.launch {
-                                delay(1100) // 原型更新进度（pi update <pkg> mock）
-                                onUpdate()
-                                updating = false
+                            if (updateAvailable) {
+                                updating = true
+                                scope.launch {
+                                    delay(1100) // 原型更新进度（pi update <pkg> mock）
+                                    onUpdate()
+                                    updating = false
+                                    updateAvailable = false // 更新完成 → 回到「检查更新」
+                                }
+                            } else {
+                                checking = true
+                                scope.launch {
+                                    delay(1100) // 原型查询远端版本（npm view / git ls-remote mock）
+                                    val latest = item.latestVersion
+                                    val hasUpdate = latest != null && latest != item.version
+                                    checking = false
+                                    updateAvailable = hasUpdate
+                                    if (!hasUpdate) {
+                                        Toast.makeText(
+                                            context,
+                                            "已是最新版本" + (item.version?.let { " $it" } ?: ""),
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    }
+                                }
                             }
                         },
                         modifier = Modifier.weight(1f),
                     )
-                    PientButton("删除", enabled = !updating, onClick = onDelete, modifier = Modifier.weight(1f))
+                    PientButton("删除", enabled = !busy, onClick = onDelete, modifier = Modifier.weight(1f))
                     PientButton(
                         "关闭",
                         onClick = onDismiss,

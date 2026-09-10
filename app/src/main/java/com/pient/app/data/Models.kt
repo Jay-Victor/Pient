@@ -620,6 +620,7 @@ data class PluginItem(
     val desc: String = "",                    // package.json description（mock）
     val readmeMd: String? = null,             // README.md 文件内容（mock；null = 无此文件）
     val version: String? = null,              // 已安装版本（mock；null = 未知）
+    val latestVersion: String? = null,        // 远端最新版本（mock；null = 未知/不可查）—— 「检查更新」的比对基准
     val configuredVersion: String? = null,    // 已配置版本/pinned ref（mock；null = 未配置）
     val status: PluginStatus = PluginStatus.LOADED,  // 包级状态（enabled=false 时显示「已禁用」）
     val resources: List<PluginResource> = emptyList(),  // 已解析资源（mock）

@@ -148,6 +148,15 @@ fun PluginsScreen(nav: NavController) {
                 detailFor = null
             },
             onUpdate = {
+                // 更新完成（原型）：把 mock 的已安装版本抬到最新，并刷新弹窗持有的实例——
+                // 否则弹窗「版本」行还是旧值、再点「检查更新」又会报有更新
+                val list = if (item.global) MockStore.globalPlugins else MockStore.projectPlugins
+                val i = list.indexOfFirst { it.name == item.name }
+                if (i >= 0) {
+                    val bumped = list[i].copy(version = list[i].latestVersion ?: list[i].version)
+                    list[i] = bumped
+                    detailFor = bumped
+                }
                 toast(context, "已更新插件 ${item.name}")
             },
         )
