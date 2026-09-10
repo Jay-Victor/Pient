@@ -23,7 +23,7 @@ data class ProviderConfig(
     val ctxLenK: String = "200",
     /** 最大输出长度（K Tokens） */
     val maxOutK: String = "64",
-    val tempEnabled: Boolean = true,
+    val tempEnabled: Boolean = false,
     val tempValue: String = "1.0",
     val topKEnabled: Boolean = false,
     val topKValue: String = "0",
@@ -62,7 +62,7 @@ object AiConfigStore {
                     modelList = o.optString("modelList"),
                     ctxLenK = o.optString("ctxLenK", "200"),
                     maxOutK = o.optString("maxOutK", "64"),
-                    tempEnabled = o.optBoolean("tempEnabled", true),
+                    tempEnabled = o.optBoolean("tempEnabled", false),
                     tempValue = o.optString("tempValue", "1.0"),
                     topKEnabled = o.optBoolean("topKEnabled", false),
                     topKValue = o.optString("topKValue", "0"),

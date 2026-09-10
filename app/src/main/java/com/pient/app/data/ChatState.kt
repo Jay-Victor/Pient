@@ -252,7 +252,7 @@ class ChatState {
         val cfg = model?.provider?.let { AiConfigStore.configs[it] }
         if (cfg == null || model == null) {
             currentMessages += Msg.Assistant(
-                "⚠️ 尚未配置模型：请先在「服务商与模型配置」中添加服务商并完成连接测试。",
+                "⚠️ 尚未配置可用模型：请在「服务商与模型配置」中添加服务商，填入 API 密钥后填写模型列表或点「刷新」拉取。",
                 error = true,
             )
             isStreaming = false

@@ -1,5 +1,6 @@
 package com.pient.app.ui.settings
 
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -65,6 +66,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -107,10 +109,15 @@ import kotlinx.coroutines.launch
  * ④ 模型参数设置卡片：温度（开关 + 数值）、Top_P / Top_K（开关 + 数值）。
  * 2026-09-09 起全部真实化：配置读写 AiConfigStore（自动持久化）、「测试连接」与
  * 「刷新模型列表」走真实 API（AiBackend.listModels）；成功置 chatState.aiConfigured。
+ * 2026-09-10：模型列表弹窗的刷新按钮以「已填 API 密钥」为前置条件——未配置密钥只弹轻提示、
+ * 不发起拉取；浮层内的所有反馈改走 Toast（页面上的 testState 被 scrim 遮住看不见）。
  */
 @Composable
 fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    /** 轻提示：浮层（模型列表弹窗）内触发时用——页面上的 testState 被 scrim 遮住看不见 */
+    fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
     // ── 状态 ──
     // 已配置服务商列表（AiConfigStore 持久化；2026-09-09 起无预置——用户自行添加）
     val configuredIds = AiConfigStore.configs.keys.toList()
@@ -135,14 +142,17 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
         AiConfigStore.configs[id] = transform(cur)
     }
 
-    /** 新增服务商：加入已配置列表并切换为当前；重复添加则仅切换 */
+    /**
+     * 新增服务商：加入已配置列表并切换为当前；重复添加则仅切换。
+     * 只带入目录里的默认端点 —— **API 密钥与模型列表保持为空**（2026-09-10 用户要求）：
+     * 模型列表由用户手动填写或点「刷新」从服务商 /models 端点拉取，不预填任何模型名。
+     */
     fun addProvider(id: String) {
         val p = ProviderCatalog.find(id)
         if (id !in AiConfigStore.configs) {
             AiConfigStore.configs[id] = ProviderConfig(
                 providerId = id,
                 endpoint = p.defaultEndpoint,
-                modelList = p.models.firstOrNull().orEmpty(),
             )
         }
         selectedId = id
@@ -159,22 +169,29 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
         confirmDeleteOpen = false
     }
 
-    /** 测试连接 / 刷新模型列表共用：GET 服务商模型端点，错误消息进 testState */
-    fun callModels(onSuccess: (List<String>) -> Unit) {
+    /**
+     * 测试连接 / 刷新模型列表共用：GET 服务商模型端点。
+     * 前置校验：API 端点与 API 密钥都必须已填写，缺一不发请求，只提示。
+     * @param onMessage 反馈出口，默认写页面内的 testState；模型列表弹窗传入 Toast（浮层挡住页面文字）
+     */
+    fun callModels(
+        onMessage: (String) -> Unit = { testState = it },
+        onSuccess: (List<String>) -> Unit,
+    ) {
         val cur = cfg ?: return
         if (cur.endpoint.isBlank()) {
-            testState = "请先填写 API 端点"
+            onMessage("请先填写 API 端点")
             return
         }
         if (cur.apiKey.isBlank()) {
-            testState = "请先填写 API 密钥"
+            onMessage("请先填写 API 密钥")
             return
         }
         scope.launch {
             try {
                 onSuccess(AiBackend.listModels(cur))
             } catch (e: Exception) {
-                testState = "连接失败：${e.message ?: "未知错误"}"
+                onMessage("连接失败：${e.message ?: "未知错误"}")
             }
         }
     }
@@ -572,14 +589,21 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                 RefreshIconButton(
                     loading = refreshing,
                     onClick = {
-                        refreshing = true
-                        callModels { models ->
-                            if (models.isEmpty()) {
-                                testState = "未获取到模型列表"
-                            } else {
-                                updateConfig { it.copy(modelList = models.joinToString(";")) }
+                        // 仅在已填入 API 密钥后才发起拉取；未配置则只弹提示、不进 loading 态
+                        if (cfg?.apiKey.isNullOrBlank()) {
+                            toast("未配置 API 密钥，无法获取模型列表")
+                        } else {
+                            refreshing = true
+                            callModels(
+                                onMessage = { msg ->
+                                    toast(msg)
+                                    refreshing = false // 失败/前置校验未通过：必须结束 loading，否则转圈卡死
+                                },
+                            ) { models ->
+                                if (models.isEmpty()) toast("未获取到模型列表")
+                                else updateConfig { it.copy(modelList = models.joinToString(";")) }
+                                refreshing = false
                             }
-                            refreshing = false
                         }
                     },
                 )
