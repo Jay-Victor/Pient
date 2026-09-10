@@ -44,6 +44,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -53,6 +54,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -69,6 +71,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.pient.app.data.ChatState
+import com.pient.app.data.CodeLanguage
+import com.pient.app.data.CodeLanguages
 import com.pient.app.data.DocumentConverter
 import com.pient.app.data.DocxConverter
 import com.pient.app.data.FileNode
@@ -76,6 +80,7 @@ import com.pient.app.data.HTML_EXTS
 import com.pient.app.data.MARKDOWN_EXTS
 import com.pient.app.data.ProjectFiles
 import com.pient.app.ui.components.MarkdownText
+import com.pient.app.ui.theme.LocalPientIsDark
 import com.pient.app.ui.theme.MonoFont
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -161,10 +166,13 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
             )
         }
         // 文本/代码：可编辑；行号槽仅非纯文本显示（txt 无行号）
+        // 代码文件另加语法着色与 4 空格缩进标记（Operit 工作区编辑器口径）；txt 两类都不加
         else -> EditableTextView(
             text = chatState.fileDrafts[key] ?: textContent ?: "",
             onValueChange = { chatState.editDraft(node, it) },
             showLineNumbers = node.ext !in PLAIN_TEXT_EXTS,
+            codeLanguage = if (node.ext in PLAIN_TEXT_EXTS) null
+            else CodeLanguages.forExtension(node.ext) ?: CodeLanguages.generic,
         )
     }
 }
@@ -510,6 +518,8 @@ private fun EditableTextView(
     text: String,
     onValueChange: (String) -> Unit,
     showLineNumbers: Boolean,
+    /** 非空 = 按该语言语法着色 + 画 4 空格缩进标记（纯文本传 null） */
+    codeLanguage: CodeLanguage? = null,
 ) {
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
@@ -526,6 +536,20 @@ private fun EditableTextView(
     )
     var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val scroll = rememberScrollState()
+
+    // 语法着色（Operit 二套调色板随主题切换）与缩进标记几何
+    val isDark = LocalPientIsDark.current
+    val palette = remember(isDark) { codePalette(isDark) }
+    val transformation = remember(codeLanguage, palette) {
+        codeLanguage?.let { CodeHighlightTransformation(it, palette) }
+    }
+    val charWidthPx = remember(codeStyle, density) { monoCharWidthPx(measurer, codeStyle) }
+    // 缩进标记色 = blend(背景, 槽边框, 0.68)（Operit indentGuidePaint；Pient 槽无边框 → outlineVariant）
+    val guideColor = lerp(
+        MaterialTheme.colorScheme.background,
+        MaterialTheme.colorScheme.outlineVariant,
+        0.68f,
+    )
 
     // 行号槽几何（位数 → 内边距；槽宽下限 24dp）
     val logicalLines = remember(text) { text.count { it == '\n' } + 1 }
@@ -567,6 +591,16 @@ private fun EditableTextView(
                             leadingPx = leadingPx,
                             numberBoxPx = numberBoxPx,
                         )
+                        // 4 空格缩进标记（画在文字下层：Canvas 在 BasicTextField 之前）
+                        if (codeLanguage != null) {
+                            drawIndentGuides(
+                                layout = layout,
+                                text = text,
+                                textLeftPx = gutterWidth.toPx(),
+                                charWidthPx = charWidthPx,
+                                color = guideColor,
+                            )
+                        }
                     }
                 }
                 BasicTextField(
@@ -574,6 +608,7 @@ private fun EditableTextView(
                     onValueChange = onValueChange,
                     textStyle = codeStyle,
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    visualTransformation = transformation ?: VisualTransformation.None,
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.None,
                         autoCorrectEnabled = false,
