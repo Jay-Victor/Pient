@@ -1,6 +1,7 @@
 package com.pient.app.ui.files
 
 import android.graphics.Bitmap
+import android.webkit.WebView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -19,6 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -60,10 +62,13 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.pient.app.data.ChatState
+import com.pient.app.data.DocxConverter
 import com.pient.app.data.FileNode
 import com.pient.app.data.ProjectFiles
 import com.pient.app.ui.components.MarkdownText
 import com.pient.app.ui.theme.MonoFont
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -84,6 +89,7 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
     val isVideo = node.ext in PREVIEW_VIDEO_EXTS
     val isAudio = node.ext in PREVIEW_AUDIO_EXTS
     val isMedia = isVideo || isAudio
+    val isDocx = node.ext in DOCX_EXTS
     val key = chatState.fileKey(node)
 
     // ── 真实文件读取（source 节点；mock 节点直接用 node.content）──
@@ -100,7 +106,7 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
             bitmap = ProjectFiles.readBitmap(context, node)
             return@LaunchedEffect
         }
-        if (isMedia) return@LaunchedEffect            // 媒体直接交给播放器，不做文本读取
+        if (isMedia || isDocx) return@LaunchedEffect   // 媒体 / docx 走各自预览，不做文本读取
         val t = ProjectFiles.readText(context, node)
         if (t == null) {
             if (node.size > 2L * 1024 * 1024) tooLarge = true else unreadable = true
@@ -113,6 +119,8 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
     when {
         // 视频 / 音频播放（ExoPlayer）
         isMedia && node.source != null -> MediaPreview(node, isVideo)
+        // docx 文档预览（HTML → WebView）
+        isDocx && node.source != null -> DocxPreview(node)
         // 真实图片预览（可缩放/拖动）
         isImage && node.source != null -> ZoomableImage(bitmap, node.name)
         tooLarge -> PaddedHint("文件超过 2MB，暂不支持预览")
@@ -133,6 +141,58 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
         )
     }
 }
+
+// ───────────────────────────── docx 文档预览 ─────────────────────────────
+
+/**
+ * docx 预览：DocxConverter 转 HTML → WebView 渲染。
+ * WebView 设置与 Operit `ReadOnlyHtmlWebView` 逐项一致（javaScript/domStorage/wideViewport/
+ * overview/builtInZoomControls 开、displayZoomControls 关、allowFileAccess 开），
+ * 基准 URL 亦取 Operit 同款 `https://workspace-preview.local/`（本地 loadData，不联网）。
+ * 失败文案取 Operit 口径「无法打开文件: X」。
+ */
+@Composable
+private fun DocxPreview(node: FileNode) {
+    val context = LocalContext.current
+    var html by remember(node.source) { mutableStateOf<String?>(null) }
+    var loading by remember(node.source) { mutableStateOf(true) }
+    LaunchedEffect(node.source) {
+        loading = true
+        html = withContext(Dispatchers.IO) { DocxConverter.toHtml(context, node) }
+        loading = false
+    }
+
+    when {
+        loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        html == null -> PaddedHint("无法打开文件: ${node.name}")
+        else -> AndroidView(
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.useWideViewPort = true
+                    settings.loadWithOverviewMode = true
+                    settings.builtInZoomControls = true
+                    settings.displayZoomControls = false
+                    settings.allowFileAccess = true
+                    settings.allowContentAccess = true
+                }
+            },
+            update = { view -> view.loadDataWithBaseURL(HTML_BASE_URL, html.orEmpty(), "text/html", "UTF-8", null) },
+            onRelease = { view ->
+                view.stopLoading()
+                view.removeAllViews()
+                view.destroy()
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/** Operit ReadOnlyHtmlWebView 同款基准 URL */
+private const val HTML_BASE_URL = "https://workspace-preview.local/"
 
 // ───────────────────────────── 视频 / 音频播放 ─────────────────────────────
 
@@ -303,6 +363,9 @@ private val PREVIEW_AUDIO_EXTS = setOf("mp3", "wav", "m4a", "aac", "ogg", "opus"
 
 /** 无行号的纯文本（用户 2026-09-10 定：txt 侧边不加行号） */
 private val PLAIN_TEXT_EXTS = setOf("txt", "text")
+
+/** docx 文档预览（Operit isWordDocument 口径；.doc 老二进制格式需 POI，暂不支持） */
+private val DOCX_EXTS = setOf("docx")
 
 /**
  * 文本编辑区（所有非媒体/非图片文本文件的唯一入口）：等宽正文 + 可选行号槽，输入即改缓冲。
