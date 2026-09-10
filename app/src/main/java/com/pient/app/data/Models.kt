@@ -76,6 +76,9 @@ object SettingsStore {
     var language by mutableStateOf("zh-CN")
     var drawerMode by mutableStateOf(DrawerMode.SLIDE)
 
+    // ── 文件预览页设置（2026-09-10）：带行号的文件长行不折行，改为向右延展 + 横向滚动 ──
+    var filePreviewNoWrap by mutableStateOf(false)
+
     // ── 自定义主题色（2026-09-01）：开关 + 色相（0..360）；开启时覆盖 12 预设色作为 accent ──
     var customAccentEnabled by mutableStateOf(false)
     var customAccentHue by mutableStateOf(215f)   // 默认蓝 hue ≈ 215
@@ -128,6 +131,7 @@ object SettingsStore {
         drawerMode = runCatching {
             DrawerMode.valueOf(p.getString("drawer_mode", "SLIDE") ?: "SLIDE")
         }.getOrDefault(DrawerMode.SLIDE)
+        filePreviewNoWrap = p.getBoolean("file_preview_no_wrap", false)
         customAccentEnabled = p.getBoolean("custom_accent_enabled", false)
         customAccentHue = p.getFloat("custom_accent_hue", 215f).coerceIn(0f, 360f)
         backgroundMediaType = runCatching {
@@ -167,6 +171,14 @@ object SettingsStore {
             .putString("light_scheme", lightScheme.name)
             .putBoolean("custom_accent_enabled", customAccentEnabled)
             .putFloat("custom_accent_hue", customAccentHue)
+            .apply()
+    }
+
+    /** 保存文件预览页设置（行为设置），重启后保持 */
+    fun saveFilePreviewNoWrap(androidCtx: android.content.Context) {
+        androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("file_preview_no_wrap", filePreviewNoWrap)
             .apply()
     }
 

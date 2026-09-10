@@ -6,6 +6,7 @@ import android.webkit.WebViewClient
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -79,6 +80,7 @@ import com.pient.app.data.FileNode
 import com.pient.app.data.HTML_EXTS
 import com.pient.app.data.MARKDOWN_EXTS
 import com.pient.app.data.ProjectFiles
+import com.pient.app.data.SettingsStore
 import com.pient.app.ui.components.MarkdownText
 import com.pient.app.ui.theme.LocalPientIsDark
 import com.pient.app.ui.theme.MonoFont
@@ -173,6 +175,7 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
             showLineNumbers = node.ext !in PLAIN_TEXT_EXTS,
             codeLanguage = if (node.ext in PLAIN_TEXT_EXTS) null
             else CodeLanguages.forExtension(node.ext) ?: CodeLanguages.generic,
+            contentKey = key,
         )
     }
 }
@@ -520,6 +523,8 @@ private fun EditableTextView(
     showLineNumbers: Boolean,
     /** 非空 = 按该语言语法着色 + 画 4 空格缩进标记（纯文本传 null） */
     codeLanguage: CodeLanguage? = null,
+    /** 内容标识（切文件时复位横向滚动，避免上一个文件的滚动位置串到新文件） */
+    contentKey: Any? = null,
 ) {
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
@@ -550,6 +555,11 @@ private fun EditableTextView(
         MaterialTheme.colorScheme.outlineVariant,
         0.68f,
     )
+    // 文件预览页设置（行为设置）：带行号的文件长行不折行 —— 每行向右延展、横向滚动，
+    // 行号槽固定不随之滚动（Operit 编辑器同款：行号固定在槽内、正文横向滚动）
+    val noWrap = showLineNumbers && SettingsStore.filePreviewNoWrap
+    val hScroll = rememberScrollState()
+    LaunchedEffect(contentKey) { hScroll.scrollTo(0) }
 
     // 行号槽几何（位数 → 内边距；槽宽下限 24dp）
     val logicalLines = remember(text) { text.count { it == '\n' } + 1 }
@@ -581,6 +591,7 @@ private fun EditableTextView(
         ) {
             Box(Modifier.fillMaxWidth()) {
                 val layout = textLayout
+                // 行号固定层：不参与横向滚动（不换行模式下文本左移时行号仍钉在槽内）
                 if (showLineNumbers && layout != null) {
                     Canvas(Modifier.matchParentSize()) {
                         drawEditorLineNumbers(
@@ -591,36 +602,43 @@ private fun EditableTextView(
                             leadingPx = leadingPx,
                             numberBoxPx = numberBoxPx,
                         )
-                        // 4 空格缩进标记（画在文字下层：Canvas 在 BasicTextField 之前）
-                        if (codeLanguage != null) {
+                    }
+                }
+                // 文本层：起始留白放在外层 → 不换行时行号槽不会被横向滚动带走
+                Box(
+                    Modifier
+                        .padding(start = if (showLineNumbers) gutterWidth else 14.dp)
+                        .then(if (noWrap) Modifier.horizontalScroll(hScroll) else Modifier.fillMaxWidth()),
+                ) {
+                    // 4 空格缩进标记：与文本同层（Canvas 原点 = 文本左缘 → textLeftPx = 0），随内容横向滚动
+                    if (layout != null && codeLanguage != null) {
+                        Canvas(Modifier.matchParentSize()) {
                             drawIndentGuides(
                                 layout = layout,
                                 text = text,
-                                textLeftPx = gutterWidth.toPx(),
+                                textLeftPx = 0f,
                                 charWidthPx = charWidthPx,
                                 color = guideColor,
                             )
                         }
                     }
-                }
-                BasicTextField(
-                    value = text,
-                    onValueChange = onValueChange,
-                    textStyle = codeStyle,
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    visualTransformation = transformation ?: VisualTransformation.None,
-                    keyboardOptions = KeyboardOptions(
-                        capitalization = KeyboardCapitalization.None,
-                        autoCorrectEnabled = false,
-                    ),
-                    onTextLayout = { textLayout = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(
-                            start = if (showLineNumbers) gutterWidth else 14.dp,
-                            end = if (showLineNumbers) 12.dp else 14.dp,
+                    BasicTextField(
+                        value = text,
+                        onValueChange = onValueChange,
+                        textStyle = codeStyle,
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        visualTransformation = transformation ?: VisualTransformation.None,
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.None,
+                            autoCorrectEnabled = false,
                         ),
-                )
+                        onTextLayout = { textLayout = it },
+                        modifier = Modifier
+                            // 不换行：宽度交给内容自身（无界约束 → 不折行），由外层横向滚动
+                            .then(if (noWrap) Modifier else Modifier.fillMaxWidth())
+                            .padding(end = if (showLineNumbers) 12.dp else 14.dp),
+                    )
+                }
             }
         }
     }

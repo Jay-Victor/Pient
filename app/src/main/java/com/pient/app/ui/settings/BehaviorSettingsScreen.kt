@@ -19,9 +19,12 @@ import androidx.compose.material.icons.automirrored.outlined.ViewSidebar
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Compress
+import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.ViewInAr
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -102,7 +105,68 @@ fun BehaviorSettingsScreen(nav: NavController) {
                     }
                 }
             }
+            item { SectionHeader("文件预览页设置") }
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(16.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
+                ) {
+                    PreviewToggleRow(
+                        icon = Icons.Outlined.SwapHoriz,
+                        title = "长行不折行（向右延展）",
+                        desc = "带行号的文件：每行内容向右延伸并可横向滚动，行号与内容始终一一对应；关闭时超出宽度自动折行。",
+                        checked = SettingsStore.filePreviewNoWrap,
+                        onCheckedChange = { SettingsStore.filePreviewNoWrap = it },
+                    )
+                }
+            }
         }
+    }
+}
+
+/** 开关型设置行（图标 + 标题 + 说明 + 开关；整行可点） */
+@Composable
+private fun PreviewToggleRow(
+    icon: ImageVector,
+    title: String,
+    desc: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+    ) {
+        Icon(
+            icon, null,
+            tint = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+        Column(Modifier.weight(1f).padding(start = 14.dp)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                desc,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary),
+            modifier = Modifier.padding(start = 8.dp),
+        )
     }
 }
 

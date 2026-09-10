@@ -99,6 +99,12 @@ fun PientApp() {
         }.collect { SettingsStore.saveTheme(context) }
     }
 
+    // 文件预览页设置持久化（行为设置），重启后保持
+    LaunchedEffect(Unit) {
+        snapshotFlow { SettingsStore.filePreviewNoWrap }
+            .collect { SettingsStore.saveFilePreviewNoWrap(context) }
+    }
+
     // 抽屉展出方式持久化（行为设置），重启后保持
     LaunchedEffect(Unit) {
         snapshotFlow { SettingsStore.drawerMode }
