@@ -237,6 +237,21 @@ private fun HtmlWebView(html: String?, baseUrl: String, modifier: Modifier = Mod
                     // 硬件层（Operit WebViewHandler 同款）：WebView 自成一纹理合成，
                     // 滚动/缩放时不必回落到父级图层重绘
                     setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                    // ★ 触摸拦截器（逐字对齐 Operit WorkspaceReadOnlyDocumentPreview
+                    //   .installDocumentPreviewTouchInterceptor）：手指一落到预览上就禁止父链拦截，
+                    //   抬手/取消再放开 —— 保证整段手势（捏合缩放、双指平移）完整归 WebView。
+                    //   没有它时外层手势（抽屉拖动等）可在捏合中途抢走/打断指针流，
+                    //   表现为缩放忽快忽慢、跳变（用户报「无法像 Operit 那样丝滑」）。
+                    setOnTouchListener { view, event ->
+                        when (event.actionMasked) {
+                            android.view.MotionEvent.ACTION_DOWN ->
+                                view.parent?.requestDisallowInterceptTouchEvent(true)
+                            android.view.MotionEvent.ACTION_UP,
+                            android.view.MotionEvent.ACTION_CANCEL ->
+                                view.parent?.requestDisallowInterceptTouchEvent(false)
+                        }
+                        false   // 不消费：事件照常交给 WebView 自己处理
+                    }
                     setBackgroundColor(android.graphics.Color.WHITE)
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
