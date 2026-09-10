@@ -17,8 +17,13 @@ enum class BubbleStyle { FLAT, BUBBLE }
 
 enum class ThemeMode { DARK, LIGHT, SYSTEM }
 
-/** 抽屉展出方式：水平滑出（默认）/ 3D 透视（仅手机；平板自动用压缩滑出） */
-enum class DrawerMode { SLIDE, PERSPECTIVE }
+/**
+ * 抽屉展出方式：
+ * - SLIDE 水平滑出（默认，浮层 + 遮罩；平板端自动用压缩滑出）
+ * - PERSPECTIVE 3D 透视（仅手机；平板端自动用压缩滑出）
+ * - PUSH 推动展开（主内容整体被推向另一侧，与侧栏同时移动，不回排版面）
+ */
+enum class DrawerMode { SLIDE, PERSPECTIVE, PUSH }
 
 /** 自定义背景媒体类型（背景设置标签：分段控制器两段） */
 enum class BackgroundMediaType { IMAGE, VIDEO }

@@ -14,7 +14,10 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.FormatIndentIncrease
+import androidx.compose.material.icons.automirrored.outlined.ViewSidebar
 import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ViewInAr
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -22,17 +25,18 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.pient.app.data.DrawerMode
 import com.pient.app.data.SettingsStore
+import com.pient.app.ui.components.DividerLine
 import com.pient.app.ui.components.SectionHeader
-import com.pient.app.ui.components.SettingsSwitchRow
 
 /**
- * 行为设置（2026-08-28）：侧边栏展出方式 ——
- * 水平滑出（默认）/ 3D 透视（Operit PhoneLayout 同款：仅手机端聊天页 3D 让位；
- * 平板端始终为聊天页宽度压缩 + 侧边栏滑出，与开关无关）。切换即时生效。
+ * 行为设置（2026-08-28；2026-09-10 改为三选一）：侧边栏展出方式 ——
+ * 水平滑出（默认，浮层 + 遮罩）/ 3D 透视展开（聊天页透视让位）/ 推动展开（主内容随侧栏同步推移）。
+ * 切换即时生效并持久化（prefs `drawer_mode`）。
  */
 @Composable
 fun BehaviorSettingsScreen(nav: NavController) {
@@ -70,24 +74,99 @@ fun BehaviorSettingsScreen(nav: NavController) {
                         .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(16.dp))
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
                 ) {
-                    SettingsSwitchRow(
-                        icon = Icons.Outlined.ViewInAr,
-                        title = "3D 透视展开",
-                        desc = "手机端聊天页 3D 透视让位",
-                        checked = SettingsStore.drawerMode == DrawerMode.PERSPECTIVE,
-                        onChecked = { on ->
-                            SettingsStore.drawerMode =
-                                if (on) DrawerMode.PERSPECTIVE else DrawerMode.SLIDE
-                        },
-                    )
-                    Text(
-                        "关闭时为水平滑出（默认）",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-                    )
+                    DrawerModeOptions.forEachIndexed { i, option ->
+                        if (i > 0) DividerLine()
+                        DrawerModeRow(
+                            icon = option.icon,
+                            title = option.title,
+                            desc = option.desc,
+                            selected = SettingsStore.drawerMode == option.mode,
+                            onClick = { SettingsStore.drawerMode = option.mode },
+                        )
+                    }
                 }
             }
+            item {
+                Text(
+                    "平板端默认压缩聊天页宽度；选择「推动展开」时改为整体推移。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 8.dp),
+                )
+            }
+        }
+    }
+}
+
+/** 展出方式选项（顺序即卡片内的排列顺序） */
+private data class DrawerModeOption(
+    val mode: DrawerMode,
+    val icon: ImageVector,
+    val title: String,
+    val desc: String,
+)
+
+private val DrawerModeOptions = listOf(
+    DrawerModeOption(
+        mode = DrawerMode.SLIDE,
+        icon = Icons.AutoMirrored.Outlined.ViewSidebar,
+        title = "水平滑出（默认）",
+        desc = "侧边栏浮在聊天页之上滑出，遮罩同步淡入；主内容保持不动。",
+    ),
+    DrawerModeOption(
+        mode = DrawerMode.PERSPECTIVE,
+        icon = Icons.Outlined.ViewInAr,
+        title = "3D 透视展开",
+        desc = "侧边栏展开时聊天页透视让位：右移、下沉、缩小并绕 Y 轴旋转。",
+    ),
+    DrawerModeOption(
+        mode = DrawerMode.PUSH,
+        icon = Icons.AutoMirrored.Outlined.FormatIndentIncrease,
+        title = "推动展开",
+        desc = "侧边栏展开时，主内容区域被“推”向另一侧，两者同时移动。这种方式能保持页面布局的连贯性。",
+    ),
+)
+
+/** 展出方式选项行：图标 + 标题 + 说明 + 选中对勾（整行可点，选中态变色加勾） */
+@Composable
+private fun DrawerModeRow(
+    icon: ImageVector,
+    title: String,
+    desc: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+    ) {
+        Icon(
+            icon, null,
+            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+        Column(Modifier.weight(1f).padding(start = 14.dp)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                desc,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        if (selected) {
+            Icon(
+                Icons.Outlined.Check, null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 8.dp).size(18.dp),
+            )
         }
     }
 }

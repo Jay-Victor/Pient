@@ -159,20 +159,26 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     var dragDx by remember { mutableStateOf(0f) }
     var dragDy by remember { mutableStateOf(0f) }
 
-    // ── 抽屉展出方式（行为设置）：SLIDE = 水平滑出（默认）／ PERSPECTIVE ──
-    // 手机 = 3D 透视（Operit PhoneLayout 同款，仅开关开启时）；
+    // ── 抽屉展出方式（行为设置）：SLIDE = 水平滑出（默认）／ PERSPECTIVE ／ PUSH ──
+    // 手机 = 3D 透视（Operit PhoneLayout 同款，仅选中 PERSPECTIVE 时）；
     // 平板 = 聊天页宽度压缩 + 侧边栏滑出（Operit TabletLayout 同款 width+offset 结构），
-    // 为平板默认行为，与 3D 透视开关无关（2026-08-30 用户决策）。
+    // 为平板默认行为（2026-08-30 用户决策），选 PUSH 时改为整体推移。
     // 平板判定：screenWidthDp >= 600（OperitApp 同款）。
     val configuration = LocalConfiguration.current
     val isTablet = configuration.screenWidthDp >= 600
     val drawerMode = SettingsStore.drawerMode
     val use3D = drawerMode == DrawerMode.PERSPECTIVE && !isTablet
-    val useCompress = isTablet
+    // 推动展开（2026-09-10）：侧栏滑入的同时主内容整体右移一个侧栏宽——两者由同一
+    // progress 驱动，逐帧同步；用 offset（不改变布局尺寸）推移，页面内部不回排版面。
+    val usePush = drawerMode == DrawerMode.PUSH
+    val useCompress = isTablet && !usePush
+    // 平板端 = 常驻侧边栏语义（导航切换/点外一律不收起，2026-08-30 用户决策）；手机端点击即收
+    val persistentDrawer = isTablet
     val drawerWidth = 296.dp
 
     // 抽屉动画进度（Operit PhoneLayout：开 LowBouncy / 关 NoBouncy，stiffness 1000；
-    // 平板压缩模式对齐 Operit TabletLayout 的 tween 280ms 宽度动画）
+    // 平板压缩模式对齐 Operit TabletLayout 的 tween 280ms 宽度动画；
+    // 推动展开与水平滑出同为 300ms tween——侧栏与主内容同步位移）
     val progress by animateFloatAsState(
         targetValue = if (chatState.drawerOpen) 1f else 0f,
         animationSpec = if (use3D) {
@@ -180,6 +186,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                 dampingRatio = if (chatState.drawerOpen) Spring.DampingRatioLowBouncy else Spring.DampingRatioNoBouncy,
                 stiffness = 1000f,
             )
+        } else if (usePush) {
+            tween(durationMillis = 300)
         } else {
             tween(durationMillis = 280)
         },
@@ -242,7 +250,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
             },
     ) {
         // ── 主内容（zIndex 1）：3D 模式 graphicsLayer 整体变换（Operit Surface 同款），
-        //    平板压缩模式 = 宽度收缩 + 右移（Operit TabletLayout 同款 layout 层方案）──
+        //    平板压缩模式 = 宽度收缩 + 右移（Operit TabletLayout 同款 layout 层方案），
+        //    推动展开 = 整体右移一个侧栏宽（offset 不改变布局尺寸，页面内部不回排版面）──
         Box(
             Modifier
                 .zIndex(1f)
@@ -258,6 +267,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                             clip = true
                             shape = RoundedCornerShape(contentCornerRadius)
                         }
+                        usePush -> Modifier.offset(x = drawerWidth * progress)
                         useCompress -> Modifier
                             .width(configuration.screenWidthDp.dp - drawerWidth * progress)
                             .offset(x = drawerWidth * progress)
@@ -326,16 +336,16 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
         }
 
         // ── 侧栏抽屉（zIndex 2）──
-        if (use3D || useCompress) {
-            // 3D 透视 / 平板压缩：progress 驱动抽屉滑入（Operit PhoneLayout 同款）。
-            // 完全关闭时移出组合（不占命中区域）；3D 模式点外关闭层为透明 ——
-            // Operit 同款：scrim 透明，3D 变换本身传达模态。
-            // 平板压缩模式不设点外关闭层（Operit TabletLayout 常驻侧边栏语义）：
-            // 否则全屏透明层会拦截压缩后聊天页的点击（顶栏终端/文件按钮等），
-            // 点一次先关抽屉、点两次才进页面（2026-08-30 平板实测 bug）。
+        if (use3D || useCompress || usePush) {
+            // 3D 透视 / 平板压缩 / 推动展开：同一 progress 驱动抽屉滑入（Operit PhoneLayout 同款）。
+            // 完全关闭时移出组合（不占命中区域）；3D 与推动展开的点外关闭层为透明 ——
+            // Operit 同款：scrim 透明，3D 变换/内容推移本身传达模态。
+            // 平板端不设点外关闭层（常驻侧边栏语义）：否则全屏透明层会拦截压缩/推移后
+            // 聊天页的点击（顶栏终端/文件按钮等），点一次先关抽屉、点两次才进页面
+            // （2026-08-30 平板实测 bug）。
             if (chatState.drawerOpen || progress > 0.001f) {
                 Box(Modifier.zIndex(2f)) {
-                    if (chatState.drawerOpen && !useCompress) {
+                    if (chatState.drawerOpen && !persistentDrawer) {
                         // ★ 点外关闭层：只在侧栏宽（296dp）之外的点击才收起。
                         //   抽屉面板是纯视觉层（无指针处理），其空白区（行间隙/状态栏条/
                         //   空列表区）的点击会穿透到本层——加 x 判定后这些点击被忽略，
@@ -352,11 +362,11 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                     }
                     SessionDrawer(
                         chatState = chatState,
-                        // 切换会话：平板压缩保持展开（持久侧边栏语义），其余模式关闭
-                        onClose = { if (!useCompress) chatState.drawerOpen = false },
+                        // 切换会话：平板端保持展开（持久侧边栏语义），其余关闭
+                        onClose = { if (!persistentDrawer) chatState.drawerOpen = false },
                         onNavigate = { route ->
-                            // 平板压缩模式：导航不关闭侧边栏（持久侧边栏语义，返回聊天页仍展开）
-                            if (!useCompress) chatState.drawerOpen = false
+                            // 平板端：导航不关闭侧边栏（持久侧边栏语义，返回聊天页仍展开）
+                            if (!persistentDrawer) chatState.drawerOpen = false
                             nav.navigate(route)
                         },
                         modifier = Modifier.graphicsLayer {
