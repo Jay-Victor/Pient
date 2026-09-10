@@ -528,6 +528,53 @@ class ChatState {
     // 文件树长按菜单「@ 提及插入输入框」请求（ChatScreen 消费后置 null）
     var mentionInsertRequest by mutableStateOf<String?>(null)
 
+    // ── 编辑态（2026-09-10：文本/代码可编辑，参照 Operit 工作区编辑器）──
+    /** 文件键：同一文件 = 名称 + 真实位置（与 openFile 判定口径一致） */
+    fun fileKey(node: FileNode): String = (node.source ?: "") + "|" + node.name
+
+    /** 编辑缓冲（键 → 当前文本；文件读取完成时播种，切标签/重组不丢） */
+    val fileDrafts = mutableStateMapOf<String, String>()
+
+    /** 未保存文件键集合（编辑器有改动未写回磁盘） */
+    val unsavedFiles = mutableStateSetOf<String>()
+
+    /** 关闭未保存文件的确认弹窗目标（页根浮层；null = 未打开） */
+    var closingTabIndex by mutableStateOf<Int?>(null)
+
+    fun isUnsaved(node: FileNode): Boolean = fileKey(node) in unsavedFiles
+
+    /** 读取完成播种（不标记未保存；已有缓冲不覆盖） */
+    fun seedDraft(node: FileNode, text: String) {
+        val k = fileKey(node)
+        if (fileDrafts[k] == null) fileDrafts[k] = text
+    }
+
+    /** 编辑改动 → 写入缓冲并标记未保存 */
+    fun editDraft(node: FileNode, text: String) {
+        val k = fileKey(node)
+        fileDrafts[k] = text
+        unsavedFiles.add(k)
+    }
+
+    /** 丢弃缓冲（关闭标签 / 放弃改动） */
+    fun discardDraft(node: FileNode) {
+        val k = fileKey(node)
+        fileDrafts.remove(k)
+        unsavedFiles.remove(k)
+    }
+
+    /** 保存：缓冲写回磁盘（成功清未保存标记 + 刷新文件树，供大小/时间显示更新） */
+    fun saveFile(context: Context, node: FileNode): Boolean {
+        val k = fileKey(node)
+        val text = fileDrafts[k] ?: return false
+        val ok = ProjectFiles.writeText(context, node, text)
+        if (ok) {
+            unsavedFiles.remove(k)
+            refreshFileTree(context)
+        }
+        return ok
+    }
+
     fun openFile(node: FileNode) {
         // 同一文件 = 名称 + 真实位置相同（FileNode 无 equals：文件树每次打开都重建
         // 节点实例，引用比较会重复加标签；也不能靠 equals——见 FileNode 注释）
@@ -542,11 +589,18 @@ class ChatState {
 
     fun closeTab(index: Int) {
         if (index in openTabs.indices) {
+            discardDraft(openTabs[index])   // 关闭 = 丢弃缓冲（未保存内容的取舍由确认弹窗先行处理）
             openTabs.removeAt(index)
             if (openTabs.isEmpty()) activeTabIndex = 0
             else if (activeTabIndex > index) activeTabIndex--
             else if (activeTabIndex >= openTabs.size) activeTabIndex = openTabs.lastIndex
         }
+    }
+
+    /** 关闭标签入口：有未保存改动 → 弹确认（页根浮层），否则直接关 */
+    fun requestCloseTab(index: Int) {
+        val node = openTabs.getOrNull(index) ?: return
+        if (isUnsaved(node)) closingTabIndex = index else closeTab(index)
     }
 
     fun toggleDir(path: String) {

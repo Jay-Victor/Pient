@@ -140,7 +140,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     // 仅当聊天主页无任何浮层/抽屉打开时拦截；浮层打开时返回键维持原默认行为。
     val overlaysClosed = !modelSheetOpen && !attachSheetOpen && !contextCardOpen &&
         !systemPromptOpen && !urlDialogOpen && forkMenuTarget == null && !mentionOpen &&
-        !chatState.drawerOpen && !locatorOpen
+        !chatState.drawerOpen && !locatorOpen && chatState.closingTabIndex == null
     var lastBackPress by remember { mutableStateOf(0L) }
     BackHandler(enabled = overlaysClosed) {
         val now = System.currentTimeMillis()

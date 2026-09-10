@@ -1,5 +1,6 @@
 package com.pient.app.ui.files
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -24,10 +25,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.InsertDriveFile
+import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -40,9 +43,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pient.app.data.ChatState
+import com.pient.app.data.FileNode
+import com.pient.app.ui.components.PientDialog
 import com.pient.app.ui.theme.PientPanel
 import com.pient.app.ui.theme.MonoFont
 
@@ -55,11 +61,22 @@ import com.pient.app.ui.theme.MonoFont
  */
 @Composable
 fun FilesPanel(chatState: ChatState) {
+    val context = LocalContext.current
     var treeOpen by remember { mutableStateOf(false) }
+
+    // 保存当前文件（成败都给 Toast 反馈：浮层外的页面态文字看不见时仍可感知）
+    fun save(node: FileNode) {
+        val ok = chatState.saveFile(context, node)
+        Toast.makeText(
+            context,
+            if (ok) "已保存 ${node.name}" else "保存失败：${node.name}",
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            FileTabBar(chatState)
+            FileTabBar(chatState, onSave = { node -> save(node) })
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 val tabs = chatState.openTabs
                 if (tabs.isEmpty() || chatState.activeTabIndex !in tabs.indices) {
@@ -136,13 +153,48 @@ fun FilesPanel(chatState: ChatState) {
                 )
             }
         }
+
+        // 关闭未保存文件的确认弹窗（页根浮层：scrim 覆盖标签栏 + 预览区；
+        // 文案/按钮结构对齐 Operit：[取消][不保存] 保存）
+        val closingIndex = chatState.closingTabIndex
+        val closingNode = closingIndex?.let { chatState.openTabs.getOrNull(it) }
+        if (closingNode != null && closingIndex != null) {
+            PientDialog(
+                title = "保存更改？",
+                onDismiss = { chatState.closingTabIndex = null },
+                confirmText = "保存",
+                onConfirm = {
+                    val ok = chatState.saveFile(context, closingNode)
+                    Toast.makeText(
+                        context,
+                        if (ok) "已保存 ${closingNode.name}" else "保存失败：${closingNode.name}",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                    chatState.closingTabIndex = null
+                    if (ok) chatState.closeTab(closingIndex)   // 保存失败不关标签，避免改动丢失
+                },
+                showClose = false,   // 全局原则：带取消按钮的确认弹窗不显示右上角 ×
+                extraActionText = "不保存",
+                onExtraAction = {
+                    chatState.closingTabIndex = null
+                    chatState.closeTab(closingIndex)
+                },
+            ) {
+                Text(
+                    "文件 ${closingNode.name} 已被修改，是否保存更改？",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
     }
 }
 
 // ───────────────────────────── 标签栏 ─────────────────────────────
 
 @Composable
-private fun FileTabBar(chatState: ChatState) {
+private fun FileTabBar(chatState: ChatState, onSave: (FileNode) -> Unit) {
     val active = chatState.openTabs.getOrNull(chatState.activeTabIndex)
     PientPanel(
         modifier = Modifier
@@ -196,16 +248,44 @@ private fun FileTabBar(chatState: ChatState) {
                         // （2026-09-03：原 weight 默认 fill=true 会把标签恒撑满 180dp = 视觉上固定宽度）
                         modifier = Modifier.weight(1f, fill = false).padding(start = 4.dp),
                     )
-                    Icon(
-                        Icons.Outlined.Close, "关闭",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    // 行尾键：未保存时由 × 变实心圆点（Operit VSCodeTab 同款「一键两位图」），
+                    // 点击仍是关闭——未保存会先弹确认（requestCloseTab）
+                    val unsaved = chatState.isUnsaved(node)
+                    val tailTint = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    Box(
                         modifier = Modifier
                             .padding(start = 4.dp)
                             .size(14.dp)
-                            .clickable(onClick = { chatState.closeTab(i) }),
-                    )
+                            .clickable(onClick = { chatState.requestCloseTab(i) }),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (unsaved) {
+                            Icon(
+                                Icons.Filled.FiberManualRecord, "未保存",
+                                tint = tailTint.copy(alpha = 0.9f),
+                                modifier = Modifier.size(8.dp),
+                            )
+                        } else {
+                            Icon(
+                                Icons.Outlined.Close, "关闭",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                    }
                 }
             }
+        }
+        // 未保存改动的当前文件 → 保存键（Operit 工具栏同款：仅存在未保存改动时出现）
+        if (active != null && chatState.isUnsaved(active)) {
+            Icon(
+                Icons.Outlined.Save, "保存",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .padding(horizontal = 8.dp)
+                    .size(18.dp)
+                    .clickable(onClick = { onSave(active) }),
+            )
         }
         // markdown 激活时：标签栏最右出现编辑/渲染切换键
         if (active != null && active.ext == "md") {

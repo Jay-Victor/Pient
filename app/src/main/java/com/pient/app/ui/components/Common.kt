@@ -408,6 +408,10 @@ fun PientDialog(
     onConfirm: () -> Unit,
     showClose: Boolean = true,
     showCancel: Boolean = true, // false = 单按钮（仅确认）；「详细信息」等纯展示弹窗用
+    // 次按钮再加一个（如「不保存」）：与「取消」同列排在确认键左侧
+    // （Operit 关闭未保存文件弹窗结构：[取消][不保存] 保存）
+    extraActionText: String? = null,
+    onExtraAction: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     Box(
@@ -455,6 +459,9 @@ fun PientDialog(
             ) {
                 if (showCancel) {
                     PientButton("取消", onClick = onDismiss, primary = false, modifier = Modifier.weight(1f))
+                }
+                if (extraActionText != null && onExtraAction != null) {
+                    PientButton(extraActionText, onClick = onExtraAction, primary = false, modifier = Modifier.weight(1f))
                 }
                 PientButton(confirmText, onClick = onConfirm, enabled = confirmEnabled, modifier = Modifier.weight(1f))
             }

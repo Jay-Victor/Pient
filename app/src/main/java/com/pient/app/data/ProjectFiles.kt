@@ -123,6 +123,31 @@ object ProjectFiles {
         }
     }
 
+    /** 播放/预览用 URI（本地绝对路径 → file://；SAF 节点 → content://）；无 source 返回 null */
+    fun mediaUri(node: FileNode): Uri? {
+        val src = node.source ?: return null
+        return if (src.startsWith("content://")) Uri.parse(src) else Uri.fromFile(File(src))
+    }
+
+    /** 文本写回（编辑器保存；本地 File / SAF 双通道，成功返回 true） */
+    fun writeText(context: Context, node: FileNode, text: String): Boolean {
+        val src = node.source ?: return false
+        return try {
+            if (src.startsWith("content://")) {
+                context.contentResolver.openOutputStream(Uri.parse(src), "wt")?.use { out ->
+                    out.write(text.toByteArray(Charsets.UTF_8))
+                    out.flush()
+                } ?: return false
+                true
+            } else {
+                File(src).writeText(text, Charsets.UTF_8)
+                true
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     // ── 写操作（新建 / 重命名 / 删除；成功返回 true） ──
 
     /** 在项目根创建文件/文件夹 */
