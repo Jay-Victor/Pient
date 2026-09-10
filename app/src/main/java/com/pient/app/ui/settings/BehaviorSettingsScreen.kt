@@ -131,7 +131,7 @@ private val DrawerModeOptions = listOf(
         mode = DrawerMode.PUSH,
         icon = Icons.AutoMirrored.Outlined.FormatIndentIncrease,
         title = "推动展开",
-        desc = "侧边栏展开时，主内容区域被“推”向另一侧，两者同时移动。这种方式能保持页面布局的连贯性。",
+        desc = "侧边栏展开时，主内容区域被“推”向另一侧，两者同时移动。",
     ),
 )
 
