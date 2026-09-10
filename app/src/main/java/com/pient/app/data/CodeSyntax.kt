@@ -10,10 +10,17 @@ package com.pient.app.data
  */
 
 /** 着色种类（对应 Operit LanguageSupport 的颜色常量；OPERATOR/DEFAULT 都落到正文色，故不单列） */
-enum class CodeToken { KEYWORD, TYPE, VARIABLE, FUNCTION, STRING, NUMBER, COMMENT }
+enum class CodeToken { KEYWORD, TYPE, VARIABLE, FUNCTION, STRING, NUMBER, COMMENT, HEADING, LINK }
 
-/** 一段同色区间 [start, end) */
-data class CodeSpan(val start: Int, val end: Int, val token: CodeToken)
+/** 一段同色区间 [start, end)（粗体/斜体/删除线 = 标记语言的强调样式，Operit 编辑器不用） */
+data class CodeSpan(
+    val start: Int,
+    val end: Int,
+    val token: CodeToken,
+    val bold: Boolean = false,
+    val italic: Boolean = false,
+    val strike: Boolean = false,
+)
 
 /** 语言定义（Operit LanguageSupport + BaseLanguageSupport 默认值） */
 class CodeLanguage(
@@ -28,6 +35,8 @@ class CodeLanguage(
     val multiCommentEnd: String? = "*/",
     val stringDelimiters: Set<Char> = setOf('"', '\''),
     val escapeChar: Char = '\\',
+    /** 标记语言（Markdown）：走专用扫描器，不用上面的逐字符词法 */
+    val markdown: Boolean = false,
 )
 
 object CodeLanguages {
@@ -232,13 +241,27 @@ object CodeLanguages {
         multiCommentEnd = null,
     )
 
+    /** Markdown（源码多色：标题/强调/代码/链接/列表/引用 —— 见 scanMarkdown） */
+    val markdown = CodeLanguage(
+        name = "markdown",
+        extensions = setOf("md", "markdown", "mdown", "mkd"),
+        markdown = true,
+    )
+
     private val all = listOf(
         kotlin, java, javascript, typescript, python,
-        html, xml, json, css, yaml, shell,
+        html, xml, json, css, yaml, shell, markdown,
     )
 
     private val byExtension: Map<String, CodeLanguage> =
         all.flatMap { lang -> lang.extensions.map { it to lang } }.toMap()
+
+    /** 围栏代码块 info 串里的语言名（```kotlin / ```kt / ```js …）→ 语言；未知返回 null */
+    fun byName(name: String): CodeLanguage? {
+        val key = name.trim().lowercase().substringBefore(' ').substringBefore(',')
+        if (key.isEmpty()) return null
+        return byExtension[key] ?: all.firstOrNull { it.name == key }
+    }
 
     /** 扩展名 → 语言（无匹配返回 null，调用方决定是否回退 generic） */
     fun forExtension(ext: String): CodeLanguage? = byExtension[ext.lowercase()]
@@ -253,9 +276,12 @@ object CodeLanguages {
 /**
  * 逐字符扫描（Operit `EditorSyntaxHighlighter.parseFullText` 同款顺序与归类）：
  * 注释 → 字符串 → 数字 → 标识符（关键字/内置类型/内置变量/内置函数/后跟 `(` → 函数/首字母大写 → 类型/其余 → 变量）。
- * 运算符与空白归正文色，不产出区间。
+ * 运算符与空白归正文色，不产出区间。Markdown 走 [scanMarkdown] 专用扫描器。
  */
-fun scanCode(text: String, lang: CodeLanguage): List<CodeSpan> {
+fun scanCode(text: String, lang: CodeLanguage): List<CodeSpan> =
+    if (lang.markdown) scanMarkdown(text) else scanCodeTokens(text, lang)
+
+private fun scanCodeTokens(text: String, lang: CodeLanguage): List<CodeSpan> {
     val spans = ArrayList<CodeSpan>()
     val n = text.length
     var i = 0
@@ -377,4 +403,280 @@ fun leadingIndentCells(line: String): Int {
         }
     }
     return cells
+}
+
+// ───────────────────────────── Markdown 源码着色 ─────────────────────────────
+
+/**
+ * Markdown 源码多色扫描（Pient 增补；Operit 编辑器无 markdown 语言）：
+ * 标题 → HEADING(+粗体，含 `#` 标记)；列表/任务标记 → NUMBER；引用标记 `>`、分隔线、围栏标记 → COMMENT；
+ * 行内代码与围栏代码体 → STRING（围栏有语言时按该语言着色）；链接文字 → FUNCTION、链接地址 → LINK；
+ * 强调标记 → VARIABLE（粗体/斜体内容分别加粗/倾斜，删除线内容 → COMMENT + 删除线）；frontmatter 键 → FUNCTION、值 → STRING。
+ */
+
+private val MD_HEADING = Regex("^ {0,3}(#{1,6})(?:\\s.*)?$")
+private val MD_HR = Regex("^ {0,3}(?:(?:- *){3,}|(?:\\* *){3,}|(?:_ *){3,})$")
+private val MD_QUOTE = Regex("^ {0,3}(?:> ?)+")
+private val MD_LIST = Regex("^\\s*(?:[-*+]|\\d{1,9}[.)])(?:\\s+|$)")
+private val MD_TASK = Regex("^\\[[ xX]\\](?:\\s+|$)")
+private val MD_FENCE = Regex("^ {0,3}(`{3,}|~{3,})(.*)$")
+private val MD_FRONT_KEY = Regex("^(\\s*)([A-Za-z0-9_.-]+)(:)(.*)$")
+
+private class MdFence(val marker: Char, val length: Int, val lang: String, val bodyStart: Int)
+
+fun scanMarkdown(text: String): List<CodeSpan> {
+    val spans = ArrayList<CodeSpan>()
+    val frontEnd = frontmatterEnd(text)
+    var offset = 0
+    var fence: MdFence? = null
+
+    for (line in text.split("\n")) {
+        val lineStart = offset
+        val lineEnd = lineStart + line.length
+        offset = lineEnd + 1
+
+        if (lineStart < frontEnd) {
+            scanFrontmatterLine(line, lineStart, spans)
+            continue
+        }
+        val open = MD_FENCE.find(line)
+        val current = fence
+        if (current != null) {
+            val closing = open != null &&
+                open.groupValues[1][0] == current.marker &&
+                open.groupValues[1].length >= current.length &&
+                open.groupValues[2].isBlank()
+            if (closing) {
+                scanFenceBody(text, current, lineStart, spans)
+                addSpan(spans, lineStart, lineEnd, CodeToken.COMMENT)
+                fence = null
+            }
+            // 围栏内其余行由 scanFenceBody 处理
+            continue
+        }
+        if (open != null) {
+            addSpan(spans, lineStart, lineEnd, CodeToken.COMMENT)
+            fence = MdFence(
+                marker = open.groupValues[1][0],
+                length = open.groupValues[1].length,
+                lang = open.groupValues[2].trim(),
+                bodyStart = offset,
+            )
+            continue
+        }
+        scanMdLine(line, lineStart, spans)
+    }
+    // 未闭合围栏：正文到文末
+    fence?.let { scanFenceBody(text, it, text.length, spans) }
+    return spans.sortedBy { it.start }
+}
+
+/** frontmatter 结束偏移（无 frontmatter 返回 0） */
+private fun frontmatterEnd(text: String): Int {
+    if (!text.startsWith("---")) return 0
+    var offset = 0
+    val lines = text.split("\n")
+    if (lines.firstOrNull()?.trimEnd() != "---") return 0
+    for ((index, line) in lines.withIndex()) {
+        if (index == 0) {
+            offset = line.length + 1
+            continue
+        }
+        if (line.trimEnd() == "---") return offset + line.length + 1
+        offset += line.length + 1
+    }
+    return 0
+}
+
+private fun scanFrontmatterLine(line: String, lineStart: Int, spans: MutableList<CodeSpan>) {
+    val trimmed = line.trim()
+    if (trimmed.isEmpty() || trimmed == "---") {
+        addSpan(spans, lineStart, lineStart + line.length, CodeToken.COMMENT)
+        return
+    }
+    if (trimmed.startsWith("#")) {
+        addSpan(spans, lineStart, lineStart + line.length, CodeToken.COMMENT)
+        return
+    }
+    val match = MD_FRONT_KEY.find(line)
+    if (match == null) {
+        addSpan(spans, lineStart, lineStart + line.length, CodeToken.STRING)
+        return
+    }
+    val keyStart = lineStart + match.groupValues[1].length
+    val keyEnd = keyStart + match.groupValues[2].length
+    addSpan(spans, keyStart, keyEnd, CodeToken.FUNCTION)
+    val valueStart = keyEnd + match.groupValues[3].length
+    if (match.groupValues[4].isNotBlank()) {
+        addSpan(spans, valueStart, lineStart + line.length, CodeToken.STRING)
+    }
+}
+
+/** 围栏代码体：有语言 → 按该语言着色（偏移平移到全文坐标）；无/未知语言 → 正文色 */
+private fun scanFenceBody(text: String, fence: MdFence, end: Int, spans: MutableList<CodeSpan>) {
+    if (fence.bodyStart >= end) return
+    val language = CodeLanguages.byName(fence.lang) ?: CodeLanguages.markdown.takeIf { fence.lang.startsWith("md") }
+    val body = text.substring(fence.bodyStart, minOf(end - 1, text.length).coerceAtLeast(fence.bodyStart))
+    if (language == null || language.markdown) {
+        addSpan(spans, fence.bodyStart, fence.bodyStart + body.length, CodeToken.STRING)
+        return
+    }
+    for (span in scanCodeTokens(body, language)) {
+        spans += CodeSpan(span.start + fence.bodyStart, span.end + fence.bodyStart, span.token, span.bold, span.italic, span.strike)
+    }
+}
+
+private fun scanMdLine(line: String, lineStart: Int, spans: MutableList<CodeSpan>) {
+    if (line.isBlank()) return
+    val lineEnd = lineStart + line.length
+    if (MD_HR.matches(line)) {
+        addSpan(spans, lineStart, lineEnd, CodeToken.COMMENT)
+        return
+    }
+    if (MD_HEADING.matches(line)) {
+        addSpan(spans, lineStart, lineEnd, CodeToken.HEADING, bold = true)
+        return
+    }
+    var cursor = 0
+    val quote = MD_QUOTE.find(line)
+    if (quote != null) {
+        addSpan(spans, lineStart, lineStart + quote.value.length, CodeToken.COMMENT)
+        cursor = quote.value.length
+    }
+    val list = MD_LIST.find(line.substring(cursor))?.takeIf { it.range.first == 0 }
+    if (list != null) {
+        addSpan(spans, lineStart + cursor, lineStart + cursor + list.value.length, CodeToken.NUMBER)
+        cursor += list.value.length
+        val task = MD_TASK.find(line.substring(cursor))
+        if (task != null) {
+            addSpan(spans, lineStart + cursor, lineStart + cursor + task.value.trimEnd().length, CodeToken.NUMBER)
+            cursor += task.value.trimEnd().length
+        }
+    }
+    scanMdInline(line, lineStart, cursor, line.length, spans, CodeToken.LINK, bold = false, italic = false)
+}
+
+/**
+ * 行内扫描 —— 必须带 [to] 上界：强调/删除线的内容递归只扫自己那一段，
+ * 否则递归会一路扫到行尾并重复产出区间（2026-09-10 实测：整段被重复着色）。
+ */
+private fun scanMdInline(
+    line: String,
+    lineStart: Int,
+    from: Int,
+    to: Int,
+    spans: MutableList<CodeSpan>,
+    linkToken: CodeToken,
+    bold: Boolean,
+    italic: Boolean,
+) {
+    var i = from
+    while (i < to) {
+        val c = line[i]
+        when {
+            // 行内代码
+            c == '`' -> {
+                val run = line.runLength(i, '`')
+                val close = line.indexOf("`".repeat(run), i + run)
+                if (close < 0 || close + run > to) {
+                    i += run
+                } else {
+                    addSpan(spans, lineStart + i, lineStart + close + run, CodeToken.STRING)
+                    i = close + run
+                }
+            }
+            // 强调（1=斜体 / 2=粗体 / 3=粗斜体）
+            c == '*' || c == '_' -> {
+                val run = line.runLength(i, c)
+                val k = minOf(run, 3)
+                val marker = c.toString().repeat(k)
+                val close = findMarker(line, marker, i + k, to)
+                if (close < 0) {
+                    i += k
+                } else {
+                    addSpan(spans, lineStart + i, lineStart + i + k, CodeToken.VARIABLE)
+                    scanMdInline(
+                        line, lineStart, i + k, close, spans, linkToken,
+                        bold || k >= 2, italic || k == 1 || k == 3,
+                    )
+                    addSpan(spans, lineStart + close, lineStart + close + k, CodeToken.VARIABLE)
+                    i = close + k
+                }
+            }
+            // 删除线
+            c == '~' && line.startsWith("~~", i) -> {
+                val close = line.indexOf("~~", i + 2)
+                if (close < 0 || close + 2 > to) {
+                    i += 1
+                } else {
+                    addSpan(spans, lineStart + i, lineStart + i + 2, CodeToken.VARIABLE)
+                    addSpan(spans, lineStart + i + 2, lineStart + close, CodeToken.COMMENT, strike = true)
+                    addSpan(spans, lineStart + close, lineStart + close + 2, CodeToken.VARIABLE)
+                    i = close + 2
+                }
+            }
+            // 链接 / 图片（label → FUNCTION，地址 → LINK）
+            (c == '[' || (c == '!' && i + 1 < line.length && line[i + 1] == '[')) -> {
+                val labelStart = if (c == '!') i + 2 else i + 1
+                val labelEnd = line.indexOf(']', labelStart)
+                val target = if (labelEnd in labelStart until to && labelEnd + 1 < line.length &&
+                    line[labelEnd + 1] == '('
+                ) {
+                    line.indexOf(')', labelEnd + 2)
+                } else -1
+                if (labelEnd < 0 || labelEnd >= to || target < 0 || target > to) {
+                    i += 1
+                } else {
+                    if (labelEnd > labelStart) {
+                        addSpan(
+                            spans, lineStart + labelStart, lineStart + labelEnd, CodeToken.FUNCTION,
+                            bold = bold, italic = italic,
+                        )
+                    }
+                    addSpan(
+                        spans, lineStart + labelEnd + 2, lineStart + target, CodeToken.LINK,
+                        bold = bold, italic = italic,
+                    )
+                    i = target + 1
+                }
+            }
+            // 自动链接
+            c == 'h' && line.startsWith("http", i) &&
+                (i == 0 || !line[i - 1].isLetterOrDigit()) -> {
+                var end = i
+                while (end < to && !line[end].isWhitespace()) end++
+                addSpan(spans, lineStart + i, lineStart + end, linkToken, bold = bold, italic = italic)
+                i = end
+            }
+            else -> i++
+        }
+    }
+}
+
+/** 在 [from, to) 内找下一个 `marker`（不越过上界） */
+private fun findMarker(line: String, marker: String, from: Int, to: Int): Int {
+    var index = line.indexOf(marker, from)
+    while (index >= 0 && index + marker.length <= to) {
+        if (index > from) return index
+        index = line.indexOf(marker, index + 1)
+    }
+    return -1
+}
+
+private fun String.runLength(index: Int, ch: Char): Int {
+    var i = index
+    while (i < length && this[i] == ch) i++
+    return i - index
+}
+
+private fun addSpan(
+    spans: MutableList<CodeSpan>,
+    start: Int,
+    end: Int,
+    token: CodeToken,
+    bold: Boolean = false,
+    italic: Boolean = false,
+    strike: Boolean = false,
+) {
+    if (end > start) spans += CodeSpan(start, end, token, bold, italic, strike)
 }

@@ -9,9 +9,12 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.pient.app.data.CodeLanguages
 import com.pient.app.data.CodeLanguage
@@ -38,6 +41,10 @@ data class CodePalette(
     val comment: Color,
     /** Operit gutterBorderColor（缩进标记混色用） */
     val gutterBorder: Color,
+    /** Markdown 标题（Pient 增补：取品牌 warn 色，Operit 无 markdown 语言） */
+    val heading: Color,
+    /** Markdown 链接地址（Pient 增补：取对话分类青，与正文/标记色区分） */
+    val link: Color,
 ) {
     fun colorOf(token: CodeToken): Color = when (token) {
         CodeToken.KEYWORD -> keyword
@@ -47,6 +54,8 @@ data class CodePalette(
         CodeToken.STRING -> string
         CodeToken.NUMBER -> number
         CodeToken.COMMENT -> comment
+        CodeToken.HEADING -> heading
+        CodeToken.LINK -> link
     }
 }
 
@@ -60,6 +69,8 @@ val CodePaletteLight = CodePalette(
     number = Color(0xFF098658),
     comment = Color(0xFF008000),
     gutterBorder = Color(0xFFE5E5E5),
+    heading = Color(0xFF9A6700),   // LightWarn
+    link = Color(0xFF1B7C83),      // LightCategoryConversation
 )
 
 /** Operit `EditorTheme.DarkTheme`（VS Code Dark+ 色系） */
@@ -72,6 +83,8 @@ val CodePaletteDark = CodePalette(
     number = Color(0xFFB5CEA8),
     comment = Color(0xFF6A9955),
     gutterBorder = Color(0xFF3A3D41),
+    heading = Color(0xFFD29922),   // DarkWarn
+    link = Color(0xFF39C5CF),      // DarkCategoryConversation
 )
 
 fun codePalette(isDark: Boolean): CodePalette = if (isDark) CodePaletteDark else CodePaletteLight
@@ -100,7 +113,16 @@ class CodeHighlightTransformation(
                 buildAnnotatedString {
                     append(plain)
                     for (span in spans) {
-                        addStyle(SpanStyle(color = palette.colorOf(span.token)), span.start, span.end)
+                        addStyle(
+                            SpanStyle(
+                                color = palette.colorOf(span.token),
+                                fontWeight = if (span.bold) FontWeight.Bold else null,
+                                fontStyle = if (span.italic) FontStyle.Italic else null,
+                                textDecoration = if (span.strike) TextDecoration.LineThrough else null,
+                            ),
+                            span.start,
+                            span.end,
+                        )
                     }
                 }
             }
