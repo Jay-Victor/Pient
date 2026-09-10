@@ -6,10 +6,6 @@ import android.webkit.WebViewClient
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.calculatePan
-import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -141,7 +137,7 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
         isDocx && node.source != null -> HtmlPreview(node) { ctx, n -> DocxConverter.toHtml(ctx, n) }
         isDoc && node.source != null -> HtmlPreview(node) { ctx, n -> DocumentConverter.docToHtml(ctx, n) }
         isSheet && node.source != null -> HtmlPreview(node) { ctx, n -> DocumentConverter.spreadsheetToHtml(ctx, n) }
-        // PDF 预览（PdfRenderer 逐页位图，可缩放/拖动）
+        // PDF 预览（PdfRenderer 逐页位图）
         isPdf && node.source != null -> PdfPreview(node)
         // HTML 预览（WebView 渲染源码；相对资源按所在目录解析，Operit HTML 分支口径）
         isHtml && !chatState.sourceEditMode -> HtmlWebView(
@@ -289,66 +285,25 @@ private fun PdfPreview(node: FileNode) {
     }
 }
 
-/**
- * 单页渲染 + 缩放：与图片预览同口径（1f～5f、拖动按视口夹取、双击 2.5f/1f）。
- * 未放大时单指拖动不消费事件 → 外层 LazyColumn 正常翻页滚动；放大后被钳在页框内平移。
- */
 @Composable
 private fun PdfPage(node: FileNode, pageIndex: Int) {
     val context = LocalContext.current
     val bmp by produceState<Bitmap?>(initialValue = null, node.source, pageIndex) {
         value = withContext(Dispatchers.IO) { DocumentConverter.renderPdfPage(context, node, pageIndex) }
     }
-    var scale by remember(node.source, pageIndex) { mutableStateOf(IMAGE_MIN_SCALE) }
-    var offset by remember(node.source, pageIndex) { mutableStateOf(Offset.Zero) }
-    var viewportSize by remember { mutableStateOf(IntSize.Zero) }
-
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = Color.White,
         shadowElevation = 2.dp,
     ) {
-        Box(
-            Modifier.fillMaxWidth().onSizeChanged { viewportSize = it },
-            contentAlignment = Alignment.Center,
-        ) {
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             val page = bmp
             if (page != null) {
                 Image(
                     bitmap = page.asImageBitmap(),
                     contentDescription = null,
+                    modifier = Modifier.fillMaxWidth(),
                     contentScale = ContentScale.FillWidth,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clipToBounds()
-                        .pointerInput(page) {
-                            detectTapGestures(
-                                onDoubleTap = { tapOffset ->
-                                    if (scale > IMAGE_MIN_SCALE) {
-                                        scale = IMAGE_MIN_SCALE
-                                        offset = Offset.Zero
-                                    } else {
-                                        scale = IMAGE_DOUBLE_TAP_SCALE
-                                        offset = doubleTapOffset(tapOffset, viewportSize, IMAGE_DOUBLE_TAP_SCALE)
-                                    }
-                                },
-                            )
-                        }
-                        .zoomPan(currentScale = { scale }) { zoomChange, panChange ->
-                            val nextScale = (scale * zoomChange).coerceIn(IMAGE_MIN_SCALE, IMAGE_MAX_SCALE)
-                            scale = nextScale
-                            offset = clampImageOffset(
-                                rawOffset = if (nextScale <= IMAGE_MIN_SCALE) Offset.Zero else offset + panChange,
-                                viewportSize = viewportSize,
-                                scale = nextScale,
-                            )
-                        }
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                            translationX = offset.x
-                            translationY = offset.y
-                        },
                 )
             } else {
                 CircularProgressIndicator(modifier = Modifier.padding(24.dp))
@@ -422,35 +377,6 @@ private const val IMAGE_DOUBLE_TAP_SCALE = 2.5f
 private const val IMAGE_MAX_SCALE = 5f
 
 /**
- * 缩放/平移手势（图片预览与 PDF 页共用）：
- * - 双指：始终缩放（未放大时也能捏合放大）
- * - 单指：仅当已放大（当前 scale > 1）时平移并消费事件；未放大时不消费 → 父级滚动容器
- *   （PDF 的 LazyColumn 等）照常滚动
- * 位移边界由调用方用 [clampImageOffset] 处理。
- */
-private fun Modifier.zoomPan(
-    currentScale: () -> Float,
-    onTransform: (zoomChange: Float, panChange: Offset) -> Unit,
-): Modifier = this.pointerInput(Unit) {
-    awaitEachGesture {
-        awaitFirstDown(requireUnconsumed = false)
-        while (true) {
-            val event = awaitPointerEvent()
-            val pressed = event.changes.count { it.pressed }
-            val zoomChange = event.calculateZoom()
-            val panChange = event.calculatePan()
-            if (pressed >= 2 || currentScale() > IMAGE_MIN_SCALE) {
-                if (zoomChange != 1f || panChange != Offset.Zero) {
-                    onTransform(zoomChange, panChange)
-                }
-                event.changes.forEach { if (it.pressed) it.consume() }
-            }
-            if (event.changes.none { it.pressed }) break
-        }
-    }
-}
-
-/**
  * 图片预览（黑底 + Fit 居中）：双指缩放 1f～5f、拖动平移（按视口夹取边界）、双击在 2.5f/1f 间切换。
  * 数值与判定公式逐项对齐 Operit WorkspaceImagePreview（clampImageOffset / doubleTapOffset）。
  */
@@ -492,15 +418,17 @@ private fun ZoomableImage(bitmap: Bitmap?, name: String) {
                         },
                     )
                 }
-                // 双指缩放 + 已放大时的单指拖动
-                .zoomPan(currentScale = { scale }) { zoomChange, panChange ->
-                    val nextScale = (scale * zoomChange).coerceIn(IMAGE_MIN_SCALE, IMAGE_MAX_SCALE)
-                    scale = nextScale
-                    offset = clampImageOffset(
-                        rawOffset = if (nextScale <= IMAGE_MIN_SCALE) Offset.Zero else offset + panChange,
-                        viewportSize = viewportSize,
-                        scale = nextScale,
-                    )
+                // 双指缩放 + 单指拖动（未放大时偏移恒为 0，平移自动失效）
+                .pointerInput(bitmap) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        val nextScale = (scale * zoom).coerceIn(IMAGE_MIN_SCALE, IMAGE_MAX_SCALE)
+                        scale = nextScale
+                        offset = clampImageOffset(
+                            rawOffset = if (nextScale <= IMAGE_MIN_SCALE) Offset.Zero else offset + pan,
+                            viewportSize = viewportSize,
+                            scale = nextScale,
+                        )
+                    }
                 }
                 .graphicsLayer {
                     scaleX = scale
