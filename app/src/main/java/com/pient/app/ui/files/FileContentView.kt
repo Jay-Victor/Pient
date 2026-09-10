@@ -141,7 +141,7 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
         isPdf && node.source != null -> PdfPreview(node)
         // HTML 预览（WebView 渲染源码；相对资源按所在目录解析，Operit HTML 分支口径）
         isHtml && !chatState.sourceEditMode -> HtmlWebView(
-            html = chatState.fileDrafts[key] ?: textContent ?: "",
+            html = chatState.fileDrafts[key] ?: textContent,
             baseUrl = ProjectFiles.htmlBaseUrl(node),
             modifier = Modifier.fillMaxSize(),
         )
@@ -191,23 +191,31 @@ private fun HtmlPreview(node: FileNode, load: suspend (android.content.Context, 
             CircularProgressIndicator()
         }
         html == null -> PaddedHint("无法打开文件: ${node.name}")
-        else -> HtmlWebView(html.orEmpty(), HTML_BASE_URL, Modifier.fillMaxSize())
+        else -> HtmlWebView(html, HTML_BASE_URL, Modifier.fillMaxSize())
     }
 }
 
 /**
- * HTML 渲染容器（文档预览与 HTML 文件预览共用）。
+ * HTML 渲染容器（文档预览与 HTML 文件预览共用）。html = null 表示内容还没读回来。
  *
- * 防「黑屏一瞬」（2026-09-10 用户报，录屏复现：新建 WebView 的 surface 首次绘制前会整屏黑一帧左右）：
- * - WebView 显式白底（预绘制阶段显示白色而非默认黑）；
- * - `onPageFinished` 前用不透明主题底色 + 转圈盖住 WebView（用户看不到中间态）；
- * - 内容只在 html/baseUrl 变化时 load 一次（旧实现 update 每次重组都 loadDataWithBaseURL，
- *   重复加载会加剧闪烁）；
- * - 外层 clipToBounds + 主题底色兜底。
+ * 防「黑屏一瞬」（2026-09-10）：WebView 显式白底 + onPageFinished 前用不透明主题底色盖住 +
+ * 内容只在 html/baseUrl 变化时 load 一次 + clipToBounds。
+ *
+ * 防「首次打开一直转圈」（2026-09-10 用户报，见 commit）：
+ * - 内容未就绪时不建 WebView（先转圈）——否则会先以空内容建视图，随后内容到达触发重组，
+ *   `remember(html)` 换成新的状态实例，而 factory 里创建的 WebViewClient 仍写旧实例
+ *   → onPageFinished 置的 loaded 永远读不到 → 一直转圈；切走再切回（重建视图）才对。
+ * - loaded 改为**单实例**状态（不随 html 重建），内容变化时用 LaunchedEffect 复位，
+ *   保证与 WebViewClient 捕获的是同一个实例。
  */
 @Composable
-private fun HtmlWebView(html: String, baseUrl: String, modifier: Modifier = Modifier) {
-    var loaded by remember(html, baseUrl) { mutableStateOf(false) }
+private fun HtmlWebView(html: String?, baseUrl: String, modifier: Modifier = Modifier) {
+    if (html == null) {
+        Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        return
+    }
+    val loadedState = remember { mutableStateOf(false) }
+    LaunchedEffect(html, baseUrl) { loadedState.value = false }
     Box(modifier.background(MaterialTheme.colorScheme.background)) {
         AndroidView(
             factory = { ctx ->
@@ -223,7 +231,7 @@ private fun HtmlWebView(html: String, baseUrl: String, modifier: Modifier = Modi
                     settings.allowContentAccess = true
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, url: String?) {
-                            loaded = true
+                            loadedState.value = true
                         }
                     }
                 }
@@ -242,7 +250,7 @@ private fun HtmlWebView(html: String, baseUrl: String, modifier: Modifier = Modi
             },
             modifier = Modifier.fillMaxSize().clipToBounds(),
         )
-        if (!loaded) {
+        if (!loadedState.value) {
             Box(
                 Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
                 contentAlignment = Alignment.Center,
