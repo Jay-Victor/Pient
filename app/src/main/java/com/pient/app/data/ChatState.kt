@@ -523,7 +523,7 @@ class ChatState {
     val openTabs = mutableStateListOf<FileNode>()
     var activeTabIndex by mutableIntStateOf(0)
     var mdEditMode by mutableStateOf(false)      // markdown 渲染/编辑切换
-    var lineNumbers by mutableStateOf(true)      // 行号可选
+    // 行号不设开关（2026-09-10 用户定）：是否显示由预览的文件类型决定，见 FileContentView.CodeView
     val expandedDirs = mutableStateSetOf<String>() // 文件树展开路径
     // 文件树长按菜单「@ 提及插入输入框」请求（ChatScreen 消费后置 null）
     var mentionInsertRequest by mutableStateOf<String?>(null)
