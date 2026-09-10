@@ -287,21 +287,24 @@ private fun FileTabBar(chatState: ChatState, onSave: (FileNode) -> Unit) {
                     .clickable(onClick = { onSave(active) }),
             )
         }
-        // markdown 激活时：标签栏最右出现编辑/渲染切换键
-        if (active != null && active.ext == "md") {
+        // markdown / html 激活时：标签栏最右出现「渲染/源码」切换键
+        if (active != null && active.ext in SOURCE_TOGGLE_EXTS) {
             Icon(
-                if (chatState.mdEditMode) Icons.Outlined.Visibility else Icons.Outlined.Edit,
-                if (chatState.mdEditMode) "渲染模式" else "编辑模式",
+                if (chatState.sourceEditMode) Icons.Outlined.Visibility else Icons.Outlined.Edit,
+                if (chatState.sourceEditMode) "渲染模式" else "编辑模式",
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
                     .padding(horizontal = 8.dp)
                     .size(18.dp)
-                    .clickable(onClick = { chatState.mdEditMode = !chatState.mdEditMode }),
+                    .clickable(onClick = { chatState.sourceEditMode = !chatState.sourceEditMode }),
             )
         }
         }
     }
 }
+
+/** 带「渲染/源码」切换键的扩展名（markdown 与 html 同款交互） */
+private val SOURCE_TOGGLE_EXTS = setOf("md", "html", "htm")
 
 /** 按扩展名区分文件图标（细线 Outlined 风格） */
 fun fileIcon(ext: String): ImageVector = when (ext) {

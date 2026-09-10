@@ -2,9 +2,14 @@ package com.pient.app.ui.files
 
 import android.graphics.Bitmap
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -83,7 +88,8 @@ import kotlin.math.roundToInt
  * 文件内容预览区（设计计划 3.5；2026-09-10 按类型分流 + 编辑，参照 Operit 工作区）：
  * - 视频/音频：ExoPlayer 播放（video：黑底 + FIT 播放器，音频：居中播放器条）
  * - 图片：真实 bitmap，可双指缩放/拖动/双击复位（Operit WorkspaceImagePreview 同款）
- * - Markdown：渲染模式（GFM）/ 编辑模式（可直接编辑）
+ * - Markdown：渲染模式（GFM）/ 源码编辑模式（标签栏右侧切换键）
+ * - HTML：预览模式（WebView 渲染，相对资源按文件所在目录解析）/ 源码编辑模式（同款切换键）
  * - txt：等宽纯文本，**无行号**，可编辑
  * - 其他文本/代码：**行号槽随类型自动显示**（Operit CanvasCodeEditorView 规格），可编辑
  * - 文档/压缩包/安装包：二进制，走「暂不支持预览」提示（无法按文本编辑）
@@ -96,6 +102,7 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
     val isVideo = node.ext in PREVIEW_VIDEO_EXTS
     val isAudio = node.ext in PREVIEW_AUDIO_EXTS
     val isMedia = isVideo || isAudio
+    val isHtml = node.ext in HTML_EXTS
     val isDocx = node.ext == "docx"
     val isDoc = node.ext == "doc"
     val isSheet = node.ext in SHEET_EXTS
@@ -134,16 +141,22 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
         isDocx && node.source != null -> HtmlPreview(node) { ctx, n -> DocxConverter.toHtml(ctx, n) }
         isDoc && node.source != null -> HtmlPreview(node) { ctx, n -> DocumentConverter.docToHtml(ctx, n) }
         isSheet && node.source != null -> HtmlPreview(node) { ctx, n -> DocumentConverter.spreadsheetToHtml(ctx, n) }
-        // PDF 预览（PdfRenderer 逐页位图）
+        // PDF 预览（PdfRenderer 逐页位图，可缩放/拖动）
         isPdf && node.source != null -> PdfPreview(node)
+        // HTML 预览（WebView 渲染源码；相对资源按所在目录解析，Operit HTML 分支口径）
+        isHtml && !chatState.sourceEditMode -> HtmlWebView(
+            html = chatState.fileDrafts[key] ?: textContent ?: "",
+            baseUrl = ProjectFiles.htmlBaseUrl(node),
+            modifier = Modifier.fillMaxSize(),
+        )
         // 真实图片预览（可缩放/拖动）
         isImage && node.source != null -> ZoomableImage(bitmap, node.name)
         tooLarge -> PaddedHint("文件超过 2MB，暂不支持预览")
         unreadable -> PaddedHint("二进制文件，暂不支持预览")
         node.imageHint != null -> ImagePlaceholder(node)
-        isMd && !chatState.mdEditMode -> PaddedScroll {
+        isMd && !chatState.sourceEditMode -> PaddedScroll {
             MarkdownText(
-                textContent ?: "",
+                chatState.fileDrafts[key] ?: textContent ?: "",
                 onFileLink = { path -> onLocalFileLink(chatState, path) },
                 modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
             )
@@ -182,9 +195,28 @@ private fun HtmlPreview(node: FileNode, load: suspend (android.content.Context, 
             CircularProgressIndicator()
         }
         html == null -> PaddedHint("无法打开文件: ${node.name}")
-        else -> AndroidView(
+        else -> HtmlWebView(html.orEmpty(), HTML_BASE_URL, Modifier.fillMaxSize())
+    }
+}
+
+/**
+ * HTML 渲染容器（文档预览与 HTML 文件预览共用）。
+ *
+ * 防「黑屏一瞬」（2026-09-10 用户报，录屏复现：新建 WebView 的 surface 首次绘制前会整屏黑一帧左右）：
+ * - WebView 显式白底（预绘制阶段显示白色而非默认黑）；
+ * - `onPageFinished` 前用不透明主题底色 + 转圈盖住 WebView（用户看不到中间态）；
+ * - 内容只在 html/baseUrl 变化时 load 一次（旧实现 update 每次重组都 loadDataWithBaseURL，
+ *   重复加载会加剧闪烁）；
+ * - 外层 clipToBounds + 主题底色兜底。
+ */
+@Composable
+private fun HtmlWebView(html: String, baseUrl: String, modifier: Modifier = Modifier) {
+    var loaded by remember(html, baseUrl) { mutableStateOf(false) }
+    Box(modifier.background(MaterialTheme.colorScheme.background)) {
+        AndroidView(
             factory = { ctx ->
                 WebView(ctx).apply {
+                    setBackgroundColor(android.graphics.Color.WHITE)
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     settings.useWideViewPort = true
@@ -193,20 +225,39 @@ private fun HtmlPreview(node: FileNode, load: suspend (android.content.Context, 
                     settings.displayZoomControls = false
                     settings.allowFileAccess = true
                     settings.allowContentAccess = true
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            loaded = true
+                        }
+                    }
                 }
             },
-            update = { view -> view.loadDataWithBaseURL(HTML_BASE_URL, html.orEmpty(), "text/html", "UTF-8", null) },
+            update = { view ->
+                // tag 记录已加载内容 → 同一份 html 不重复 load（重组/动画不再触发重载闪屏）
+                if (view.tag != html) {
+                    view.tag = html
+                    view.loadDataWithBaseURL(baseUrl, html, "text/html", "UTF-8", null)
+                }
+            },
             onRelease = { view ->
                 view.stopLoading()
                 view.removeAllViews()
                 view.destroy()
             },
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().clipToBounds(),
         )
+        if (!loaded) {
+            Box(
+                Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
+            }
+        }
     }
 }
 
-/** Operit ReadOnlyHtmlWebView 同款基准 URL */
+/** Operit ReadOnlyHtmlWebView 同款基准 URL（文档预览用；HTML 文件预览用文件所在目录） */
 private const val HTML_BASE_URL = "https://workspace-preview.local/"
 
 // ───────────────────────────── PDF 预览 ─────────────────────────────
@@ -238,25 +289,66 @@ private fun PdfPreview(node: FileNode) {
     }
 }
 
+/**
+ * 单页渲染 + 缩放：与图片预览同口径（1f～5f、拖动按视口夹取、双击 2.5f/1f）。
+ * 未放大时单指拖动不消费事件 → 外层 LazyColumn 正常翻页滚动；放大后被钳在页框内平移。
+ */
 @Composable
 private fun PdfPage(node: FileNode, pageIndex: Int) {
     val context = LocalContext.current
     val bmp by produceState<Bitmap?>(initialValue = null, node.source, pageIndex) {
         value = withContext(Dispatchers.IO) { DocumentConverter.renderPdfPage(context, node, pageIndex) }
     }
+    var scale by remember(node.source, pageIndex) { mutableStateOf(IMAGE_MIN_SCALE) }
+    var offset by remember(node.source, pageIndex) { mutableStateOf(Offset.Zero) }
+    var viewportSize by remember { mutableStateOf(IntSize.Zero) }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = Color.White,
         shadowElevation = 2.dp,
     ) {
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.fillMaxWidth().onSizeChanged { viewportSize = it },
+            contentAlignment = Alignment.Center,
+        ) {
             val page = bmp
             if (page != null) {
                 Image(
                     bitmap = page.asImageBitmap(),
                     contentDescription = null,
-                    modifier = Modifier.fillMaxWidth(),
                     contentScale = ContentScale.FillWidth,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clipToBounds()
+                        .pointerInput(page) {
+                            detectTapGestures(
+                                onDoubleTap = { tapOffset ->
+                                    if (scale > IMAGE_MIN_SCALE) {
+                                        scale = IMAGE_MIN_SCALE
+                                        offset = Offset.Zero
+                                    } else {
+                                        scale = IMAGE_DOUBLE_TAP_SCALE
+                                        offset = doubleTapOffset(tapOffset, viewportSize, IMAGE_DOUBLE_TAP_SCALE)
+                                    }
+                                },
+                            )
+                        }
+                        .zoomPan(currentScale = { scale }) { zoomChange, panChange ->
+                            val nextScale = (scale * zoomChange).coerceIn(IMAGE_MIN_SCALE, IMAGE_MAX_SCALE)
+                            scale = nextScale
+                            offset = clampImageOffset(
+                                rawOffset = if (nextScale <= IMAGE_MIN_SCALE) Offset.Zero else offset + panChange,
+                                viewportSize = viewportSize,
+                                scale = nextScale,
+                            )
+                        }
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                            translationX = offset.x
+                            translationY = offset.y
+                        },
                 )
             } else {
                 CircularProgressIndicator(modifier = Modifier.padding(24.dp))
@@ -330,6 +422,35 @@ private const val IMAGE_DOUBLE_TAP_SCALE = 2.5f
 private const val IMAGE_MAX_SCALE = 5f
 
 /**
+ * 缩放/平移手势（图片预览与 PDF 页共用）：
+ * - 双指：始终缩放（未放大时也能捏合放大）
+ * - 单指：仅当已放大（当前 scale > 1）时平移并消费事件；未放大时不消费 → 父级滚动容器
+ *   （PDF 的 LazyColumn 等）照常滚动
+ * 位移边界由调用方用 [clampImageOffset] 处理。
+ */
+private fun Modifier.zoomPan(
+    currentScale: () -> Float,
+    onTransform: (zoomChange: Float, panChange: Offset) -> Unit,
+): Modifier = this.pointerInput(Unit) {
+    awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false)
+        while (true) {
+            val event = awaitPointerEvent()
+            val pressed = event.changes.count { it.pressed }
+            val zoomChange = event.calculateZoom()
+            val panChange = event.calculatePan()
+            if (pressed >= 2 || currentScale() > IMAGE_MIN_SCALE) {
+                if (zoomChange != 1f || panChange != Offset.Zero) {
+                    onTransform(zoomChange, panChange)
+                }
+                event.changes.forEach { if (it.pressed) it.consume() }
+            }
+            if (event.changes.none { it.pressed }) break
+        }
+    }
+}
+
+/**
  * 图片预览（黑底 + Fit 居中）：双指缩放 1f～5f、拖动平移（按视口夹取边界）、双击在 2.5f/1f 间切换。
  * 数值与判定公式逐项对齐 Operit WorkspaceImagePreview（clampImageOffset / doubleTapOffset）。
  */
@@ -371,17 +492,15 @@ private fun ZoomableImage(bitmap: Bitmap?, name: String) {
                         },
                     )
                 }
-                // 双指缩放 + 单指拖动（未放大时偏移恒为 0，平移自动失效）
-                .pointerInput(bitmap) {
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        val nextScale = (scale * zoom).coerceIn(IMAGE_MIN_SCALE, IMAGE_MAX_SCALE)
-                        scale = nextScale
-                        offset = clampImageOffset(
-                            rawOffset = if (nextScale <= IMAGE_MIN_SCALE) Offset.Zero else offset + pan,
-                            viewportSize = viewportSize,
-                            scale = nextScale,
-                        )
-                    }
+                // 双指缩放 + 已放大时的单指拖动
+                .zoomPan(currentScale = { scale }) { zoomChange, panChange ->
+                    val nextScale = (scale * zoomChange).coerceIn(IMAGE_MIN_SCALE, IMAGE_MAX_SCALE)
+                    scale = nextScale
+                    offset = clampImageOffset(
+                        rawOffset = if (nextScale <= IMAGE_MIN_SCALE) Offset.Zero else offset + panChange,
+                        viewportSize = viewportSize,
+                        scale = nextScale,
+                    )
                 }
                 .graphicsLayer {
                     scaleX = scale
@@ -437,6 +556,9 @@ private val PLAIN_TEXT_EXTS = setOf("txt", "text")
 
 /** 表格文档（Operit isSpreadsheetDocument 口径；xls/xlsx 走 POI WorkbookFactory） */
 private val SHEET_EXTS = setOf("xls", "xlsx")
+
+/** HTML（Operit isHtml 口径：.html / .htm；带「渲染/源码」切换键） */
+private val HTML_EXTS = setOf("html", "htm")
 
 /**
  * 文本编辑区（所有非媒体/非图片文本文件的唯一入口）：等宽正文 + 可选行号槽，输入即改缓冲。

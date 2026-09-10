@@ -129,6 +129,19 @@ object ProjectFiles {
         return if (src.startsWith("content://")) Uri.parse(src) else Uri.fromFile(File(src))
     }
 
+    /**
+     * HTML 预览基准 URL：本地文件用所在目录（`file://<parent>/`，让相对引用的 css/js/图片能加载，
+     * Operit HTML 分支同口径）；SAF 节点无目录语义，回退到文档预览用的占位基准地址。
+     */
+    fun htmlBaseUrl(node: FileNode): String {
+        val src = node.source ?: return FALLBACK_BASE_URL
+        if (src.startsWith("content://")) return FALLBACK_BASE_URL
+        val parent = File(src).parent ?: return FALLBACK_BASE_URL
+        return "file://$parent/"
+    }
+
+    private const val FALLBACK_BASE_URL = "https://workspace-preview.local/"
+
     /** 文本写回（编辑器保存；本地 File / SAF 双通道，成功返回 true） */
     fun writeText(context: Context, node: FileNode, text: String): Boolean {
         val src = node.source ?: return false
