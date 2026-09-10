@@ -727,20 +727,6 @@ fun SessionDrawer(
                                 onDeleteRequest = { deleteConfirmFor = s.id },
                             )
                         }
-                        // 分隔线：置顶会话与下方时间分组列表隔开（2026-09-09 用户要求——
-                        // 置顶段与未置顶会话的视觉分界；仅两侧都有会话且置顶段展开时渲染，
-                        // 全置顶或置顶折叠时无内容可区分，不渲染悬线）
-                        if (groups.isNotEmpty()) {
-                            item(key = "g-pinned-divider") {
-                                Box(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 6.dp)
-                                        .height(1.dp)
-                                        .background(MaterialTheme.colorScheme.outlineVariant),
-                                )
-                            }
-                        }
                     }
                 }
                 // ── 渐进揭示（2026-09-09 用户要求）──
