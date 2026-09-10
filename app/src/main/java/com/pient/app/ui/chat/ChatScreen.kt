@@ -16,6 +16,8 @@ import androidx.compose.foundation.MarqueeAnimationMode
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.lazy.LazyListState
@@ -57,6 +59,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -159,6 +162,10 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     val drawerOpenNow by rememberUpdatedState(chatState.drawerOpen)
     var dragDx by remember { mutableStateOf(0f) }
     var dragDy by remember { mutableStateOf(0f) }
+    // 多指手势监视（捏合缩放预览等）：只读不消费，仅用于让抽屉拖动让位 ——
+    // 否则捏合时第一根手指的水平位移会累计进 dragDx，超过 40px 就把侧栏滑出来
+    // （放大缩小时侧栏乱弹/内容被推走，缩放自然“不丝滑”）。
+    val multiPointerDown = remember { mutableStateOf(false) }
 
     // ── 抽屉展出方式（行为设置）：SLIDE = 水平滑出（默认）／ PERSPECTIVE ／ PUSH ──
     // 手机 = 三选一；平板 = 固定压缩滑出（2026-09-10 用户决策：平板不支持
@@ -219,6 +226,18 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
         Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
+                // 多指监视器（Initial pass：不消费事件，因此不影响任何既有手势）
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    while (true) {
+                        val e = awaitPointerEvent(PointerEventPass.Initial)
+                        multiPointerDown.value = e.changes.count { it.pressed } > 1
+                        if (e.changes.none { it.pressed }) break
+                    }
+                    multiPointerDown.value = false
+                }
+            }
+            .pointerInput(Unit) {
                 detectDragGestures(
                     onDragStart = {
                         dragDx = 0f
@@ -235,6 +254,11 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                 ) { change, _ ->
                     change.consume()
                     val delta = change.position - change.previousPosition
+                    if (multiPointerDown.value) {   // 双指（捏合）不驱动抽屉
+                        dragDx = 0f
+                        dragDy = 0f
+                        return@detectDragGestures
+                    }
                     dragDx += delta.x
                     dragDy += delta.y
                     if (abs(dragDx) > abs(dragDy)) {

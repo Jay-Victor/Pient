@@ -213,7 +213,7 @@ private fun HtmlPreview(node: FileNode, load: suspend (android.content.Context, 
  * HTML 渲染容器（文档预览与 HTML 文件预览共用）。html = null 表示内容还没读回来。
  *
  * 防「黑屏一瞬」（2026-09-10）：WebView 显式白底 + onPageFinished 前用不透明主题底色盖住 +
- * 内容只在 html/baseUrl 变化时 load 一次 + clipToBounds。
+ * 内容只在 html/baseUrl 变化时 load 一次（不加 clipToBounds：会给 interop 视图多套一层全屏图层）。
  *
  * 防「首次打开一直转圈」（2026-09-10 用户报，见 commit）：
  * - 内容未就绪时不建 WebView（先转圈）——否则会先以空内容建视图，随后内容到达触发重组，
@@ -234,6 +234,9 @@ private fun HtmlWebView(html: String?, baseUrl: String, modifier: Modifier = Mod
         AndroidView(
             factory = { ctx ->
                 WebView(ctx).apply {
+                    // 硬件层（Operit WebViewHandler 同款）：WebView 自成一纹理合成，
+                    // 滚动/缩放时不必回落到父级图层重绘
+                    setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
                     setBackgroundColor(android.graphics.Color.WHITE)
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
@@ -262,7 +265,10 @@ private fun HtmlWebView(html: String?, baseUrl: String, modifier: Modifier = Mod
                 view.removeAllViews()
                 view.destroy()
             },
-            modifier = Modifier.fillMaxSize().clipToBounds(),
+            // ★ 不要加 clipToBounds()：它等于 graphicsLayer(clip = true)，会给 interop 视图再套一层
+            //   全尺寸离屏图层（每帧多一次全屏合成，滚动/缩放实测掉帧）；WebView 自身在边界内绘制，
+            //   外层 Box 已有主题底色兜底（Operit 的 ReadOnlyHtmlWebView 也没有裁剪修饰符）
+            modifier = Modifier.fillMaxSize(),
         )
         if (!loadedState.value) {
             Box(
