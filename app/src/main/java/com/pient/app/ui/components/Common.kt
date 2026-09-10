@@ -51,6 +51,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -586,6 +587,12 @@ fun DetailRow(label: String, value: String) {
         )
     }
 }
+
+// ─────────────────────────────────────────────────────────────
+// 设备形态判定（全端唯一出处）：screenWidthDp >= 600 = 平板（OperitApp 同款）
+// ─────────────────────────────────────────────────────────────
+@Composable
+fun isTabletLayout(): Boolean = LocalConfiguration.current.screenWidthDp >= 600
 
 // ─────────────────────────────────────────────────────────────
 // 分区标题（设置/模型配置分区卡片头）

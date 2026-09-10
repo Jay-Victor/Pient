@@ -74,6 +74,7 @@ import com.pient.app.data.ChatState
 import com.pient.app.data.DrawerMode
 import com.pient.app.data.Panel
 import com.pient.app.data.SettingsStore
+import com.pient.app.ui.components.isTabletLayout
 import com.pient.app.ui.components.StatusBadge
 import com.pient.app.ui.files.FilesPanel
 import com.pient.app.ui.terminal.TerminalPanel
@@ -160,18 +161,19 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     var dragDy by remember { mutableStateOf(0f) }
 
     // ── 抽屉展出方式（行为设置）：SLIDE = 水平滑出（默认）／ PERSPECTIVE ／ PUSH ──
+    // 手机 = 三选一；平板 = 固定压缩滑出（2026-09-10 用户决策：平板不支持
+    // 3D 透视展开 / 推动展开），与手机端所选展出方式无关。
     // 手机 = 3D 透视（Operit PhoneLayout 同款，仅选中 PERSPECTIVE 时）；
     // 平板 = 聊天页宽度压缩 + 侧边栏滑出（Operit TabletLayout 同款 width+offset 结构），
-    // 为平板默认行为（2026-08-30 用户决策），选 PUSH 时改为整体推移。
-    // 平板判定：screenWidthDp >= 600（OperitApp 同款）。
+    // 为平板默认行为（2026-08-30 用户决策）。
     val configuration = LocalConfiguration.current
-    val isTablet = configuration.screenWidthDp >= 600
+    val isTablet = isTabletLayout()
     val drawerMode = SettingsStore.drawerMode
     val use3D = drawerMode == DrawerMode.PERSPECTIVE && !isTablet
-    // 推动展开（2026-09-10）：侧栏滑入的同时主内容整体右移一个侧栏宽——两者由同一
+    // 推动展开（2026-09-10，仅手机）：侧栏滑入的同时主内容整体右移一个侧栏宽——两者由同一
     // progress 驱动，逐帧同步；用 offset（不改变布局尺寸）推移，页面内部不回排版面。
-    val usePush = drawerMode == DrawerMode.PUSH
-    val useCompress = isTablet && !usePush
+    val usePush = drawerMode == DrawerMode.PUSH && !isTablet
+    val useCompress = isTablet
     // 平板端 = 常驻侧边栏语义（导航切换/点外一律不收起，2026-08-30 用户决策）；手机端点击即收
     val persistentDrawer = isTablet
     val drawerWidth = 296.dp

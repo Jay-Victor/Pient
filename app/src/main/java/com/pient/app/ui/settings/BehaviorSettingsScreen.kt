@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.outlined.FormatIndentIncreas
 import androidx.compose.material.icons.automirrored.outlined.ViewSidebar
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Compress
 import androidx.compose.material.icons.outlined.ViewInAr
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -32,14 +33,17 @@ import com.pient.app.data.DrawerMode
 import com.pient.app.data.SettingsStore
 import com.pient.app.ui.components.DividerLine
 import com.pient.app.ui.components.SectionHeader
+import com.pient.app.ui.components.isTabletLayout
 
 /**
- * 行为设置（2026-08-28；2026-09-10 改为三选一）：侧边栏展出方式 ——
- * 水平滑出（默认，浮层 + 遮罩）/ 3D 透视展开（聊天页透视让位）/ 推动展开（主内容随侧栏同步推移）。
- * 切换即时生效并持久化（prefs `drawer_mode`）。
+ * 行为设置（2026-08-28；2026-09-10 改为三选一）：
+ * 手机端 = 侧边栏展出方式三选一 —— 水平滑出（默认，浮层 + 遮罩）/ 3D 透视展开 / 推动展开；
+ * 平板端 = 固定压缩滑出（不支持 3D 透视展开与推动展开），故只呈现一种方式（用户决策 2026-09-10）。
+ * 切换即时生效并持久化（prefs `drawer_mode`）；平板端不写 prefs，手机端所选方式得以保留。
  */
 @Composable
 fun BehaviorSettingsScreen(nav: NavController) {
+    val isTablet = isTabletLayout()
     Column(Modifier.fillMaxSize()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -74,25 +78,29 @@ fun BehaviorSettingsScreen(nav: NavController) {
                         .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(16.dp))
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
                 ) {
-                    DrawerModeOptions.forEachIndexed { i, option ->
-                        if (i > 0) DividerLine()
+                    if (isTablet) {
+                        // 平板端固定压缩滑出（不支持 3D 透视展开 / 推动展开）：只有一种方式，
+                        // 因此整行不可点、也不写 prefs —— 手机端所选展出方式在平板仍被保留。
                         DrawerModeRow(
-                            icon = option.icon,
-                            title = option.title,
-                            desc = option.desc,
-                            selected = SettingsStore.drawerMode == option.mode,
-                            onClick = { SettingsStore.drawerMode = option.mode },
+                            icon = Icons.Outlined.Compress,
+                            title = "压缩滑出（平板固定）",
+                            desc = "侧边栏展开时聊天页宽度收窄并同步右移，整页始终完整可见。",
+                            selected = true,
+                            onClick = null,
                         )
+                    } else {
+                        DrawerModeOptions.forEachIndexed { i, option ->
+                            if (i > 0) DividerLine()
+                            DrawerModeRow(
+                                icon = option.icon,
+                                title = option.title,
+                                desc = option.desc,
+                                selected = SettingsStore.drawerMode == option.mode,
+                                onClick = { SettingsStore.drawerMode = option.mode },
+                            )
+                        }
                     }
                 }
-            }
-            item {
-                Text(
-                    "平板端默认压缩聊天页宽度；选择「推动展开」时改为整体推移。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 8.dp),
-                )
             }
         }
     }
@@ -127,20 +135,20 @@ private val DrawerModeOptions = listOf(
     ),
 )
 
-/** 展出方式选项行：图标 + 标题 + 说明 + 选中对勾（整行可点，选中态变色加勾） */
+/** 展出方式选项行：图标 + 标题 + 说明 + 选中对勾（整行可点，选中态变色加勾）；onClick = null 时行不可点（平板固定项） */
 @Composable
 private fun DrawerModeRow(
     icon: ImageVector,
     title: String,
     desc: String,
     selected: Boolean,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)?,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(enabled = onClick != null) { onClick?.invoke() }
             .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
     ) {
         Icon(
