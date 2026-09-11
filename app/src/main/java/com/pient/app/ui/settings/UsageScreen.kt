@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -64,9 +66,16 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import com.pient.app.data.AiConfigStore
+import com.pient.app.data.BillingMode
 import com.pient.app.data.ModelDayUsage
-import com.pient.app.data.UsageMock
+import com.pient.app.data.ModelPricing
+import com.pient.app.data.PricingCurrency
+import com.pient.app.data.UsageStore
+import com.pient.app.data.fromCny
+import com.pient.app.data.toCny
 import com.pient.app.ui.components.PientDialog
+import com.pient.app.ui.components.PientInputBox
 import com.pient.app.ui.components.PientSegmented
 import com.pient.app.ui.theme.PientPanel
 import java.time.Instant
@@ -82,12 +91,20 @@ private enum class UsageRange(val label: String) {
     LAST_7("近7天"), LAST_30("近30天"), WEEK("本周"), MONTH("本月"), CUSTOM("自定义"),
 }
 
-/** 各模型图例色（deepseek 品牌蓝为主色系） */
-private val modelColors = mapOf(
-    "deepseek-chat" to Color(0xFF4D6BFE),
-    "deepseek-reasoner" to Color(0xFF8B5CF6),
-    "claude-sonnet-4-5" to Color(0xFF22D3EE),
+/**
+ * 模型配色池（deepseek 品牌蓝为主色系）：按模型在台账中的首次出现顺序取色——
+ * 切换时间范围/筛选模型不变色，模型数量超过池长时循环取色。
+ */
+private val MODEL_PALETTE = listOf(
+    Color(0xFF4D6BFE), Color(0xFF8B5CF6), Color(0xFF22D3EE), Color(0xFFF59E0B),
+    Color(0xFF10B981), Color(0xFFEF4444), Color(0xFFEC4899), Color(0xFF84CC16),
 )
+
+/** 某模型的图例/柱体/进度条颜色（order = 台账中的模型顺序） */
+private fun modelColor(name: String, order: List<String>): Color {
+    val i = order.indexOf(name)
+    return MODEL_PALETTE[(if (i < 0) 0 else i) % MODEL_PALETTE.size]
+}
 
 /** 堆叠柱的一段（单柱内一个色块） */
 private data class StackSegment(val label: String, val color: Color, val value: Double)
@@ -96,7 +113,8 @@ private data class StackSegment(val label: String, val color: Color, val value: 
  * 模型用量信息（2026-09-01 制作，结构参照 deepseek 开放平台用量页；三版）：
  * 时间维度选择器 + 模型选择器（2026-09-01 新增，同款式卡片 + v 箭头列表）→ 三卡 →
  * Token / 费用 两张堆叠柱状图卡（单模型时按输入/输出堆叠，全部模型按模型堆叠）。
- * 数据为 UsageMock 演示数据。
+ * 数据为**真实用量台账**（2026-09-11 起，UsageStore：每次回复记一笔；
+ * 金额按「模型费用信息」配置的单价计算，未配单价的模型金额为 0）。
  */
 @Composable
 fun UsageScreen(nav: NavController) {
@@ -108,11 +126,26 @@ fun UsageScreen(nav: NavController) {
     var showCustom by remember { mutableStateOf(false) }
     var customStart by remember { mutableStateOf<LocalDate?>(null) }
     var customEnd by remember { mutableStateOf<LocalDate?>(null) }
+    // 模型定价弹窗（Operit 式：用量页里点模型 → 编辑定价和计费方式）+ 汇率输入态
+    var pricingModel by remember { mutableStateOf<String?>(null) }
+    var rateInput by remember { mutableStateOf(AiConfigStore.usdToCnyRate.toString()) }
+
+    // ── 真实数据源（2026-09-11 起替换 UsageMock 演示数据）──
+    // 用量台账：每次回复记一笔（UsageStore，落盘 usage.json）；
+    // 费用不落盘、按「模型费用信息」里配置的单价实时计算 → 改单价金额立即重算。
+    val recordCount = UsageStore.records.size
+    val pricingState = AiConfigStore.pricing.toMap()
+    val rateState = AiConfigStore.usdToCnyRate
+    val modelNames = remember(recordCount) { UsageStore.modelOrder() }
+    val daily = remember(recordCount, pricingState, rateState) { UsageStore.daily() }
+    val firstDate = remember(recordCount) { UsageStore.firstDate() }
+    // 选中模型已从台账消失（记录被清空/换服务商）：回退「全部模型」
+    if (model != null && model !in modelNames) model = null
 
     val today = LocalDate.now()
-    val (start, end) = remember(range, customStart, customEnd, today) {
+    val (start, end) = remember(range, customStart, customEnd, today, firstDate) {
         when (range) {
-            UsageRange.ALL -> today.minusDays((UsageMock.totalDays - 1).toLong()) to today
+            UsageRange.ALL -> (firstDate ?: today) to today
             UsageRange.TODAY -> today to today
             UsageRange.YESTERDAY -> today.minusDays(1) to today.minusDays(1)
             UsageRange.LAST_7 -> today.minusDays(6) to today
@@ -122,11 +155,18 @@ fun UsageScreen(nav: NavController) {
             UsageRange.CUSTOM -> customStart to customEnd
         }
     }
-    val days = remember(start, end) {
+    // X 轴 = 所选时间范围的**每一天**（无记录的日期补零成空柱槽）。
+    // 2026-09-11 用户报「选了非今天的时间维度，图里只有一天」：此前直接用台账里有记录的
+    // 日期当轴（UsageStore.daily() 只含出现过的日期），于是近30天/近7天也只剩一两根柱。
+    val days = remember(daily, start, end) {
         if (start != null && end != null && !start.isAfter(end)) {
-            UsageMock.daily.entries
-                .filter { !it.key.isBefore(start) && !it.key.isAfter(end) }
-                .sortedBy { it.key }
+            val out = ArrayList<Pair<LocalDate, Map<String, ModelDayUsage>>>()
+            var d = start
+            while (!d.isAfter(end)) {
+                out += d to (daily[d] ?: emptyMap())
+                d = d.plusDays(1)
+            }
+            out
         } else emptyList()
     }
     val totals = remember(days, model) {
@@ -138,7 +178,7 @@ fun UsageScreen(nav: NavController) {
                 if (model == null || model == name) {
                     tokens += u.tokens
                     requests += u.requests
-                    cost += u.tokens * priceOf(name) / 1_000_000.0
+                    cost += u.cost
                 }
             }
         }
@@ -148,18 +188,30 @@ fun UsageScreen(nav: NavController) {
     val rangeText = if (start != null && end != null) "${fmtDate(start)} ~ ${fmtDate(end)}"
     else "请选择时间范围"
 
+    // 选中模型的计费方式（单模型视图的图例/费用柱随计费方式变：按次计费不拆输入/输出）
+    val selectedBillingMode = remember(daily, model) {
+        val m = model
+        if (m == null) null else daily.values.asSequence().mapNotNull { it[m] }.firstOrNull()?.billingMode
+    }
+    // 是否有 USD 计价模型的费用（有则显示汇率折算提示；Operit settings_rate_applied_hint 同款）
+    val hasUsdCost = remember(days) {
+        days.any { (_, perModel) ->
+            perModel.any { (_, u) -> u.currency == PricingCurrency.USD && u.cost > 0.0 }
+        }
+    }
+
     // 堆叠数据：全部模型 → 按模型；单模型 → 按输入/输出
-    val tokenStacks = remember(days, model) {
+    val tokenStacks = remember(days, model, modelNames) {
         days.map { (_, perModel) ->
             if (model == null) {
-                UsageMock.models.mapNotNull { m ->
-                    val v = perModel[m.name]?.tokens ?: return@mapNotNull null
-                    if (v <= 0L) null else StackSegment(m.name, modelColors[m.name] ?: Color.Gray, v.toDouble())
+                modelNames.mapNotNull { name ->
+                    val v = perModel[name]?.tokens ?: return@mapNotNull null
+                    if (v <= 0L) null else StackSegment(name, modelColor(name, modelNames), v.toDouble())
                 }
             } else {
                 val m = model ?: return@map emptyList()
                 val u = perModel[m] ?: return@map emptyList()
-                val c = modelColors[m] ?: Color.Gray
+                val c = modelColor(m, modelNames)
                 listOf(
                     StackSegment("输入", c.copy(alpha = 0.45f), u.inputTokens.toDouble()),
                     StackSegment("输出", c, u.outputTokens.toDouble()),
@@ -167,47 +219,52 @@ fun UsageScreen(nav: NavController) {
             }
         }
     }
-    val costStacks = remember(days, model) {
+    val costStacks = remember(days, model, modelNames, selectedBillingMode) {
         days.map { (_, perModel) ->
             if (model == null) {
-                UsageMock.models.mapNotNull { m ->
-                    val u = perModel[m.name] ?: return@mapNotNull null
-                    val v = u.tokens * priceOf(m.name) / 1_000_000.0
-                    if (v <= 0.0) null else StackSegment(m.name, modelColors[m.name] ?: Color.Gray, v)
+                modelNames.mapNotNull { name ->
+                    val u = perModel[name] ?: return@mapNotNull null
+                    if (u.cost <= 0.0) null else StackSegment(name, modelColor(name, modelNames), u.cost)
                 }
             } else {
                 val m = model ?: return@map emptyList()
                 val u = perModel[m] ?: return@map emptyList()
-                val c = modelColors[m] ?: Color.Gray
-                val price = priceOf(m)
-                listOf(
-                    StackSegment("输入", c.copy(alpha = 0.45f), u.inputTokens * price / 1_000_000.0),
-                    StackSegment("输出", c, u.outputTokens * price / 1_000_000.0),
-                )
+                val c = modelColor(m, modelNames)
+                if (selectedBillingMode == BillingMode.COUNT) {
+                    // 按次计费：无输入/输出拆分，单段显示（Operit 按次计费只算每次请求价）
+                    listOf(StackSegment("按次", c, u.cost))
+                } else {
+                    listOf(
+                        StackSegment("输入", c.copy(alpha = 0.45f), u.inputCost),
+                        StackSegment("输出", c, u.outputCost),
+                    )
+                }
             }
         }
     }
-    val legend = remember(model) {
-        if (model == null) {
-            UsageMock.models.map { it.name to (modelColors[it.name] ?: Color.Gray) }
+    val legend = remember(model, modelNames, selectedBillingMode) {
+        val m = model
+        if (m == null) {
+            modelNames.map { it to modelColor(it, modelNames) }
         } else {
-            val c = modelColors[model] ?: Color.Gray
-            listOf("输入" to c.copy(alpha = 0.45f), "输出" to c)
+            val c = modelColor(m, modelNames)
+            if (selectedBillingMode == BillingMode.COUNT) listOf("按次" to c)
+            else listOf("输入" to c.copy(alpha = 0.45f), "输出" to c)
         }
     }
     val modelLabel = model ?: "全部模型"
 
     // 用量排行（模型消耗榜）：每模型 token 总量 + 费用；卡片内分段控制器切换维度
-    val rankData = remember(days) {
+    val rankData = remember(days, modelNames) {
         val tokens = mutableMapOf<String, Long>()
         val costs = mutableMapOf<String, Double>()
         days.forEach { (_, m) ->
             m.forEach { (name, u) ->
                 tokens[name] = (tokens[name] ?: 0L) + u.tokens
-                costs[name] = (costs[name] ?: 0.0) + u.tokens * priceOf(name) / 1_000_000.0
+                costs[name] = (costs[name] ?: 0.0) + u.cost
             }
         }
-        UsageMock.models.map { m -> Triple(m.name, tokens[m.name] ?: 0L, costs[m.name] ?: 0.0) }
+        modelNames.map { name -> Triple(name, tokens[name] ?: 0L, costs[name] ?: 0.0) }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -285,7 +342,7 @@ fun UsageScreen(nav: NavController) {
                         modifier = Modifier.weight(1f),
                         fillMax = true,
                     ) {
-                        val options = listOf<String?>(null) + UsageMock.models.map { it.name }
+                        val options = listOf<String?>(null) + modelNames
                         options.forEach { m ->
                             DropdownMenuItem(
                                 text = {
@@ -318,12 +375,21 @@ fun UsageScreen(nav: NavController) {
                     StatCard("API请求次数", formatCount(totals.second), Modifier.weight(1f))
                     StatCard("Tokens", formatCompact(totals.first), Modifier.weight(1f))
                 }
+                // 汇率折算提示（有 USD 计价模型的费用时显示；Operit settings_rate_applied_hint 同款）
+                if (hasUsdCost) {
+                    Text(
+                        "总费用按 1 USD = ${"%.4f".format(AiConfigStore.usdToCnyRate)} CNY 折算",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                    )
+                }
 
                 // ── Token 用量趋势图卡 ──
                 UsageChartCard(
                     title = "Token",
                     rangeText = rangeText,
-                    days = days.map { it.key },
+                    days = days.map { it.first },
                     stacks = tokenStacks,
                     legend = legend,
                     byCost = false,
@@ -333,14 +399,34 @@ fun UsageScreen(nav: NavController) {
                 UsageChartCard(
                     title = "费用",
                     rangeText = rangeText,
-                    days = days.map { it.key },
+                    days = days.map { it.first },
                     stacks = costStacks,
                     legend = legend,
                     byCost = true,
                 )
                 Spacer(Modifier.height(12.dp))
-                // ── 用量排行（模型消耗榜，卡内 Token/费用 分段切换） ──
-                UsageRankingCard(rankData = rankData, rangeText = rangeText)
+                // ── 用量排行（模型消耗榜，卡内 Token/费用 分段切换；点模型行 = 编辑定价和计费方式） ──
+                UsageRankingCard(
+                    rankData = rankData,
+                    rangeText = rangeText,
+                    modelNames = modelNames,
+                    onEditPricing = { name -> pricingModel = name },
+                )
+                Spacer(Modifier.height(12.dp))
+                // ── 汇率设置卡（Operit 汇率设置同款：美元计费模型按此汇率折算为人民币总费用） ──
+                ExchangeRateCard(
+                    rateInput = rateInput,
+                    onRateInputChange = { rateInput = it },
+                    onSave = {
+                        val parsed = rateInput.trim().toDoubleOrNull()
+                        if (parsed != null && parsed > 0.0) {
+                            AiConfigStore.usdToCnyRate = parsed
+                            toast(context, "汇率已保存")
+                        } else {
+                            toast(context, "请输入大于 0 的汇率")
+                        }
+                    },
+                )
             }
         }
 
@@ -363,6 +449,11 @@ fun UsageScreen(nav: NavController) {
                 },
                 onDismiss = { showCustom = false },
             )
+        }
+
+        // ── 模型定价弹窗（页面级浮层；Operit 式：从用量页模型行进入） ──
+        pricingModel?.let { name ->
+            ModelPricingDialog(model = name, onDismiss = { pricingModel = null })
         }
     }
 }
@@ -457,11 +548,14 @@ private fun StatCard(label: String, value: String, modifier: Modifier = Modifier
     }
 }
 
-/** 用量排行卡（模型消耗榜）：标题右侧 Token/费用 分段控制器；名次徽标 + 模型色点 + 模型名 + 值 + 模型色进度条 */
+/** 用量排行卡（模型消耗榜）：标题右侧 Token/费用 分段控制器；名次徽标 + 模型色点 + 模型名 + 值 + 模型色进度条。
+ *  每行可点 = 打开该模型的定价弹窗（Operit「点击编辑定价和计费方式」同款），行下显示计费摘要。 */
 @Composable
 private fun UsageRankingCard(
     rankData: List<Triple<String, Long, Double>>,
     rangeText: String,
+    modelNames: List<String>,
+    onEditPricing: (String) -> Unit,
 ) {
     var unit by remember { mutableStateOf(1) }   // 0 = Token，1 = 费用（默认费用）
     val sorted = remember(rankData, unit) {
@@ -500,9 +594,15 @@ private fun UsageRankingCard(
         }
         Spacer(Modifier.height(12.dp))
         sorted.forEachIndexed { i, (name, tokens, cost) ->
-            val mColor = modelColors[name] ?: Color.Gray
+            val mColor = modelColor(name, modelNames)
             val value = if (unit == 0) tokens.toDouble() else cost
             val ratio = (value / maxV).toFloat()
+            val pricing = AiConfigStore.effectivePricing(providersOfModel(name).firstOrNull().orEmpty(), name)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onEditPricing(name) },
+            ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // 名次徽标：前 3 主色底、其余弱色
                 Box(
@@ -543,6 +643,15 @@ private fun UsageRankingCard(
                     color = MaterialTheme.colorScheme.onBackground,
                 )
             }
+            // 计费摘要 + 编辑入口提示（Operit 模型卡：计费方式 chip +「点击编辑定价和计费方式」）
+            Text(
+                billingSummary(pricing) + " · 点击编辑定价和计费方式",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 30.dp, top = 2.dp),
+            )
             // 模型色占比进度条
             Box(
                 Modifier
@@ -557,6 +666,7 @@ private fun UsageRankingCard(
                         .height(3.dp)
                         .background(mColor, RoundedCornerShape(1.5.dp)),
                 )
+            }
             }
         }
     }
@@ -594,11 +704,29 @@ private fun UsageChartCard(
             )
         }
         Spacer(Modifier.height(12.dp))
-        StackedBarChart(days, stacks, byCost)
+        // 空态：所选范围内无记录（新装/清数据/范围选错）时给一句说明，避免空白图看着像渲染异常
+        if (stacks.all { it.isEmpty() }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(180.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "所选范围内暂无用量记录 · 对话完成后自动统计",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            StackedBarChart(days, stacks, byCost)
+        }
         Spacer(Modifier.height(8.dp))
-        // 图例
-        Row(
+        // 图例（模型名可能很长：FlowRow 换行 + 单项单行省略。
+        // 2026-09-11 用户报「图右下角有竖直的字」= 图例第二个长模型名被挤成一列竖排字）
+        FlowRow(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
             legend.forEach { (name, color) ->
@@ -612,7 +740,11 @@ private fun UsageChartCard(
                         name,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 5.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .padding(start = 5.dp)
+                            .widthIn(max = 168.dp),
                     )
                 }
             }
@@ -736,14 +868,19 @@ private fun StackedBarChart(
                         }
                     }
                     // X 轴日期标签（按 ~80dp 一根的密度标注，滚动时标签随内容移动）
+                    // 首尾标签横向 clamp 在画布内：否则居中绘制会让内容两端各有一半露在
+                    // 画布外被裁掉（2026-09-11 用户报「滑到左右两端有遮挡、没显示全」）
                     val step = maxOf(1, ((80.dp / slot)).toInt())
+                    val maxX = (size.width - 1f).coerceAtLeast(0f)
                     days.forEachIndexed { i, d ->
                         val show = n <= 7 || i % step == 0 || i == n - 1
                         if (!show) return@forEachIndexed
-                        val cx = slot.toPx() * i + slot.toPx() / 2f
                         val text = fmtDate(d).take(5)
                         val layout = textMeasurer.measure(AnnotatedString(text), labelStyle)
-                        drawText(layout, topLeft = Offset(cx - layout.size.width / 2f, chartH + 4.dp.toPx()))
+                        val cx = slot.toPx() * i + slot.toPx() / 2f
+                        val labelX = (cx - layout.size.width / 2f)
+                            .coerceIn(0f, (maxX - layout.size.width).coerceAtLeast(0f))
+                        drawText(layout, topLeft = Offset(labelX, chartH + 4.dp.toPx()))
                     }
                 }
                 // 柱数据浮层（点击柱后显示；随内容滚动，位于滚动 Box 内）
@@ -939,9 +1076,6 @@ private fun DateField(label: String, value: LocalDate?, onClick: () -> Unit) {
 
 // ───────────────────────────── 工具 ─────────────────────────────
 
-private fun priceOf(name: String): Float =
-    UsageMock.models.firstOrNull { it.name == name }?.pricePerM ?: 0f
-
 /** 金额：¥ 千分位两位小数；≥1 万缩写为 x.xx万 */
 private fun formatMoney(v: Double): String =
     if (v >= 10_000) String.format("¥%.2f万", v / 10_000)
@@ -984,4 +1118,207 @@ private fun fmtDate(d: LocalDate): String = "${"%02d".format(d.monthValue)}-${"%
 
 private fun toast(context: android.content.Context, msg: String) {
     android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+}
+
+// ───────────────────────────── 模型定价（2026-09-11 按 Operit 的处理方式） ─────────────────────────────
+
+/** 计费摘要文案（排行行副标题；币种用模型原生符号——Operit 模型卡的计费方式 + 单价） */
+private fun billingSummary(p: ModelPricing): String {
+    val sym = p.currency.symbol
+    return when (p.billingMode) {
+        BillingMode.TOKEN ->
+            "按Token计费 · 输入 ${sym}${fmtPrice(p.inputPerMillion)}/百万 · 输出 ${sym}${fmtPrice(p.outputPerMillion)}/百万"
+        BillingMode.COUNT -> "按次计费 · 每次 ${sym}${fmtPrice(p.pricePerRequest)}"
+    }
+}
+
+/** 单价数字显示：整数不带小数（1）、其余保留原值（0.02） */
+private fun fmtPrice(v: Double): String =
+    if (v == v.toLong().toDouble()) v.toLong().toString() else v.toString()
+
+/** 该模型挂在哪些服务商下（定价覆盖按 provider:model 存；台账 + 已配置模型列表去重） */
+private fun providersOfModel(name: String): List<String> {
+    val ledger = UsageStore.records.filter { it.model == name }.map { it.provider }
+    val configured = AiConfigStore.configs.filterValues { it.models.contains(name) }.keys.toList()
+    return (ledger + configured).distinct()
+}
+
+/** 带标签的价格输入行（定价弹窗内） */
+@Composable
+private fun PriceField(label: String, value: String, onValueChange: (String) -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        PientInputBox(
+            value = value,
+            onValueChange = { v -> onValueChange(v.filter { c -> c.isDigit() || c == '.' }) },
+            placeholder = "0",
+            number = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 3.dp),
+        )
+    }
+}
+
+/** 汇率设置卡（Operit ExchangeRateSettingsCard 同款：标题 + 副标题 + 汇率输入 + 保存） */
+@Composable
+private fun ExchangeRateCard(
+    rateInput: String,
+    onRateInputChange: (String) -> Unit,
+    onSave: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(16.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+            .padding(14.dp),
+    ) {
+        Text(
+            "汇率设置",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
+        Text(
+            "美元计费模型会按此汇率折算为人民币总费用",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        PientInputBox(
+            value = rateInput,
+            onValueChange = { v -> onRateInputChange(v.filter { c -> c.isDigit() || c == '.' }) },
+            placeholder = "USD → CNY 汇率",
+            number = true,
+            suffix = "CNY",
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp),
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            Text(
+                "保存",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clickable(onClick = onSave)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+        }
+    }
+}
+
+/**
+ * 模型定价弹窗（Operit「编辑模型定价 - 模型名」同款结构）：
+ * 「当前计价币种：CNY」提示 + 计费方式（PientSegmented：按Token计费 / 按次计费）
+ * + 价格输入（一律按人民币填写；USD 计价模型保存时经汇率折回原生价存储，与 Operit
+ * convertCnyToPricingCurrency 口径一致）+ 保存/取消。
+ */
+@Composable
+private fun ModelPricingDialog(model: String, onDismiss: () -> Unit) {
+    val providers = remember(model) { providersOfModel(model) }
+    val rate = AiConfigStore.usdToCnyRate
+    val current = remember(model, providers, rate) {
+        AiConfigStore.effectivePricing(providers.firstOrNull().orEmpty(), model)
+    }
+    var mode by remember { mutableStateOf(current.billingMode) }
+    var inputPrice by remember { mutableStateOf(fmtPrice(toCny(current.inputPerMillion, current.currency, rate))) }
+    var cachedPrice by remember { mutableStateOf(fmtPrice(toCny(current.cachedInputPerMillion, current.currency, rate))) }
+    var outputPrice by remember { mutableStateOf(fmtPrice(toCny(current.outputPerMillion, current.currency, rate))) }
+    var requestPrice by remember { mutableStateOf(fmtPrice(toCny(current.pricePerRequest, current.currency, rate))) }
+
+    fun priceOf(text: String): Double? = text.trim().toDoubleOrNull()?.takeIf { it >= 0.0 }
+    val valid = when (mode) {
+        BillingMode.TOKEN ->
+            priceOf(inputPrice) != null && priceOf(cachedPrice) != null && priceOf(outputPrice) != null
+        BillingMode.COUNT -> priceOf(requestPrice) != null
+    }
+
+    PientDialog(
+        title = "编辑模型定价 - $model",
+        onDismiss = onDismiss,
+        confirmText = "保存",
+        confirmEnabled = valid,
+        showClose = false, // 底部已有取消按钮（全项目确认类弹窗口径）
+        onConfirm = {
+            val pricing = when (mode) {
+                BillingMode.TOKEN -> ModelPricing(
+                    billingMode = BillingMode.TOKEN,
+                    inputPerMillion = fromCny(priceOf(inputPrice) ?: 0.0, current.currency, rate),
+                    outputPerMillion = fromCny(priceOf(outputPrice) ?: 0.0, current.currency, rate),
+                    cachedInputPerMillion = fromCny(priceOf(cachedPrice) ?: 0.0, current.currency, rate),
+                    currency = current.currency,
+                )
+                BillingMode.COUNT -> current.copy(
+                    billingMode = BillingMode.COUNT,
+                    pricePerRequest = fromCny(priceOf(requestPrice) ?: 0.0, current.currency, rate),
+                )
+            }
+            // 同名模型挂在多个服务商下时一并写入（覆盖键 = provider:model）
+            providers.forEach { p -> AiConfigStore.setPricing(p, model, pricing) }
+            onDismiss()
+        },
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            Text(
+                "当前计价币种：CNY",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "计费方式",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
+            )
+            PientSegmented(
+                labels = listOf("按Token计费", "按次计费"),
+                selected = if (mode == BillingMode.TOKEN) 0 else 1,
+                onSelect = { mode = if (it == 0) BillingMode.TOKEN else BillingMode.COUNT },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (mode == BillingMode.TOKEN) {
+                Text(
+                    "设置每百万Token价格（CNY）",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+                PriceField("输入价格（每百万Token） (CNY)", inputPrice) { inputPrice = it }
+                PriceField("缓存输入价格（每百万Token） (CNY)", cachedPrice) { cachedPrice = it }
+                PriceField("输出价格（每百万Token） (CNY)", outputPrice) { outputPrice = it }
+            } else {
+                Text(
+                    "设置每次API请求价格（CNY）",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+                PriceField("单次请求价格（CNY）", requestPrice) { requestPrice = it }
+            }
+            if (!valid) {
+                Text(
+                    "请输入有效的非负价格",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
+    }
 }

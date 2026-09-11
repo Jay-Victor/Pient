@@ -86,6 +86,7 @@ import com.pient.app.data.ProviderInfo
 import com.pient.app.ui.components.DividerLine
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.components.PientDialog
+import com.pient.app.ui.components.PientInputBox
 import com.pient.app.ui.components.SectionHeader
 import com.pient.app.ui.theme.LocalPientIsDark
 import com.pient.app.ui.theme.MonoFont
@@ -486,6 +487,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                     }
                 }
             }
+
         }
     }
 
@@ -716,7 +718,7 @@ private fun ParamInputField(
             .fillMaxWidth()
             .padding(start = 14.dp, end = 14.dp, top = 6.dp),
     ) {
-        InputBox(
+        PientInputBox(
             value = value,
             onValueChange = onValueChange,
             placeholder = placeholder,
@@ -830,7 +832,7 @@ private fun EndpointField(
             .fillMaxWidth()
             .padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
     ) {
-        InputBox(
+        PientInputBox(
             value = value,
             onValueChange = onValueChange,
             placeholder = "https://api.example.com/v1",
@@ -858,7 +860,7 @@ private fun ApiKeyField(
             .fillMaxWidth()
             .padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
     ) {
-        InputBox(
+        PientInputBox(
             value = value,
             onValueChange = onValueChange,
             placeholder = "输入 API Key…",
@@ -886,7 +888,7 @@ private fun ModelListField(
             .fillMaxWidth()
             .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
     ) {
-        InputBox(
+        PientInputBox(
             value = value,
             onValueChange = onValueChange,
             placeholder = "model1;model2（英文分号分隔）",
@@ -898,60 +900,6 @@ private fun ModelListField(
             onClick = onOpenPicker,
         )
     }
-}
-
-/** 通用输入框（surfaceContainerHigh 底 + hairline 边 + 10dp 圆角；suffix 显示在输入框内最右侧） */
-@Composable
-private fun InputBox(
-    value: String,
-    onValueChange: (String) -> Unit,
-    placeholder: String,
-    modifier: Modifier = Modifier,
-    password: Boolean = false,
-    number: Boolean = false,
-    suffix: String? = null,
-) {
-    BasicTextField(
-        value = value,
-        onValueChange = onValueChange,
-        textStyle = MaterialTheme.typography.bodySmall.copy(
-            fontFamily = MonoFont,
-            color = MaterialTheme.colorScheme.onBackground,
-        ),
-        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-        visualTransformation = if (password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
-        keyboardOptions = if (number) KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number) else KeyboardOptions.Default,
-        singleLine = true,
-        modifier = modifier
-            .height(38.dp)
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(10.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        decorationBox = { inner ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Box(Modifier.weight(1f)) {
-                    if (value.isEmpty()) {
-                        Text(
-                            placeholder,
-                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFont),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        )
-                    }
-                    inner()
-                }
-                if (suffix != null) {
-                    Text(
-                        suffix,
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFont),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        },
-    )
 }
 
 /** 输入框旁的图标按钮（38dp 高、与输入框同风格） */
@@ -1030,7 +978,7 @@ private fun TokenInputField(
     onValueChange: (String) -> Unit,
     placeholder: String,
 ) {
-    InputBox(
+    PientInputBox(
         value = value,
         onValueChange = onValueChange,
         placeholder = placeholder,

@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Close
@@ -49,6 +51,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
@@ -62,6 +65,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -69,6 +74,7 @@ import androidx.compose.ui.unit.sp
 import com.pient.app.ui.theme.DarkBrandPurple
 import com.pient.app.ui.theme.LightBrandPurple
 import com.pient.app.ui.theme.LocalPientIsDark
+import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
 
 // ─────────────────────────────────────────────────────────────
@@ -763,4 +769,63 @@ fun PermissionRequestDialog(
         }
         }
     }
+}
+
+/**
+ * 通用输入框（surfaceContainerHigh 底 + hairline 边 + 10dp 圆角；suffix 显示在输入框内最右侧）。
+ * 2026-09-11 从服务商配置页抽到公共组件（模型定价弹窗同样使用，避免第二份实现）。
+ */
+@Composable
+fun PientInputBox(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    password: Boolean = false,
+    number: Boolean = false,
+    suffix: String? = null,
+) {
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        textStyle = MaterialTheme.typography.bodySmall.copy(
+            fontFamily = MonoFont,
+            color = MaterialTheme.colorScheme.onBackground,
+        ),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        visualTransformation = if (password) PasswordVisualTransformation()
+        else androidx.compose.ui.text.input.VisualTransformation.None,
+        keyboardOptions = if (number) KeyboardOptions(keyboardType = KeyboardType.Number)
+        else KeyboardOptions.Default,
+        singleLine = true,
+        modifier = modifier
+            .height(38.dp)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(10.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        decorationBox = { inner ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Box(Modifier.weight(1f)) {
+                    if (value.isEmpty()) {
+                        Text(
+                            placeholder,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFont),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        )
+                    }
+                    inner()
+                }
+                if (suffix != null) {
+                    Text(
+                        suffix,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFont),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+    )
 }
