@@ -48,11 +48,17 @@ enum class InputBarStyle { BOTTOM, FLOATING }
 
 /**
  * 输入框材质（输入框设置标签，效果与依赖对齐 Mdcito 的卡片风格）：
- * - DEFAULT 默认：纯色面板 + hairline 描边（全应用统一容器材质，无玻璃）
- * - FROSTED 磨砂玻璃：采样背后背景并高斯模糊 + 边缘高光 + 投影（kyant backdrop）
+ * - DEFAULT 简约（原「默认」）：实色面板 + hairline 描边，可调透明度（全应用统一容器材质，无玻璃）
+ * - FROSTED 磨砂玻璃：采样背后内容并高斯模糊 + 边缘高光 + 投影，可调纹理强度（kyant backdrop）
  * - LIQUID 液态玻璃：水玻璃流体折射/色散/边缘曲率（fletchmckee liquid）
  */
 enum class InputBarMaterial { DEFAULT, FROSTED, LIQUID }
+
+/** 简约材质透明度滑轨范围（0 = 完全不透明，100 = 完全透明；口径对齐 Mdcito 卡片透明度） */
+const val INPUT_BAR_TRANSPARENCY_MAX = 100
+
+/** 磨砂玻璃纹理强度滑轨范围（Mdcito 纹理强度 0..300：模糊 10 + 20×、叠加浓度 ×0.30） */
+const val INPUT_BAR_FROST_INTENSITY_MAX = 300
 
 /** 字体大小滑轨范围（sp） */
 const val FONT_SIZE_MIN = 12f
@@ -121,9 +127,12 @@ object SettingsStore {
     var customFontLabel by mutableStateOf<String?>(null)  // 导入文件原始名（弹窗显示名）
     var fontSize by mutableStateOf(14f)                   // 12..24 sp
 
-    // ── 输入框设置（2026-09-12）：输入框样式（贴底/悬浮）+ 输入框材质（默认/磨砂玻璃/液态玻璃） ──
+    // ── 输入框设置（2026-09-12）：输入框样式（贴底/悬浮）+ 输入框材质（简约/磨砂玻璃/液态玻璃）
+    //    + 材质各自的可调项（简约→透明度 0..100；磨砂玻璃→纹理强度 0..300，均对齐 Mdcito） ──
     var inputBarStyle by mutableStateOf(InputBarStyle.BOTTOM)
     var inputBarMaterial by mutableStateOf(InputBarMaterial.DEFAULT)
+    var inputBarTransparency by mutableStateOf(0f)      // 0..100：100 = 完全透明（仅简约材质）
+    var inputBarFrostIntensity by mutableStateOf(50f)   // 0..300（仅磨砂玻璃材质；Mdcito 默认 50）
 
     /** 当前主题下生效的主色：自定义开启时按色相生成暗/亮双变体，否则用预设 */
     fun accentFor(dark: Boolean): Color =
@@ -184,6 +193,10 @@ object SettingsStore {
         inputBarMaterial = runCatching {
             InputBarMaterial.valueOf(p.getString("input_bar_material", "DEFAULT") ?: "DEFAULT")
         }.getOrDefault(InputBarMaterial.DEFAULT)
+        inputBarTransparency = p.getFloat("input_bar_transparency", 0f)
+            .coerceIn(0f, INPUT_BAR_TRANSPARENCY_MAX.toFloat())
+        inputBarFrostIntensity = p.getFloat("input_bar_frost_intensity", 50f)
+            .coerceIn(0f, INPUT_BAR_FROST_INTENSITY_MAX.toFloat())
     }
 
     /** 保存当前主题选择（外观模式 + 主题色 + 自定义主题色 + 深浅界面方案），重启后保持 */
@@ -215,12 +228,14 @@ object SettingsStore {
             .apply()
     }
 
-    /** 保存输入框设置（样式 + 材质），重启后保持 */
+    /** 保存输入框设置（样式 + 材质 + 透明度/纹理强度），重启后保持 */
     fun saveInputBar(androidCtx: android.content.Context) {
         androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
             .edit()
             .putString("input_bar_style", inputBarStyle.name)
             .putString("input_bar_material", inputBarMaterial.name)
+            .putFloat("input_bar_transparency", inputBarTransparency)
+            .putFloat("input_bar_frost_intensity", inputBarFrostIntensity)
             .apply()
     }
 

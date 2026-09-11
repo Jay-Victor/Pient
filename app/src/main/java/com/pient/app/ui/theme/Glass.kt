@@ -125,11 +125,22 @@ fun PientGlassSurface(
     modifier: Modifier = Modifier,
     containerColor: Color = MaterialTheme.colorScheme.surfaceContainer,
     floating: Boolean = false,
+    /** 「简约」材质透明度 0..100（100 = 完全透明；口径对齐 Mdcito 卡片透明度 alpha = 1 - t/100） */
+    transparency: Float = 0f,
+    /** 「磨砂玻璃」材质纹理强度 0..300（Mdcito：模糊 10 + 20×因子、叠加浓度 因子×0.30；默认 50） */
+    frostIntensity: Float = 50f,
     extraBackdrop: Backdrop? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
     if (material == InputBarMaterial.DEFAULT) {
-        PientPanel(modifier = modifier, shape = shape, content = content)
+        PientPanel(
+            modifier = modifier,
+            shape = shape,
+            tint = containerColor.copy(
+                alpha = 1f - (transparency / 100f).coerceIn(0f, 1f),
+            ),
+            content = content,
+        )
         return
     }
 
@@ -142,19 +153,17 @@ fun PientGlassSurface(
     }
 
     val isLightGlass = containerColor.luminance() >= 0.5f
-    val overlayAlphaBoost = when (material) {
-        InputBarMaterial.FROSTED -> if (floating) 0.06f else 0.10f
-        else -> if (floating) 0.04f else 0.08f
-    }
     val glassModifier = if (material == InputBarMaterial.FROSTED) {
+        // 纹理强度（Mdcito）：0..300 → 0..1；模糊 10dp + 20dp×因子、叠加浓度 0.30×因子
+        val intensityFactor = (frostIntensity / 300f).coerceIn(0f, 1f)
         Modifier.frostedGlass(
             backdrop = backdrop,
             shape = shape,
             containerColor = containerColor,
             isLightGlass = isLightGlass,
             shadowElevation = if (floating) 10.dp else 14.dp,
-            blurRadius = if (floating) 16.dp else 20.dp,
-            overlayAlphaBoost = overlayAlphaBoost,
+            blurRadius = (10f + 20f * intensityFactor).dp,
+            overlayAlphaBoost = intensityFactor * 0.30f,
         )
     } else {
         Modifier.liquidGlass(
@@ -162,7 +171,7 @@ fun PientGlassSurface(
             containerColor = containerColor,
             isLightGlass = isLightGlass,
             shadowElevation = if (floating) 10.dp else 14.dp,
-            overlayAlphaBoost = overlayAlphaBoost,
+            overlayAlphaBoost = if (floating) 0.04f else 0.08f,
         )
     }
 

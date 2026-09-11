@@ -118,10 +118,12 @@ fun PientApp() {
             .collect { SettingsStore.saveDrawerMode(context) }
     }
 
-    // 输入框设置持久化（样式 + 材质），重启后保持
+    // 输入框设置持久化（样式 + 材质 + 透明度/纹理强度），重启后保持
     LaunchedEffect(Unit) {
-        snapshotFlow { SettingsStore.inputBarStyle to SettingsStore.inputBarMaterial }
-            .collect { SettingsStore.saveInputBar(context) }
+        snapshotFlow {
+            SettingsStore.inputBarStyle to SettingsStore.inputBarMaterial to
+                SettingsStore.inputBarTransparency to SettingsStore.inputBarFrostIntensity
+        }.collect { SettingsStore.saveInputBar(context) }
     }
 
     // 背景设置持久化（媒体类型/图片/视频/模糊/亮度/视频播放），重启后保持

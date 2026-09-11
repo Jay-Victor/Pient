@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -48,6 +49,7 @@ import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.Loop
 import androidx.compose.material.icons.outlined.Rectangle
 import androidx.compose.material.icons.outlined.RoundedCorner
+import androidx.compose.material.icons.outlined.Send
 import androidx.compose.material.icons.outlined.SpaceBar
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.VerticalAlignBottom
@@ -71,6 +73,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.ImageBitmap
@@ -83,6 +87,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
@@ -98,6 +103,8 @@ import com.pient.app.data.DarkSchemes
 import com.pient.app.data.FONT_SIZE_MAX
 import com.pient.app.data.FONT_SIZE_MIN
 import com.pient.app.data.FontSource
+import com.pient.app.data.INPUT_BAR_FROST_INTENSITY_MAX
+import com.pient.app.data.INPUT_BAR_TRANSPARENCY_MAX
 import com.pient.app.data.InputBarMaterial
 import com.pient.app.data.InputBarStyle
 import com.pient.app.data.LightSchemes
@@ -114,8 +121,13 @@ import com.pient.app.ui.components.SectionHeader
 import com.pient.app.ui.components.SettingsRow
 import com.pient.app.ui.components.SettingsSwitchRow
 import com.pient.app.ui.theme.LocalPientIsDark
+import com.pient.app.ui.theme.LocalWaterGlassState
+import com.pient.app.ui.theme.PientGlassSurface
 import com.pient.app.ui.theme.decodeSampled
 import com.pient.app.ui.theme.resolveFontFamily
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import io.github.fletchmckee.liquid.liquefiable
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -1287,9 +1299,215 @@ private fun InputBarTabContent() {
                         selected = SettingsStore.inputBarMaterial == option.material,
                         onClick = { SettingsStore.inputBarMaterial = option.material },
                     )
+                    // 选中材质后在其下方展开该材质的可调项（Mdcito 同款：
+                    // 简约 → 透明度；磨砂玻璃 → 纹理强度；液态玻璃无可调项）
+                    if (SettingsStore.inputBarMaterial == option.material) {
+                        when (option.material) {
+                            InputBarMaterial.DEFAULT -> MaterialSliderRow(
+                                title = "透明度",
+                                value = SettingsStore.inputBarTransparency,
+                                onValueChange = { SettingsStore.inputBarTransparency = it },
+                                range = 0f..INPUT_BAR_TRANSPARENCY_MAX.toFloat(),
+                                rangeLabel = "范围：0 - 100",
+                                valueLabel = "${SettingsStore.inputBarTransparency.roundToInt()}%",
+                            )
+                            InputBarMaterial.FROSTED -> MaterialSliderRow(
+                                title = "纹理强度",
+                                value = SettingsStore.inputBarFrostIntensity,
+                                onValueChange = { SettingsStore.inputBarFrostIntensity = it },
+                                range = 0f..INPUT_BAR_FROST_INTENSITY_MAX.toFloat(),
+                                rangeLabel = "范围：0 - 300",
+                                valueLabel = SettingsStore.inputBarFrostIntensity.roundToInt().toString(),
+                            )
+                            InputBarMaterial.LIQUID -> Unit
+                        }
+                    }
                 }
             }
         }
+
+        // ── 卡片预览（版式对齐 Mdcito CardPreview：渐变底容器 + 材质徽标 + 彩色预览区） ──
+        item { InputBarPreviewCard() }
+    }
+}
+
+/**
+ * 输入框预览（2026-09-12 用户 spec；版式参考 Mdcito CardPreview）：
+ * 渐变底容器（标题行「卡片预览」+ 当前材质徽标）+ 固定高度彩色预览区，
+ * 区内渲染一枚按当前设置（样式 / 材质 / 透明度 / 纹理强度）实时生效的样例输入栏。
+ */
+@Composable
+private fun InputBarPreviewCard() {
+    val material = SettingsStore.inputBarMaterial
+    val floating = SettingsStore.inputBarStyle == InputBarStyle.FLOATING
+    val materialTitle = InputBarMaterialOptions.firstOrNull { it.material == material }?.title ?: ""
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f),
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    ),
+                ),
+            )
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
+                RoundedCornerShape(12.dp),
+            )
+            .padding(16.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "卡片预览",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                materialTitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        InputBarPreviewArea(material = material, floating = floating)
+    }
+}
+
+/**
+ * 预览区：彩色渐变底 + 样例输入栏。
+ * 玻璃材质下把彩色底录成 backdrop（与样例输入栏同级）——预览里的玻璃采样的是预览区自身的彩色底，
+ * 与聊天页输入栏采样「页面背景 + 背后内容」的机制一致。
+ */
+@Composable
+private fun InputBarPreviewArea(material: InputBarMaterial, floating: Boolean) {
+    val previewBackdrop = rememberLayerBackdrop()
+    val waterGlassState = LocalWaterGlassState.current
+    val glassOn = material != InputBarMaterial.DEFAULT
+    val shape = if (floating) RoundedCornerShape(28.dp)
+    else RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(150.dp)
+            .clip(RoundedCornerShape(10.dp)),
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .then(if (glassOn) Modifier.layerBackdrop(previewBackdrop) else Modifier)
+                .then(
+                    if (glassOn && waterGlassState != null) {
+                        Modifier.liquefiable(waterGlassState)
+                    } else {
+                        Modifier
+                    },
+                )
+                .drawBehind {
+                    drawRect(
+                        brush = Brush.linearGradient(
+                            colors = listOf(Color(0xFF6B6BFF), Color(0xFF4ECDC4), Color(0xFFFF6B9D)),
+                            start = Offset.Zero,
+                            end = Offset(size.width, size.height),
+                        ),
+                    )
+                },
+        )
+        // 样例输入栏：贴底 = 贴预览区下沿（上两角圆角），悬浮 = 四周留白 + 全圆角
+        PientGlassSurface(
+            material = material,
+            shape = shape,
+            floating = floating,
+            transparency = SettingsStore.inputBarTransparency,
+            frostIntensity = SettingsStore.inputBarFrostIntensity,
+            extraBackdrop = previewBackdrop,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(
+                    start = if (floating) 12.dp else 0.dp,
+                    end = if (floating) 12.dp else 0.dp,
+                    bottom = if (floating) 12.dp else 0.dp,
+                ),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+            ) {
+                Text(
+                    "给 Agent 派个任务…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.9f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Outlined.Send, null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 材质可调项滑轨块（渲染在选中材质选项行下方）：
+ * 标题行（透明度 / 纹理强度）+ PientSlider（整数吸附）+ 范围/实时数值行。
+ * 取值为整数——显示值与滑块位置必须一致（同字体大小滑轨口径）。
+ */
+@Composable
+private fun MaterialSliderRow(
+    title: String,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    range: ClosedFloatingPointRange<Float>,
+    rangeLabel: String,
+    valueLabel: String,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        PientSlider(
+            value = value,
+            onValueChange = {
+                onValueChange(it.roundToInt().toFloat().coerceIn(range.start, range.endInclusive))
+            },
+            valueRange = range,
+        )
+        SliderRangeRow(range = rangeLabel, value = valueLabel)
     }
 }
 
@@ -1328,8 +1546,8 @@ private val InputBarMaterialOptions = listOf(
     InputBarMaterialOption(
         material = InputBarMaterial.DEFAULT,
         icon = Icons.Outlined.Rectangle,
-        title = "默认",
-        desc = "纯色面板与描边，与其他页面容器材质一致。",
+        title = "简约（默认）",
+        desc = "实色面板、标准描边，清晰利落。",
     ),
     InputBarMaterialOption(
         material = InputBarMaterial.FROSTED,

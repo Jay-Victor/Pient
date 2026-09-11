@@ -124,6 +124,8 @@ fun ChatInputBar(
         material = SettingsStore.inputBarMaterial,
         shape = dockShape,
         floating = floating,
+        transparency = SettingsStore.inputBarTransparency,
+        frostIntensity = SettingsStore.inputBarFrostIntensity,
         extraBackdrop = backdrop,
         modifier = Modifier
             .fillMaxWidth()
