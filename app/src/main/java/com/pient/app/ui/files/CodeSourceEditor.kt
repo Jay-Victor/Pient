@@ -26,8 +26,8 @@ import com.pient.app.data.FileNode
  * 工具栏随系统键盘一起上移（IME 避让由工具栏承担，编辑区传 `applyImePadding = false`）。
  *
  * 缓冲/保存链路与其它文件一致（`ChatState.editDraft` → 标签栏未保存圆点 → 保存键写回磁盘）。
- * 与 markdown 源码编辑器的差异：本栏只做符号插入，不做格式动作，也没有撤销栈
- * （markdown 那套 undo/redo 属其编辑器专用）。
+ * 与 markdown 源码编辑器的差异：本栏只做符号插入 + 撤销/取消撤销，不做 markdown 的格式动作；
+ * 撤销/重做**与 markdown 侧共用同一份实现**（[EditorUndoController]：粒度按编辑动作、每步带光标位置）。
  */
 @Composable
 internal fun CodeSourceEditor(
@@ -53,6 +53,10 @@ internal fun CodeSourceEditor(
         }
     }
 
+    // ── 撤销 / 重做（与 markdown 源码编辑器共用同一份 EditorUndoController：
+    //    粒度按编辑动作、每步带光标位置、撤销与重做都整步恢复）──
+    val history = remember(key) { EditorUndoController() }
+
     // 底部符号工具栏可见性汇报 → FilesPanel 据此把右下 FAB 抬到工具栏之上。
     // 用「进入置真 / 离开复位」而不是静态类型推测：二进制、超限文件走提示分支不显示工具栏，
     // 只有本编辑器知道；切到其它文件或其它预览分支时本组件离开组合，标志自动回落。
@@ -64,8 +68,11 @@ internal fun CodeSourceEditor(
             EditableTextView(
                 value = value,
                 onValueChange = {
+                    history.onTextChange(value, it)     // 按编辑动作并入/新开一步
+                    // 仅选区变化（移动光标）不写编辑缓冲：与 markdown 编辑器同一口径，
+                    // 否则单纯挪一下光标就会把文件标记成未保存
+                    if (it.text != value.text) chatState.editDraft(node, it.text)
                     value = it
-                    chatState.editDraft(node, it.text)
                 },
                 showLineNumbers = true,
                 codeLanguage = codeLanguage,
@@ -74,9 +81,24 @@ internal fun CodeSourceEditor(
             )
         }
         CodeSymbolToolbar(
+            canUndo = history.canUndo,
+            canRedo = history.canRedo,
+            onUndo = {
+                history.undo(value)?.let {
+                    value = it
+                    chatState.editDraft(node, it.text)
+                }
+            },
+            onRedo = {
+                history.redo(value)?.let {
+                    value = it
+                    chatState.editDraft(node, it.text)
+                }
+            },
             onSymbol = { symbol ->
                 val next = insertCodeSymbol(value, symbol)
                 if (next.text != value.text) {
+                    history.push(value)      // 符号插入 = 结构动作，单独一步撤销
                     value = next
                     chatState.editDraft(node, next.text)
                 }

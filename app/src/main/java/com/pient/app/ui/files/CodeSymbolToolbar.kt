@@ -5,6 +5,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Redo
+import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -125,12 +128,11 @@ internal val CodeSymbolGroups: List<List<CodeSymbol>> = listOf(
  * - 同一对之内（串首 +δ 紧接串尾 −δ）：**不补**——那正是要收紧的地方（字形间距 W − 2δ）
  * - 成对键 ↔ 成对键（串尾 −δ 紧接下一串首 +δ）：补 2δ（字形间距回到 B）
  * - 成对键 ↔ 普通键 / 分组竖线：补 δ
- * - 行首为串首时同样补 δ（面板左留白不变）
  *
- * 数据保证「串首后面一定是它的串尾」，故不会出现 串首↔普通键 这种半截组合。
+ * 数据保证「串首后面一定是它的串尾」，故不会出现 串首↔普通键 这种半截组合；
+ * 工具栏最左是撤销 / 取消撤销两枚普通键（照常占标准键宽），不需要额外补偿。
  */
-private fun boundaryGap(prevNudge: Dp?, nudge: Dp, shift: Dp): Dp = when {
-    prevNudge == null -> if (nudge > 0.dp) shift else 0.dp
+private fun boundaryGap(prevNudge: Dp, nudge: Dp, shift: Dp): Dp = when {
     prevNudge > 0.dp && nudge < 0.dp -> 0.dp
     prevNudge < 0.dp && nudge > 0.dp -> shift * 2
     prevNudge != 0.dp || nudge != 0.dp -> shift
@@ -139,6 +141,10 @@ private fun boundaryGap(prevNudge: Dp?, nudge: Dp, shift: Dp): Dp = when {
 
 @Composable
 internal fun CodeSymbolToolbar(
+    canUndo: Boolean,
+    canRedo: Boolean,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
     onSymbol: (CodeSymbol) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -149,8 +155,24 @@ internal fun CodeSymbolToolbar(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
         ) {
-            // 前一项的字形位移（null = 行首；0.dp = 未位移键 / 分组竖线）
-            var prevNudge: Dp? = null
+            // 撤销 / 取消撤销：与 markdown 格式工具栏同款按键、同语义
+            // （共用 EditorUndoController：粒度按编辑动作、撤销与重做都恢复光标位置）
+            EditorToolbarButton(
+                icon = Icons.AutoMirrored.Outlined.Undo,
+                desc = "撤销",
+                enabled = canUndo,
+                onClick = onUndo,
+            )
+            EditorToolbarButton(
+                icon = Icons.AutoMirrored.Outlined.Redo,
+                desc = "取消撤销",
+                enabled = canRedo,
+                onClick = onRedo,
+            )
+            EditorToolbarDivider()
+
+            // 前一项的字形位移（0.dp = 普通键 / 分组竖线）
+            var prevNudge: Dp = 0.dp
             CodeSymbolGroups.forEachIndexed { groupIndex, group ->
                 if (groupIndex > 0) {
                     val gap = boundaryGap(prevNudge, 0.dp, pairShift)
