@@ -15,9 +15,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -51,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pient.app.data.ChatState
 import com.pient.app.data.FileNode
+import com.pient.app.data.MARKDOWN_EXTS
 import com.pient.app.data.SOURCE_TOGGLE_EXTS
 import com.pient.app.ui.components.PientDialog
 import com.pient.app.ui.theme.PientPanel
@@ -67,6 +71,13 @@ import com.pient.app.ui.theme.MonoFont
 fun FilesPanel(chatState: ChatState) {
     val context = LocalContext.current
     var treeOpen by remember { mutableStateOf(false) }
+
+    // markdown 源码模式（md 文件 + 源码编辑）→ 底部格式工具栏占位：FAB 抬到工具栏之上（Mdcito 同款）
+    val activeTab = chatState.openTabs.getOrNull(chatState.activeTabIndex)
+    val mdToolbarVisible = activeTab != null &&
+        activeTab.ext in MARKDOWN_EXTS && chatState.sourceEditMode
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val fabBottomPadding = if (mdToolbarVisible) mdToolbarHeight() + navBottom + 16.dp else 16.dp
 
     // 保存当前文件（成败都给 Toast 反馈：浮层外的页面态文字看不见时仍可感知）
     fun save(node: FileNode) {
@@ -104,10 +115,11 @@ fun FilesPanel(chatState: ChatState) {
         }
 
         // 右下 FAB → 右侧文件树
+        // markdown 源码模式：工具栏占底部 → FAB 抬到工具栏之上（Mdcito 同款）
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(16.dp)
+                .padding(end = 16.dp, bottom = fabBottomPadding)
                 .size(52.dp)
                 .background(MaterialTheme.colorScheme.primary, CircleShape)
                 .clickable(onClick = { treeOpen = true }),

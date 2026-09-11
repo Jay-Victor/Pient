@@ -57,7 +57,13 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
@@ -172,9 +178,11 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
                 imageResolver = { src -> resolveMarkdownImage(chatState, node, src) },
             )
         }
+        // markdown 源码模式：可编辑 + 底部格式工具栏 + 搜索卡（2026-09-11）
+        isMd -> MarkdownSourceEditor(chatState, node, chatState.fileDrafts[key] ?: textContent ?: "")
         // 文本/代码：可编辑；行号槽仅非纯文本显示（txt 无行号）
         // 代码文件另加语法着色与 4 空格缩进标记（Operit 工作区编辑器口径）；txt 两类都不加
-        else -> EditableTextView(
+        else -> PlainTextEditor(
             text = chatState.fileDrafts[key] ?: textContent ?: "",
             onValueChange = { chatState.editDraft(node, it) },
             showLineNumbers = node.ext !in PLAIN_TEXT_EXTS,
@@ -183,6 +191,42 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
             contentKey = key,
         )
     }
+}
+
+/**
+ * 非 markdown 文本/代码编辑入口：把「文本字符串 + 回调」的调用形态适配到 [EditableTextView] 的
+ * TextFieldValue 受控形态（外部文本变化时同步，选区按新长度夹取）。
+ */
+@Composable
+private fun PlainTextEditor(
+    text: String,
+    onValueChange: (String) -> Unit,
+    showLineNumbers: Boolean,
+    codeLanguage: CodeLanguage?,
+    contentKey: Any?,
+) {
+    var value by remember(contentKey) { mutableStateOf(TextFieldValue(text)) }
+    LaunchedEffect(text) {
+        if (value.text != text) {
+            value = TextFieldValue(
+                text = text,
+                selection = TextRange(
+                    value.selection.start.coerceIn(0, text.length),
+                    value.selection.end.coerceIn(0, text.length),
+                ),
+            )
+        }
+    }
+    EditableTextView(
+        value = value,
+        onValueChange = {
+            value = it
+            onValueChange(it.text)
+        },
+        showLineNumbers = showLineNumbers,
+        codeLanguage = codeLanguage,
+        contentKey = contentKey,
+    )
 }
 
 // ───────────────────────────── docx 文档预览 ─────────────────────────────
@@ -543,15 +587,25 @@ private val SHEET_EXTS = setOf("xls", "xlsx")
  * - 行号按「逻辑行」编号：折行的续行不给号，行号与首行同基线（取文本排版的行基线定位）
  */
 @Composable
-private fun EditableTextView(
-    text: String,
-    onValueChange: (String) -> Unit,
+internal fun EditableTextView(
+    /** 受控编辑值（选区是格式插入 / 搜索跳转的前提，故用 TextFieldValue 而非裸字符串） */
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
     showLineNumbers: Boolean,
     /** 非空 = 按该语言语法着色 + 画 4 空格缩进标记（纯文本传 null） */
     codeLanguage: CodeLanguage? = null,
     /** 内容标识（切文件时复位横向滚动，避免上一个文件的滚动位置串到新文件） */
     contentKey: Any? = null,
+    /** 搜索命中区间（非空 = 正文叠加搜索色块；下标 = currentMatchIndex 者用深色） */
+    searchMatches: List<IntRange> = emptyList(),
+    currentMatchIndex: Int = -1,
+    /** 非空 = 请求滚动到该文本偏移（执行后由 onScrollRequestConsumed 清空） */
+    scrollRequest: Int? = null,
+    onScrollRequestConsumed: () -> Unit = {},
+    /** IME 避让由本组件承担（默认）；调用方自带随键盘上移的容器（如 markdown 底部工具栏）时传 false，避免双重留白 */
+    applyImePadding: Boolean = true,
 ) {
+    val text = value.text
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
     val codeStyle = MaterialTheme.typography.bodySmall.copy(
@@ -571,8 +625,13 @@ private fun EditableTextView(
     // 语法着色（Operit 二套调色板随主题切换）与缩进标记几何
     val isDark = LocalPientIsDark.current
     val palette = remember(isDark) { codePalette(isDark) }
-    val transformation = remember(codeLanguage, palette) {
+    val baseTransformation = remember(codeLanguage, palette) {
         codeLanguage?.let { CodeHighlightTransformation(it, palette) }
+    }
+    // 搜索色块叠在语法着色之上（命中处背景/字色覆盖语法色）
+    val transformation = remember(baseTransformation, searchMatches, currentMatchIndex) {
+        if (searchMatches.isEmpty()) baseTransformation
+        else SearchHighlightTransformation(baseTransformation, searchMatches, currentMatchIndex)
     }
     val charWidthPx = remember(codeStyle, density) { monoCharWidthPx(measurer, codeStyle) }
     // 缩进标记色 = blend(背景, 槽边框, 0.68)（Operit indentGuidePaint；Pient 槽无边框 → outlineVariant）
@@ -586,6 +645,16 @@ private fun EditableTextView(
     val noWrap = showLineNumbers && SettingsStore.filePreviewNoWrap
     val hScroll = rememberScrollState()
     LaunchedEffect(contentKey) { hScroll.scrollTo(0) }
+
+    // 搜索跳转：命中偏移 → 该命中所在排版行的顶端 → 滚动到可见（Mdcito 由编辑器自身滚动；此处手动定位）
+    val verticalPadPx = with(density) { (if (showLineNumbers) 10.dp else 8.dp).toPx() }
+    LaunchedEffect(scrollRequest, textLayout) {
+        val offset = scrollRequest ?: return@LaunchedEffect
+        val layout = textLayout ?: return@LaunchedEffect
+        val line = layout.getLineForOffset(offset.coerceIn(0, text.length))
+        scroll.animateScrollTo((layout.getLineTop(line) + verticalPadPx).roundToInt().coerceAtLeast(0))
+        onScrollRequestConsumed()
+    }
 
     // 行号槽几何（位数 → 内边距；槽宽下限 24dp）
     val logicalLines = remember(text) { text.count { it == '\n' } + 1 }
@@ -612,7 +681,7 @@ private fun EditableTextView(
             Modifier
                 .fillMaxSize()
                 .verticalScroll(scroll)
-                .imePadding()
+                .then(if (applyImePadding) Modifier.imePadding() else Modifier)
                 .padding(vertical = if (showLineNumbers) 10.dp else 8.dp),
         ) {
             Box(Modifier.fillMaxWidth()) {
@@ -649,7 +718,7 @@ private fun EditableTextView(
                         }
                     }
                     BasicTextField(
-                        value = text,
+                        value = value,
                         onValueChange = onValueChange,
                         textStyle = codeStyle,
                         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
@@ -699,6 +768,60 @@ private fun DrawScope.drawEditorLineNumbers(
                 y = layout.getLineBaseline(i) - numberLayout.getLineBaseline(0),
             ),
         )
+    }
+}
+
+/**
+ * 搜索命中高亮（叠加在语法着色变换之上）：命中区间加搜索色块 —— 当前命中深色 [MdCurrentMatchHighlight]、
+ * 其余浅色 [MdMatchHighlight]，色块上文字固定深墨色 [MdMatchInk]。
+ * 偏移映射沿用底层变换（搜索高亮只改样式、不增删字符）。
+ */
+private class SearchHighlightTransformation(
+    private val base: VisualTransformation?,
+    private val matches: List<IntRange>,
+    private val currentIndex: Int,
+) : VisualTransformation {
+    private var cachedText: String? = null
+    private var cachedBase: VisualTransformation? = null
+    private var cachedMatches: List<IntRange>? = null
+    private var cachedIndex: Int = -1
+    private var cached: TransformedText? = null
+
+    override fun filter(text: AnnotatedString): TransformedText {
+        cached?.let {
+            if (cachedText == text.text && cachedMatches == matches && cachedIndex == currentIndex &&
+                cachedBase === base
+            ) {
+                return it
+            }
+        }
+        val out = base?.filter(text) ?: TransformedText(text, OffsetMapping.Identity)
+        if (matches.isEmpty()) return out
+        val len = text.length
+        val annotated = buildAnnotatedString {
+            append(out.text)
+            matches.forEachIndexed { index, range ->
+                val start = range.first.coerceIn(0, len)
+                val end = (range.last + 1).coerceIn(0, len)
+                if (start < end) {
+                    addStyle(
+                        SpanStyle(
+                            background = if (index == currentIndex) MdCurrentMatchHighlight else MdMatchHighlight,
+                            color = MdMatchInk,
+                        ),
+                        start,
+                        end,
+                    )
+                }
+            }
+        }
+        return TransformedText(annotated, out.offsetMapping).also {
+            cachedText = text.text
+            cachedBase = base
+            cachedMatches = matches
+            cachedIndex = currentIndex
+            cached = it
+        }
     }
 }
 
