@@ -67,6 +67,7 @@ import com.pient.app.data.AttachmentKind
 import com.pient.app.data.ChatState
 import com.pient.app.data.Quote
 import com.pient.app.ui.components.ContextIndicator
+import com.pient.app.ui.files.fileIcon
 import com.pient.app.ui.theme.PientPanel
 
 /**
@@ -147,7 +148,7 @@ fun ChatInputBar(
                 refMatches.forEach { m ->
                     AttachmentPill(
                         label = m.file.path,
-                        icon = if (m.file.isImage) Icons.Outlined.Image else Icons.Outlined.Description,
+                        icon = fileIcon(m.file.ext),
                         onRemove = {
                             // 移除整个 "@路径"（连同尾随空格），光标移到 token 起点
                             var end = m.endExclusive

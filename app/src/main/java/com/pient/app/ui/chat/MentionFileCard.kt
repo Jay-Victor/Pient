@@ -10,9 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -27,14 +24,24 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pient.app.data.FileNode
+import com.pient.app.ui.files.PREVIEW_IMAGE_EXTS
+import com.pient.app.ui.files.fileIcon
 import com.pient.app.ui.theme.PientPanel
 
 /** @ 引用候选文件（mock 文件树扁平化产物） */
 data class MentionFile(
     val name: String,
     val path: String,   // 项目相对路径（@ 引用格式用）
-    val isImage: Boolean = false,
-)
+    /**
+     * 小写扩展名（FileNode.ext 同源）。图标与类型判定必须走文件树同一函数
+     * `fileIcon(ext)` —— 此前本模型自带 `isImage` 布尔 + 各处各写一份图标
+     * （非图片一律 Description），与文件树（video=MOVIE / audio=MUSIC_NOTE /
+     * 其它=INSERT_DRIVE_FILE）不一致，@ 引用 chip 的图案与文件树对不上。
+     */
+    val ext: String = "",
+) {
+    val isImage: Boolean get() = ext in PREVIEW_IMAGE_EXTS
+}
 
 /** 文本中已提交的 @ 引用路径（含起止下标；供 chip 派生与输入框高亮共用） */
 data class MentionPathMatch(
@@ -78,14 +85,14 @@ fun buildMentionFiles(node: FileNode, prefix: String = ""): List<MentionFile> {
             result += MentionFile(
                 name = child.name,
                 path = p,
-                isImage = child.imageHint != null || child.ext in IMAGE_EXTS,
+                ext = child.ext,
             )
         }
     }
     return result
 }
 
-private val IMAGE_EXTS = setOf("png", "jpg", "jpeg", "webp", "gif")
+/** 图标一律走文件树共享函数：见 ui/files/FilesPanel.kt 的 fileIcon(ext)（原 IMAGE_EXTS 清单已废弃） */
 
 /**
  * 光标处是否有完整的 @ 引用 token 收尾（含或不含尾随空格）。
@@ -219,5 +226,5 @@ private fun MentionFileRow(f: MentionFile, onClick: () -> Unit) {
     }
 }
 
-private fun iconFor(f: MentionFile): ImageVector =
-    if (f.isImage) Icons.Outlined.Image else Icons.Outlined.Description
+/** @ 候选行图标 = 文件树同一函数（fileIcon(ext)：图片/视频/音频/其它四态一致） */
+private fun iconFor(f: MentionFile): ImageVector = fileIcon(f.ext)
