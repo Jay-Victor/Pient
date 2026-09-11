@@ -65,16 +65,23 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pient.app.data.AttachmentKind
 import com.pient.app.data.ChatState
+import com.pient.app.data.InputBarStyle
 import com.pient.app.data.Quote
+import com.pient.app.data.SettingsStore
 import com.pient.app.ui.components.ContextIndicator
 import com.pient.app.ui.files.fileIcon
-import com.pient.app.ui.theme.PientPanel
+import com.pient.app.ui.theme.PientGlassSurface
+import com.kyant.backdrop.Backdrop
 
 /**
  * 输入栏 dock（P1 核心，设计计划 3.4）：
- * 玻璃容器；多行输入框（2–6 行，中文全拼/IME 组合态）；左下方
+ * 多行输入框（2–6 行，中文全拼/IME 组合态）；左下方
  * 模型选择器 + 上下文指示器；右下方 "+" 与发送键；流式中发送键
  * 变停止（abort），模型选择器禁用置灰。
+ *
+ * 外观由「主题与外观 → 输入框设置」决定（2026-09-12）：
+ * - 输入框样式：贴底（与屏幕底边齐平、上两角 16dp）/ 悬浮（四角全圆角、四周留白浮起）；
+ * - 输入框材质：默认（纯色面板）/ 磨砂玻璃 / 液态玻璃（见 [PientGlassSurface]）。
  */
 @Composable
 fun ChatInputBar(
@@ -96,6 +103,8 @@ fun ChatInputBar(
     focusTick: Int = 0,
     onChipPositioned: (Float) -> Unit = {}, // 模型按键上缘 y（root 坐标，px）：供弹窗底部锚定
     onDockTopPositioned: (Float) -> Unit = {}, // dock 上缘 y（root 坐标，px）：供 @ 引用卡锚定
+    /** 输入栏背后内容层的 backdrop（2026-09-12）：玻璃采样「内容滑过输入栏」的实时画面 */
+    backdrop: Backdrop? = null,
 ) {
     var fullscreenOpen by rememberSaveable { mutableStateOf(false) }
     val streaming = chatState.isStreaming
@@ -106,13 +115,27 @@ fun ChatInputBar(
     // @ 引用高亮（Operit MentionVisualTransformation 同款：主色 14% 底 + 主色字 + 0.88x + Medium）
     val mentionTransformation = rememberMentionVisualTransformation(mentionFiles)
 
-    PientPanel(
+    // 输入框设置（2026-09-12）：贴底 / 悬浮 + 材质（默认 / 磨砂玻璃 / 液态玻璃）
+    val floating = SettingsStore.inputBarStyle == InputBarStyle.FLOATING
+    val dockShape = if (floating) RoundedCornerShape(28.dp)
+    else RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+
+    PientGlassSurface(
+        material = SettingsStore.inputBarMaterial,
+        shape = dockShape,
+        floating = floating,
+        extraBackdrop = backdrop,
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
             .imePadding()
+            // 悬浮：四周留白（圆角矩形整体浮起）；贴底：仅保留上两角圆角、贴齐底边
+            .padding(
+                start = if (floating) 12.dp else 0.dp,
+                end = if (floating) 12.dp else 0.dp,
+                bottom = if (floating) 10.dp else 0.dp,
+            )
             .onGloballyPositioned { onDockTopPositioned(it.positionInRoot().y) },
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
     ) {
     Column(
         modifier = Modifier

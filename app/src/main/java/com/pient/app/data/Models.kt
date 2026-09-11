@@ -39,6 +39,21 @@ enum class VideoCropMode(val label: String) {
 /** 字体来源（字体设置标签：分段控制器两段） */
 enum class FontSource { BUILTIN, CUSTOM }
 
+/**
+ * 输入框样式（输入框设置标签）：
+ * - BOTTOM 贴底输入框（默认）：与屏幕底边齐平，仅上两角 16dp 圆角
+ * - FLOATING 悬浮输入框：四角全圆角、四周留白，像卡片一样浮在页面上
+ */
+enum class InputBarStyle { BOTTOM, FLOATING }
+
+/**
+ * 输入框材质（输入框设置标签，效果与依赖对齐 Mdcito 的卡片风格）：
+ * - DEFAULT 默认：纯色面板 + hairline 描边（全应用统一容器材质，无玻璃）
+ * - FROSTED 磨砂玻璃：采样背后背景并高斯模糊 + 边缘高光 + 投影（kyant backdrop）
+ * - LIQUID 液态玻璃：水玻璃流体折射/色散/边缘曲率（fletchmckee liquid）
+ */
+enum class InputBarMaterial { DEFAULT, FROSTED, LIQUID }
+
 /** 字体大小滑轨范围（sp） */
 const val FONT_SIZE_MIN = 12f
 const val FONT_SIZE_MAX = 24f
@@ -106,6 +121,10 @@ object SettingsStore {
     var customFontLabel by mutableStateOf<String?>(null)  // 导入文件原始名（弹窗显示名）
     var fontSize by mutableStateOf(14f)                   // 12..24 sp
 
+    // ── 输入框设置（2026-09-12）：输入框样式（贴底/悬浮）+ 输入框材质（默认/磨砂玻璃/液态玻璃） ──
+    var inputBarStyle by mutableStateOf(InputBarStyle.BOTTOM)
+    var inputBarMaterial by mutableStateOf(InputBarMaterial.DEFAULT)
+
     /** 当前主题下生效的主色：自定义开启时按色相生成暗/亮双变体，否则用预设 */
     fun accentFor(dark: Boolean): Color =
         if (customAccentEnabled) {
@@ -159,6 +178,12 @@ object SettingsStore {
         customFontPath = p.getString("custom_font_path", null)
         customFontLabel = p.getString("custom_font_label", null)
         fontSize = p.getFloat("font_size", 14f).coerceIn(FONT_SIZE_MIN, FONT_SIZE_MAX)
+        inputBarStyle = runCatching {
+            InputBarStyle.valueOf(p.getString("input_bar_style", "BOTTOM") ?: "BOTTOM")
+        }.getOrDefault(InputBarStyle.BOTTOM)
+        inputBarMaterial = runCatching {
+            InputBarMaterial.valueOf(p.getString("input_bar_material", "DEFAULT") ?: "DEFAULT")
+        }.getOrDefault(InputBarMaterial.DEFAULT)
     }
 
     /** 保存当前主题选择（外观模式 + 主题色 + 自定义主题色 + 深浅界面方案），重启后保持 */
@@ -187,6 +212,15 @@ object SettingsStore {
         androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
             .edit()
             .putString("drawer_mode", drawerMode.name)
+            .apply()
+    }
+
+    /** 保存输入框设置（样式 + 材质），重启后保持 */
+    fun saveInputBar(androidCtx: android.content.Context) {
+        androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString("input_bar_style", inputBarStyle.name)
+            .putString("input_bar_material", inputBarMaterial.name)
             .apply()
     }
 

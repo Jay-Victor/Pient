@@ -60,6 +60,11 @@ dependencies {
     implementation("androidx.media3:media3-effect:1.7.1")
     implementation("com.vanniktech:android-image-cropper:4.5.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // 输入框材质（磨砂玻璃 / 液态玻璃，2026-09-12，与 Mdcito 同款依赖）：
+    //   com.kyant.backdrop  — 背景采样 + 高斯模糊 + 边缘高光/投影（磨砂玻璃，enableLens 时含透镜折射）
+    //   io.github.fletchmckee.liquid — 水玻璃流体折射/色散（液态玻璃）
+    implementation("io.github.kyant0:backdrop:1.0.6")
+    implementation("io.github.fletchmckee.liquid:liquid:1.1.1")
     // 文档预览（Operit 同款：.doc = poi-scratchpad HWPF、.xls/.xlsx = poi/poi-ooxml WorkbookFactory）
     implementation("org.apache.poi:poi:5.2.3")
     implementation("org.apache.poi:poi-ooxml:5.2.3")

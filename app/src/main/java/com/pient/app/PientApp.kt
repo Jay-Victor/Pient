@@ -49,6 +49,7 @@ import com.pient.app.ui.skills.SkillSearchScreen
 import com.pient.app.ui.skills.SkillsScreen
 import com.pient.app.ui.terminal.TerminalSetupScreen
 import com.pient.app.ui.theme.AppBackgroundLayer
+import com.pient.app.ui.theme.PientGlassProvisioning
 import com.pient.app.ui.theme.PientTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.debounce
@@ -115,6 +116,12 @@ fun PientApp() {
     LaunchedEffect(Unit) {
         snapshotFlow { SettingsStore.drawerMode }
             .collect { SettingsStore.saveDrawerMode(context) }
+    }
+
+    // 输入框设置持久化（样式 + 材质），重启后保持
+    LaunchedEffect(Unit) {
+        snapshotFlow { SettingsStore.inputBarStyle to SettingsStore.inputBarMaterial }
+            .collect { SettingsStore.saveInputBar(context) }
     }
 
     // 背景设置持久化（媒体类型/图片/视频/模糊/亮度/视频播放），重启后保持
@@ -192,62 +199,72 @@ fun PientApp() {
         // ★ 全屏页面底色：亮色模式下页面整体变白、暗色模式下变黑，
         // 卡片/消息气泡等容器在底色之上用各自的 surface 令牌分层。
         // 自定义背景（背景设置标签）作为最底层覆盖其上（未设置时不绘制，底色保持）。
-        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            AppBackgroundLayer()
-            NavHost(
-                navController = nav,
-                startDestination = if (onboarded) "chat" else "onboarding",
-                // 页面级路由 = 水平推入（2026-08-27）：新页从右滑入、旧页向左让位；
-                // 返回时旧页从左滑回、当前页向右退出。API 34+ 自动支持预测性返回手势。
-                enterTransition = { slideInHorizontally(tween(300)) { it } },
-                exitTransition = { slideOutHorizontally(tween(300)) { -it } },
-                popEnterTransition = { slideInHorizontally(tween(300)) { -it } },
-                popExitTransition = { slideOutHorizontally(tween(300)) { it } },
-            ) {
-                composable("onboarding") {
-                    OnboardingScreen(onDone = {
-                        prefs.edit().putBoolean("onboarded", true).apply()
-                        nav.navigate("chat") { popUpTo(0) { inclusive = true } }
-                    })
-                }
-                composable("chat") {
-                    ChatScreen(chatState = chatState, nav = nav)
-                }
-                composable("skills") {
-                    SkillsScreen(nav = nav)
-                }
-                composable("skill_search") {
-                    SkillSearchScreen(nav = nav)
-                }
-                composable("plugins") {
-                    PluginsScreen(nav = nav)
-                }
-                composable("settings") {
-                    SettingsScreen(nav = nav)
-                }
-                composable("model_config") {
-                    ModelConfigScreen(nav = nav, chatState = chatState)
-                }
-                composable("theme_settings") {
-                    ThemeSettingsScreen(nav = nav)
-                }
-                composable("language_settings") {
-                    LanguageSettingsScreen(nav = nav)
-                }
-                composable("behavior_settings") {
-                    BehaviorSettingsScreen(nav = nav)
-                }
-                composable("terminal_setup") {
-                    TerminalSetupScreen(nav = nav, chatState = chatState)
-                }
-                composable("usage") {
-                    UsageScreen(nav = nav)
-                }
-                composable("project_management") {
-                    ProjectManagementScreen(nav = nav, chatState = chatState)
-                }
-                composable("about") {
-                    AboutScreen(nav = nav)
+        //
+        // ★ 玻璃材质基础设施（2026-09-12，输入框设置「输入框材质」）：
+        // 底色 + 背景层放进「背景捕获层」，应用内容与其同级 —— 输入栏的磨砂/液态玻璃
+        // 从中采样背景纹理；若把内容放进捕获层会造成渲染树自引用（Mdcito 同款红线）。
+        PientGlassProvisioning(
+            backgroundContent = {
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+                AppBackgroundLayer()
+            },
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                NavHost(
+                    navController = nav,
+                    startDestination = if (onboarded) "chat" else "onboarding",
+                    // 页面级路由 = 水平推入（2026-08-27）：新页从右滑入、旧页向左让位；
+                    // 返回时旧页从左滑回、当前页向右退出。API 34+ 自动支持预测性返回手势。
+                    enterTransition = { slideInHorizontally(tween(300)) { it } },
+                    exitTransition = { slideOutHorizontally(tween(300)) { -it } },
+                    popEnterTransition = { slideInHorizontally(tween(300)) { -it } },
+                    popExitTransition = { slideOutHorizontally(tween(300)) { it } },
+                ) {
+                    composable("onboarding") {
+                        OnboardingScreen(onDone = {
+                            prefs.edit().putBoolean("onboarded", true).apply()
+                            nav.navigate("chat") { popUpTo(0) { inclusive = true } }
+                        })
+                    }
+                    composable("chat") {
+                        ChatScreen(chatState = chatState, nav = nav)
+                    }
+                    composable("skills") {
+                        SkillsScreen(nav = nav)
+                    }
+                    composable("skill_search") {
+                        SkillSearchScreen(nav = nav)
+                    }
+                    composable("plugins") {
+                        PluginsScreen(nav = nav)
+                    }
+                    composable("settings") {
+                        SettingsScreen(nav = nav)
+                    }
+                    composable("model_config") {
+                        ModelConfigScreen(nav = nav, chatState = chatState)
+                    }
+                    composable("theme_settings") {
+                        ThemeSettingsScreen(nav = nav)
+                    }
+                    composable("language_settings") {
+                        LanguageSettingsScreen(nav = nav)
+                    }
+                    composable("behavior_settings") {
+                        BehaviorSettingsScreen(nav = nav)
+                    }
+                    composable("terminal_setup") {
+                        TerminalSetupScreen(nav = nav, chatState = chatState)
+                    }
+                    composable("usage") {
+                        UsageScreen(nav = nav)
+                    }
+                    composable("project_management") {
+                        ProjectManagementScreen(nav = nav, chatState = chatState)
+                    }
+                    composable("about") {
+                        AboutScreen(nav = nav)
+                    }
                 }
             }
         }

@@ -46,8 +46,13 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.Loop
+import androidx.compose.material.icons.outlined.Rectangle
+import androidx.compose.material.icons.outlined.RoundedCorner
+import androidx.compose.material.icons.outlined.SpaceBar
 import androidx.compose.material.icons.outlined.TextFields
+import androidx.compose.material.icons.outlined.VerticalAlignBottom
 import androidx.compose.material.icons.outlined.Videocam
+import androidx.compose.material.icons.outlined.WaterDrop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -93,6 +98,8 @@ import com.pient.app.data.DarkSchemes
 import com.pient.app.data.FONT_SIZE_MAX
 import com.pient.app.data.FONT_SIZE_MIN
 import com.pient.app.data.FontSource
+import com.pient.app.data.InputBarMaterial
+import com.pient.app.data.InputBarStyle
 import com.pient.app.data.LightSchemes
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ThemeMode
@@ -119,7 +126,7 @@ private enum class ThemeTab(val label: String) {
     THEME("主题设置"),
     BACKGROUND("背景设置"),
     FONT("字体设置"),
-    MATERIAL("外观设置"),
+    INPUT_BAR("输入框设置"),
 }
 
 /** 分段控制器展示顺序（用户指定：浅色 → 深色 → 跟随系统）与 ThemeMode 枚举的映射 */
@@ -185,7 +192,7 @@ fun ThemeSettingsScreen(nav: NavController) {
             ThemeTab.THEME -> ThemeTabContent()
             ThemeTab.BACKGROUND -> BackgroundTabContent()
             ThemeTab.FONT -> FontTabContent()
-            ThemeTab.MATERIAL -> PlaceholderTab()
+            ThemeTab.INPUT_BAR -> InputBarTabContent()
         }
     }
 }
@@ -1241,16 +1248,144 @@ private fun copyFontToInternalStorage(context: android.content.Context, uri: Uri
 }
 
 // ─────────────────────────────────────────────────────────────
-// 未制作标签占位
+// 输入框设置标签：输入框样式 + 输入框材质（2026-09-12）
 // ─────────────────────────────────────────────────────────────
+/**
+ * 输入框设置（用户 spec 2026-09-12；原「外观设置」占位标签及页面已移除）：
+ * - 输入框样式：贴底输入框（默认）/ 悬浮输入框（输入框变为悬浮的全圆角矩形）；
+ * - 输入框材质：默认 / 磨砂玻璃 / 液态玻璃（材质效果与依赖参考 Mdcito 的卡片风格）。
+ * 两处即时生效于聊天页输入栏，并写 prefs 持久化。
+ */
 @Composable
-private fun PlaceholderTab() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(
-            "暂不制作",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+private fun InputBarTabContent() {
+    LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
+        item { SectionHeader("输入框样式", icon = Icons.Outlined.SpaceBar) }
+        item {
+            Card {
+                InputBarStyleOptions.forEachIndexed { i, option ->
+                    if (i > 0) DividerLine()
+                    InputBarOptionRow(
+                        icon = option.icon,
+                        title = option.title,
+                        desc = option.desc,
+                        selected = SettingsStore.inputBarStyle == option.style,
+                        onClick = { SettingsStore.inputBarStyle = option.style },
+                    )
+                }
+            }
+        }
+
+        item { SectionHeader("输入框材质", icon = Icons.Outlined.BlurOn) }
+        item {
+            Card {
+                InputBarMaterialOptions.forEachIndexed { i, option ->
+                    if (i > 0) DividerLine()
+                    InputBarOptionRow(
+                        icon = option.icon,
+                        title = option.title,
+                        desc = option.desc,
+                        selected = SettingsStore.inputBarMaterial == option.material,
+                        onClick = { SettingsStore.inputBarMaterial = option.material },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 输入框样式选项（顺序即卡片内排列顺序；「默认」项按用户 spec 写进标题） */
+private data class InputBarStyleOption(
+    val style: InputBarStyle,
+    val icon: ImageVector,
+    val title: String,
+    val desc: String,
+)
+
+private val InputBarStyleOptions = listOf(
+    InputBarStyleOption(
+        style = InputBarStyle.BOTTOM,
+        icon = Icons.Outlined.VerticalAlignBottom,
+        title = "贴底输入框（默认）",
+        desc = "输入框与屏幕底边齐平，仅上方两角圆角。",
+    ),
+    InputBarStyleOption(
+        style = InputBarStyle.FLOATING,
+        icon = Icons.Outlined.RoundedCorner,
+        title = "悬浮输入框",
+        desc = "输入框变为悬浮的全圆角矩形，四周留白浮在页面上。",
+    ),
+)
+
+/** 输入框材质选项（说明文案沿用 Mdcito 卡片风格的同名项） */
+private data class InputBarMaterialOption(
+    val material: InputBarMaterial,
+    val icon: ImageVector,
+    val title: String,
+    val desc: String,
+)
+
+private val InputBarMaterialOptions = listOf(
+    InputBarMaterialOption(
+        material = InputBarMaterial.DEFAULT,
+        icon = Icons.Outlined.Rectangle,
+        title = "默认",
+        desc = "纯色面板与描边，与其他页面容器材质一致。",
+    ),
+    InputBarMaterialOption(
+        material = InputBarMaterial.FROSTED,
+        icon = Icons.Outlined.BlurLinear,
+        title = "磨砂玻璃",
+        desc = "半通透模糊效果，方向光照浮雕纹理。",
+    ),
+    InputBarMaterialOption(
+        material = InputBarMaterial.LIQUID,
+        icon = Icons.Outlined.WaterDrop,
+        title = "液态玻璃",
+        desc = "水润折射色散质感。",
+    ),
+)
+
+/** 输入框设置选项行：图标 + 标题 + 说明 + 选中对勾（整行可点，选中态图标/标题变主色） */
+@Composable
+private fun InputBarOptionRow(
+    icon: ImageVector,
+    title: String,
+    desc: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+    ) {
+        Icon(
+            icon, null,
+            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
         )
+        Column(Modifier.weight(1f).padding(start = 14.dp)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                desc,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        if (selected) {
+            Icon(
+                Icons.Outlined.Check, null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 8.dp).size(18.dp),
+            )
+        }
     }
 }
 
