@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -37,28 +38,33 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.pient.app.data.CodeLanguages
 import com.pient.app.data.FileNode
-import com.pient.app.data.MdAlign
 import com.pient.app.data.MdBlock
 import com.pient.app.data.MdFrontmatter
 import com.pient.app.data.MdSpan
@@ -69,6 +75,7 @@ import com.pient.app.ui.files.CodeHighlightTransformation
 import com.pient.app.ui.files.codePalette
 import com.pient.app.ui.theme.LocalPientIsDark
 import com.pient.app.ui.theme.MonoFont
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -598,24 +605,67 @@ private fun QuoteAwareBlocks(
 private fun TableBlock(block: MdBlock.Table, s: MdStyles, modifier: Modifier = Modifier) {
     val columns = maxOf(block.head.size, block.rows.maxOfOrNull { it.size } ?: 0)
     if (columns == 0) return
-    // 列宽权重按各列最长内容估算（pi-web 用 min-width:100% + 横向滚动；移动端改为自适应换行）
-    val weights = remember(block) {
-        List(columns) { col ->
-            val maxLen = (listOf(block.head.getOrNull(col)) + block.rows.map { it.getOrNull(col) })
-                .filterNotNull().maxOfOrNull { it.length } ?: 1
-            maxLen.coerceIn(3, 40).toFloat()
+    val measurer = rememberTextMeasurer()
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val cellPadding = with(LocalDensity.current) { (TableCellHorizontalPadding * 2).toPx() }
+        // 列宽（px）：逐格量出内容宽度 → 每列取最小/最大内容宽度 → 按可用宽度分配
+        val widths = remember(block, s, constraints.maxWidth, constraints.hasBoundedWidth) {
+            if (!constraints.hasBoundedWidth) {
+                // 宽度无界（如横向滚动容器内）拿不到可用宽度，退回按字符数估权重
+                estimatedColumnWeights(block, columns)
+            } else {
+                val minW = FloatArray(columns)
+                val maxW = FloatArray(columns)
+                fun accumulate(cells: List<String>, header: Boolean) {
+                    val style = tableCellStyle(s, header)
+                    for (col in 0 until columns) {
+                        val raw = cells.getOrNull(col) ?: continue
+                        val annotated = buildAnnotated(parseMdInline(raw), s)
+                        val (min, max) = cellContentWidths(measurer, annotated, style)
+                        if (min > minW[col]) minW[col] = min
+                        if (max > maxW[col]) maxW[col] = max
+                    }
+                }
+                accumulate(block.head, header = true)
+                block.rows.forEach { accumulate(it, header = false) }
+                distributeColumnWidths(minW.toList(), maxW.toList(), constraints.maxWidth.toFloat(), cellPadding)
+            }
         }
+        TableGrid(block, widths, s)
     }
+}
+
+@Composable
+private fun TableGrid(block: MdBlock.Table, widths: List<Float>, s: MdStyles) {
     Column(
-        modifier
+        Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(7.dp))
-            .border(1.dp, s.border, RoundedCornerShape(7.dp)),
+            .border(1.dp, s.border, RoundedCornerShape(7.dp))
+            // 列分隔竖线：行间横线由各行的 Box 画，列间竖线没有对应的布局元素（Row 高度由内容决定，
+            // 竖条用 fillMaxHeight 需要 IntrinsicSize 测量），改为在表格容器上按列宽等比绘制整表贯穿的竖线。
+            .drawWithContent {
+                drawContent()
+                val total = widths.sum()
+                if (total <= 0f) return@drawWithContent
+                // 像素对齐：竖线落点取整，宽度取整，避免 1dp 在非整数倍密度下被抗锯齿糊成 2px 灰带
+                val stroke = 1.dp.toPx().roundToInt().toFloat()
+                var acc = 0f
+                for (i in 0 until widths.size - 1) {
+                    acc += widths[i]
+                    val left = (size.width * acc / total - stroke / 2f).roundToInt().toFloat()
+                    drawRect(
+                        color = s.border,
+                        topLeft = Offset(left, 0f),
+                        size = Size(stroke, size.height),
+                    )
+                }
+            },
     ) {
-        TableRow(block.head, block.align, weights, s, header = true)
+        TableRow(block.head, widths, s, header = true)
         block.rows.forEachIndexed { index, row ->
             Box(Modifier.fillMaxWidth().height(1.dp).background(s.border))
-            TableRow(row, block.align, weights, s, header = false, zebra = index % 2 == 1)
+            TableRow(row, widths, s, header = false, zebra = index % 2 == 1)
         }
     }
 }
@@ -623,14 +673,13 @@ private fun TableBlock(block: MdBlock.Table, s: MdStyles, modifier: Modifier = M
 @Composable
 private fun TableRow(
     cells: List<String>,
-    aligns: List<MdAlign>,
-    weights: List<Float>,
+    widths: List<Float>,
     s: MdStyles,
     header: Boolean,
     zebra: Boolean = false,
 ) {
     Row(
-        Modifier
+        modifier = Modifier
             .fillMaxWidth()
             .background(
                 when {
@@ -639,31 +688,170 @@ private fun TableRow(
                     else -> Color.Transparent
                 },
             ),
+        // 单元格文字在行内垂直居中（行高由最高的单元格决定，单行单元格贴顶会显得参差）
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        weights.forEachIndexed { index, weight ->
+        widths.forEachIndexed { index, weight ->
             val cellText = cells.getOrNull(index) ?: ""
-            val align = aligns.getOrNull(index) ?: MdAlign.LEFT
-            val style = s.base.copy(
-                fontSize = 13.sp,
-                lineHeight = 1.55.em,
-                fontWeight = if (header) FontWeight.W600 else FontWeight.Normal,
-                color = if (header) lerp(s.text, s.muted, 0.12f) else s.text,
-                textAlign = when (align) {
-                    MdAlign.CENTER -> TextAlign.Center
-                    MdAlign.RIGHT -> TextAlign.End
-                    MdAlign.LEFT -> TextAlign.Start
-                },
-            )
+            val style = tableCellStyle(s, header)
             val spans = remember(cellText) { parseMdInline(cellText) }
             val annotated = remember(spans) { buildAnnotated(spans, s) }
             Text(
                 text = annotated,
                 style = style,
-                modifier = Modifier.weight(weight).padding(horizontal = 10.dp, vertical = 6.dp),
+                modifier = Modifier.weight(weight).padding(horizontal = TableCellHorizontalPadding, vertical = 6.dp),
             )
         }
     }
 }
+
+// ── 列宽计算：最小/最大内容宽度（MCW / max-content）→ 按可用宽度分配 ──
+
+/** 单元格左右内边距（列宽分配时要先从可用宽度里扣除） */
+private val TableCellHorizontalPadding = 10.dp
+
+/** 单元格文字样式（表头/正文两态）：水平居中为用户口径，表头行与左右两列同样居中 */
+private fun tableCellStyle(s: MdStyles, header: Boolean): TextStyle = s.base.copy(
+    fontSize = 13.sp,
+    lineHeight = 1.55.em,
+    fontWeight = if (header) FontWeight.W600 else FontWeight.Normal,
+    color = if (header) lerp(s.text, s.muted, 0.12f) else s.text,
+    textAlign = TextAlign.Center,
+)
+
+/** 一个单元格的 (最小内容宽度, 最大内容宽度)，单位 px */
+private fun cellContentWidths(m: TextMeasurer, text: AnnotatedString, style: TextStyle): Pair<Float, Float> {
+    val max = m.measure(text, style, constraints = Constraints()).size.width.toFloat()
+    var min = 0f
+    // MCW = 最宽的「不可断行单元」：CJK 逐字可断（单字即一单元），空白处可断，其余拉丁/数字/标点连成一个单元
+    var units = unbreakableUnits(text.text)
+    if (units.size > MaxMeasuredUnits) {
+        // 长文本只量最长的若干单元，避免逐词测量拖慢首帧（按字符数取候选）
+        units = units.sortedByDescending { it.second - it.first }.take(MaxMeasuredUnits)
+    }
+    for ((start, end) in units) {
+        val w = m.measure(text.subSequence(start, end), style, constraints = Constraints()).size.width.toFloat()
+        if (w > min) min = w
+    }
+    return min to max
+}
+
+private const val MaxMeasuredUnits = 12
+
+/** 文本里各「不可断行单元」的 [start, end) 区间 */
+private fun unbreakableUnits(text: String): List<Pair<Int, Int>> {
+    val units = ArrayList<Pair<Int, Int>>()
+    var runStart = -1
+    var i = 0
+    while (i < text.length) {
+        val cp = Character.codePointAt(text, i)
+        val size = Character.charCount(cp)
+        when {
+            isCjk(cp) -> {
+                if (runStart >= 0) {
+                    units += runStart to i
+                    runStart = -1
+                }
+                units += i to i + size
+            }
+            Character.isWhitespace(cp) -> {
+                if (runStart >= 0) {
+                    units += runStart to i
+                    runStart = -1
+                }
+            }
+            runStart < 0 -> runStart = i
+        }
+        i += size
+    }
+    if (runStart >= 0) units += runStart to text.length
+    return units
+}
+
+/** CJK 及全角标点：两侧都是断行机会（Kinsoku 的简化判断） */
+private fun isCjk(cp: Int): Boolean =
+    cp in 0x2E80..0x303F || cp in 0x3040..0x30FF || cp in 0x3400..0x4DBF ||
+        cp in 0x4E00..0x9FFF || cp in 0xF900..0xFAFF || cp in 0xFE30..0xFE4F ||
+        cp in 0xFF00..0xFFEF || cp in 0x20000..0x2FA1F
+
+/**
+ * 列宽分配（CSS auto table layout 的简化版；pi-web 那边由浏览器表格布局完成）：
+ * ① Σ最大内容宽度 ≤ 可用文字区 → 每列都拿到自己的最大内容宽度，余量按最大内容宽度比例摊开铺满；
+ * ② Σ最小内容宽度 > 可用文字区 → 表里存在超长不可断单元（长 URL / 长标识符），物理上放不下，
+ *    改按「最大内容宽度」做 progressive filling：需求小的列先按需满足，剩下的列均分余量；
+ * ③ 中间态 → 先给每列 MCW 保底，余量按「最大内容宽度」从小到大依次补足，补不满的列按最大内容宽度比例分摊。
+ * 传入/传出均为 px；单元格内边距先扣除，分配的是文字区宽度。
+ * 注：②里 MCW 必然被突破（例：57 字符的 token 宽 942px 而文字区只有 833px），此时交给列内词内折行。
+ * 关键是别用「按增长潜力比例」一刀切 —— 那样短列（如 2 字的表头，只需 68px）会被饿到 40px 而换行。
+ */
+private fun distributeColumnWidths(
+    minW: List<Float>,
+    maxW: List<Float>,
+    available: Float,
+    cellPadding: Float,
+): List<Float> {
+    val n = minW.size
+    if (n == 0) return emptyList()
+    val textSpace = (available - n * cellPadding).coerceAtLeast(0f)
+    val text = FloatArray(n)
+    val maxSum = maxW.sum()
+    when {
+        maxSum <= textSpace -> {
+            for (i in 0 until n) text[i] = if (maxSum > 0f) maxW[i] * textSpace / maxSum else textSpace / n
+        }
+        minW.sum() > textSpace -> {
+            progressiveFill(text, maxW.toFloatArray(), textSpace)
+        }
+        else -> {
+            for (i in 0 until n) text[i] = minW[i]
+            var free = textSpace - minW.sum()
+            val pending = ArrayList<Int>()
+            for (i in (0 until n).sortedBy { maxW[it] }) {
+                val need = maxW[i] - text[i]
+                if (need <= free) {
+                    text[i] = maxW[i]
+                    free -= need
+                } else {
+                    pending += i
+                }
+            }
+            if (free > 0f) {
+                val targets = if (pending.isEmpty()) (0 until n).toList() else pending
+                var pool = 0f
+                for (i in targets) pool += maxW[i]
+                if (pool > 0f) for (i in targets) text[i] += free * maxW[i] / pool
+            }
+        }
+    }
+    return List(n) { text[it] + cellPadding }
+}
+
+/** 经典 progressive filling（最大最小公平分配）：需求小的列先按需满足，需求装不下的列均分余量 */
+private fun progressiveFill(out: FloatArray, demand: FloatArray, budget: Float) {
+    var remaining = budget
+    val active = ArrayList(out.indices.sortedBy { demand[it] })
+    while (active.isNotEmpty()) {
+        val share = remaining / active.size
+        val fit = active.filter { demand[it] <= share }
+        if (fit.isEmpty()) {
+            for (i in active) out[i] = share
+            return
+        }
+        for (i in fit) {
+            out[i] = demand[i]
+            remaining -= demand[i]
+        }
+        active.removeAll(fit)
+    }
+}
+
+/** 宽度无界时的兜底权重：按各列最长文本的字符数估（旧口径） */
+private fun estimatedColumnWeights(block: MdBlock.Table, columns: Int): List<Float> =
+    List(columns) { col ->
+        val maxLen = (listOf(block.head.getOrNull(col)) + block.rows.map { it.getOrNull(col) })
+            .filterNotNull().maxOfOrNull { it.length } ?: 1
+        maxLen.coerceIn(3, 40).toFloat()
+    }
 
 // ───────────────────────────── frontmatter 卡片 ─────────────────────────────
 
