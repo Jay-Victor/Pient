@@ -62,12 +62,14 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.navigation.NavController
@@ -76,6 +78,7 @@ import com.pient.app.data.Attachment
 import com.pient.app.data.AttachmentKind
 import com.pient.app.data.ChatState
 import com.pient.app.data.DrawerMode
+import com.pient.app.data.InputBarMaterial
 import com.pient.app.data.Msg
 import com.pient.app.data.Panel
 import com.pient.app.data.Quote
@@ -84,7 +87,11 @@ import com.pient.app.ui.components.isTabletLayout
 import com.pient.app.ui.components.StatusBadge
 import com.pient.app.ui.files.FilesPanel
 import com.pient.app.ui.terminal.TerminalPanel
+import com.pient.app.ui.theme.LocalWaterGlassState
 import com.pient.app.ui.theme.PientPanel
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import io.github.fletchmckee.liquid.liquefiable
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -141,6 +148,16 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     var dockTopY by remember { mutableStateOf(0f) }
     val mentionBottomOffset =
         if (dockTopY > 0f) with(density) { (screenHpx - dockTopY).toDp() + 8.dp } else 8.dp
+
+    // 输入栏背后内容层（2026-09-12，修「玻璃输入框看着像遮罩、内容滑过不透」）：
+    // 输入栏改为覆盖在面板内容之上（Operit ClassicChatInputSection 同款 —— 其输入栏是
+    // align(BottomCenter) 浮层），面板内容单独录一层 backdrop / 标记 liquefiable 供玻璃采样，
+    // 从而「内容滑过输入栏时能从玻璃里透出模糊的内容」。输入栏与该层同级 → 不会渲染树自引用。
+    val panelBackdrop = rememberLayerBackdrop()
+    val waterGlassState = LocalWaterGlassState.current
+    val chatGlassOn = SettingsStore.inputBarMaterial != InputBarMaterial.DEFAULT
+    var dockHeightPx by remember { mutableIntStateOf(0) }
+    val dockInset = with(density) { dockHeightPx.toDp() }
 
     // 文件树随当前项目加载（@ 引用文件源；文件树面板打开时也会刷新）
     LaunchedEffect(chatState.currentProject) {
@@ -335,58 +352,83 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                     attachSheetOpen = false // 切页时收起附件卡片
                 },
             )
+            // 面板内容 + 覆盖其上的输入栏（2026-09-12：输入栏 dock 改为浮层，
+            // 面板内容伸到屏幕底部、可从玻璃里透出 —— Operit 输入栏 align(BottomCenter) 同款）
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                when (chatState.activePanel) {
-                    Panel.MESSAGES -> MessagesPanel(
-                        chatState = chatState,
-                        scope = scope,
-                        listState = messagesListState,
-                        onOpenLocator = { locatorOpen = true },
-                        onMessageLongPress = { idx, rect -> forkMenuTarget = idx to rect },
-                        onConfigureAi = {
-                            attachSheetOpen = false
-                            nav.navigate("model_config")
-                        },
-                    )
-                    Panel.FILES -> FilesPanel(chatState)
-                    Panel.TERMINAL -> TerminalPanel(chatState, nav)
-                    Panel.TREE -> TreeCanvasPanel(chatState)
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        // 仅在玻璃材质下录层/标记液化层：默认材质时不做额外合成
+                        .then(if (chatGlassOn) Modifier.layerBackdrop(panelBackdrop) else Modifier)
+                        .then(
+                            if (chatGlassOn && waterGlassState != null) {
+                                Modifier.liquefiable(waterGlassState)
+                            } else {
+                                Modifier
+                            },
+                        ),
+                ) {
+                    when (chatState.activePanel) {
+                        Panel.MESSAGES -> MessagesPanel(
+                            chatState = chatState,
+                            scope = scope,
+                            listState = messagesListState,
+                            bottomInset = dockInset,
+                            onOpenLocator = { locatorOpen = true },
+                            onMessageLongPress = { idx, rect -> forkMenuTarget = idx to rect },
+                            onConfigureAi = {
+                                attachSheetOpen = false
+                                nav.navigate("model_config")
+                            },
+                        )
+                        Panel.FILES -> FilesPanel(chatState)
+                        Panel.TERMINAL -> TerminalPanel(chatState, nav)
+                        Panel.TREE -> TreeCanvasPanel(chatState)
+                    }
                 }
-            }
-            // 输入栏 dock 仅在消息区显示（文件/终端页有各自交互区）；
-            // 项目与 AI 配置齐备前不显示（2026-09-08：聊天页引导清单接管）
-            if (chatState.activePanel == Panel.MESSAGES &&
-                chatState.currentProject != null && chatState.aiConfigured
-            ) {
-                ChatInputBar(
-                    chatState = chatState,
-                    text = inputText,
-                    onTextChange = {
-                        // 一键删除整段 @ 引用：单字符退格 + 光标停在 token 末尾
-                        // → 整个 "@路径 " 一起删掉（Operit normalizeMentionDeletion 同款）
-                        inputText = normalizeMentionDeletion(inputText, it, mentionFiles)
-                        mentionOpen = inputText.text.endsWith("@")
-                    },
-                    mentionFiles = mentionFiles,
-                    onOpenModelSelector = { modelSheetOpen = true },
-                    onOpenAttach = { attachSheetOpen = !attachSheetOpen },
-                    onToggleContextCard = { contextCardOpen = !contextCardOpen },
-                    onToggleSystemPrompt = { systemPromptOpen = !systemPromptOpen },
-                    onSend = { text ->
-                        // 首条消息自动建会话（2026-09-08：无 mock 会话后，发送即建当前项目首会话）
-                        if (chatState.currentSessionId == null) chatState.newSession()
-                        val q = pendingQuote
-                        chatState.streamJob = scope.launch { chatState.streamReply(text, q) }
-                        pendingQuote = null // 引用随消息落库（Msg.User.quote），输入栏引用卡随之清空
-                    },
-                    onAbort = { chatState.abort() },
-                    modelSelectorOpen = modelSheetOpen,
-                    quote = pendingQuote,
-                    onRemoveQuote = { pendingQuote = null },
-                    focusTick = inputFocusTick,
-                    onChipPositioned = { chipTopY = it },
-                    onDockTopPositioned = { dockTopY = it },
-                )
+                // 输入栏 dock 仅在消息区显示（文件/终端页有各自交互区）；
+                // 项目与 AI 配置齐备前不显示（2026-09-08：聊天页引导清单接管）
+                if (chatState.activePanel == Panel.MESSAGES &&
+                    chatState.currentProject != null && chatState.aiConfigured
+                ) {
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .onGloballyPositioned { dockHeightPx = it.size.height },
+                    ) {
+                    ChatInputBar(
+                        chatState = chatState,
+                        text = inputText,
+                        onTextChange = {
+                            // 一键删除整段 @ 引用：单字符退格 + 光标停在 token 末尾
+                            // → 整个 "@路径 " 一起删掉（Operit normalizeMentionDeletion 同款）
+                            inputText = normalizeMentionDeletion(inputText, it, mentionFiles)
+                            mentionOpen = inputText.text.endsWith("@")
+                        },
+                        mentionFiles = mentionFiles,
+                        onOpenModelSelector = { modelSheetOpen = true },
+                        onOpenAttach = { attachSheetOpen = !attachSheetOpen },
+                        onToggleContextCard = { contextCardOpen = !contextCardOpen },
+                        onToggleSystemPrompt = { systemPromptOpen = !systemPromptOpen },
+                        onSend = { text ->
+                            // 首条消息自动建会话（2026-09-08：无 mock 会话后，发送即建当前项目首会话）
+                            if (chatState.currentSessionId == null) chatState.newSession()
+                            val q = pendingQuote
+                            chatState.streamJob = scope.launch { chatState.streamReply(text, q) }
+                            pendingQuote = null // 引用随消息落库（Msg.User.quote），输入栏引用卡随之清空
+                        },
+                        onAbort = { chatState.abort() },
+                        modelSelectorOpen = modelSheetOpen,
+                        quote = pendingQuote,
+                        onRemoveQuote = { pendingQuote = null },
+                        focusTick = inputFocusTick,
+                        onChipPositioned = { chipTopY = it },
+                        onDockTopPositioned = { dockTopY = it },
+                        backdrop = panelBackdrop,
+                    )
+                    }
+                }
             }
         }
         }
@@ -797,6 +839,7 @@ private fun MessagesPanel(
     chatState: ChatState,
     scope: kotlinx.coroutines.CoroutineScope,
     listState: LazyListState,
+    bottomInset: Dp = 0.dp,
     onOpenLocator: () -> Unit,
     onMessageLongPress: (Int, Rect) -> Unit,
     onConfigureAi: () -> Unit,
@@ -812,6 +855,7 @@ private fun MessagesPanel(
         isStreaming = chatState.isStreaming,
         streamDraft = chatState.streamDraft,
         listState = listState,
+        bottomInset = bottomInset,
         onOpenLocator = onOpenLocator,
         onMessageLongPress = onMessageLongPress,
     )

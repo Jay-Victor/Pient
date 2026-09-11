@@ -102,6 +102,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -140,6 +141,7 @@ fun ChatMessages(
     isStreaming: Boolean,
     streamDraft: String,
     listState: LazyListState,
+    bottomInset: Dp = 0.dp,
     onOpenLocator: () -> Unit,
     onMessageLongPress: ((Int, Rect) -> Unit)? = null,
 ) {
@@ -221,7 +223,14 @@ fun ChatMessages(
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+            // 底部留出输入栏 dock 的高度（2026-09-12：dock 改为覆盖在消息之上的浮层，
+            // 消息可滑到 dock 之下，最后一条需能被滚到 dock 上沿之上）
+            contentPadding = PaddingValues(
+                start = 14.dp,
+                top = 10.dp,
+                end = 14.dp,
+                bottom = 10.dp + bottomInset,
+            ),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(messages.size, key = { it }) { idx ->
@@ -282,7 +291,13 @@ fun ChatMessages(
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(16.dp)
+                    .padding(
+                        start = 16.dp,
+                        top = 16.dp,
+                        end = 16.dp,
+                        // 抬到输入栏 dock 之上（2026-09-12：dock 为浮层）
+                        bottom = 16.dp + bottomInset,
+                    )
                     .size(40.dp)
                     .background(
                         MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.95f),
