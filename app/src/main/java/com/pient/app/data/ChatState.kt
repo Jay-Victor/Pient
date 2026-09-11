@@ -746,6 +746,10 @@ class ChatState {
     var activeTabIndex by mutableIntStateOf(0)
     // 源码/预览切换（markdown 与 html 共用；默认进预览）：预览 = md 渲染 / html 渲染，源码 = 可编辑文本
     var sourceEditMode by mutableStateOf(false)
+    // 代码文件底部符号工具栏是否可见（由 FileContentView 的 CodeSourceEditor 汇报：进入置真、离开复位）。
+    // FilesPanel 据此把右下 FAB 抬到工具栏之上——二进制 / 超限文件走提示分支不显示工具栏，
+    // 只有渲染方知道，故不做扩展名的静态推测（否则 zip 之类会凭空抬起 FAB）
+    var symbolToolbarVisible by mutableStateOf(false)
     // 行号不设开关（2026-09-10 用户定）：是否显示由预览的文件类型决定，见 FileContentView.CodeView
     val expandedDirs = mutableStateSetOf<String>() // 文件树展开路径
     // 文件树长按菜单「@ 提及插入输入框」请求（ChatScreen 消费后置 null）

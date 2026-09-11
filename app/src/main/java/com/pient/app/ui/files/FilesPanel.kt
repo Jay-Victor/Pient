@@ -72,12 +72,14 @@ fun FilesPanel(chatState: ChatState) {
     val context = LocalContext.current
     var treeOpen by remember { mutableStateOf(false) }
 
-    // markdown 源码模式（md 文件 + 源码编辑）→ 底部格式工具栏占位：FAB 抬到工具栏之上（Mdcito 同款）
+    // 预览区底部工具栏占位 → FAB 抬到工具栏之上（Mdcito 同款）：
+    // markdown 源码模式 = 格式工具栏；代码文件 = 符号工具栏（可见性由 CodeSourceEditor 汇报）
     val activeTab = chatState.openTabs.getOrNull(chatState.activeTabIndex)
     val mdToolbarVisible = activeTab != null &&
         activeTab.ext in MARKDOWN_EXTS && chatState.sourceEditMode
+    val bottomToolbarVisible = mdToolbarVisible || (activeTab != null && chatState.symbolToolbarVisible)
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val fabBottomPadding = if (mdToolbarVisible) mdToolbarHeight() + navBottom + 16.dp else 16.dp
+    val fabBottomPadding = if (bottomToolbarVisible) editorToolbarHeight() + navBottom + 16.dp else 16.dp
 
     // 保存当前文件（成败都给 Toast 反馈：浮层外的页面态文字看不见时仍可感知）
     fun save(node: FileNode) {
@@ -115,7 +117,7 @@ fun FilesPanel(chatState: ChatState) {
         }
 
         // 右下 FAB → 右侧文件树
-        // markdown 源码模式：工具栏占底部 → FAB 抬到工具栏之上（Mdcito 同款）
+        // 预览区底部有工具栏时（md 源码格式栏 / 代码符号栏）：FAB 抬到工具栏之上（Mdcito 同款）
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)

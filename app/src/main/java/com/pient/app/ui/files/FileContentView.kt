@@ -94,6 +94,7 @@ import com.pient.app.data.SettingsStore
 import com.pient.app.ui.components.MarkdownText
 import com.pient.app.ui.theme.LocalPientIsDark
 import com.pient.app.ui.theme.MonoFont
+import com.pient.app.ui.theme.MonoNoLigatures
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.max
@@ -106,7 +107,8 @@ import kotlin.math.roundToInt
  * - Markdown：渲染模式（GFM）/ 源码编辑模式（标签栏右侧切换键）
  * - HTML：预览模式（WebView 渲染，相对资源按文件所在目录解析）/ 源码编辑模式（同款切换键）
  * - txt：等宽纯文本，**无行号**，可编辑
- * - 其他文本/代码：**行号槽随类型自动显示**（Operit CanvasCodeEditorView 规格），可编辑
+ * - 其他文本/代码：**行号槽随类型自动显示**（Operit CanvasCodeEditorView 规格）+ 语法着色 +
+ *   底部符号工具栏（各类括号 / 引号 / 运算符 / 分隔符，2026-09-11），可编辑
  * - 文档/压缩包/安装包：二进制，走「暂不支持预览」提示（无法按文本编辑）
  */
 @Composable
@@ -180,29 +182,32 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
         }
         // markdown 源码模式：可编辑 + 底部格式工具栏 + 搜索卡（2026-09-11）
         isMd -> MarkdownSourceEditor(chatState, node, chatState.fileDrafts[key] ?: textContent ?: "")
-        // 文本/代码：可编辑；行号槽仅非纯文本显示（txt 无行号）
-        // 代码文件另加语法着色与 4 空格缩进标记（Operit 工作区编辑器口径）；txt 两类都不加
+        // 代码 / 标记语言源文件（含 html 源码模式）：行号 + 语法着色 + 4 空格缩进标记 +
+        // 底部符号工具栏（Operit 工作区编辑器口径；2026-09-11 加工具栏）
+        node.ext !in PLAIN_TEXT_EXTS -> CodeSourceEditor(
+            chatState = chatState,
+            node = node,
+            text = chatState.fileDrafts[key] ?: textContent ?: "",
+            codeLanguage = CodeLanguages.forExtension(node.ext) ?: CodeLanguages.generic,
+        )
+        // txt：等宽纯文本，无行号 / 无着色 / 无工具栏（用户 2026-09-10 定）
         else -> PlainTextEditor(
             text = chatState.fileDrafts[key] ?: textContent ?: "",
             onValueChange = { chatState.editDraft(node, it) },
-            showLineNumbers = node.ext !in PLAIN_TEXT_EXTS,
-            codeLanguage = if (node.ext in PLAIN_TEXT_EXTS) null
-            else CodeLanguages.forExtension(node.ext) ?: CodeLanguages.generic,
             contentKey = key,
         )
     }
 }
 
 /**
- * 非 markdown 文本/代码编辑入口：把「文本字符串 + 回调」的调用形态适配到 [EditableTextView] 的
+ * 纯文本（txt）编辑入口：把「文本字符串 + 回调」的调用形态适配到 [EditableTextView] 的
  * TextFieldValue 受控形态（外部文本变化时同步，选区按新长度夹取）。
+ * 无行号、无着色（用户定），IME 避让由编辑区自担（本类型没有底部工具栏）。
  */
 @Composable
 private fun PlainTextEditor(
     text: String,
     onValueChange: (String) -> Unit,
-    showLineNumbers: Boolean,
-    codeLanguage: CodeLanguage?,
     contentKey: Any?,
 ) {
     var value by remember(contentKey) { mutableStateOf(TextFieldValue(text)) }
@@ -223,8 +228,8 @@ private fun PlainTextEditor(
             value = it
             onValueChange(it.text)
         },
-        showLineNumbers = showLineNumbers,
-        codeLanguage = codeLanguage,
+        showLineNumbers = false,
+        codeLanguage = null,
         contentKey = contentKey,
     )
 }
@@ -613,6 +618,8 @@ internal fun EditableTextView(
         fontSize = CodeFontSize,
         lineHeight = CodeLineHeight,
         color = MaterialTheme.colorScheme.onBackground,
+        // 关闭连字：`!=` / `->` / `==` / `<=` 必须原样显示为字符本身，不得被字体渲染成 ≠ → 之类
+        fontFeatureSettings = MonoNoLigatures,
     )
     val numberStyle = codeStyle.copy(
         fontSize = CodeFontSize * 0.82f,
