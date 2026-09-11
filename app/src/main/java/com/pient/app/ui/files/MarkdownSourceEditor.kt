@@ -10,7 +10,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -43,42 +42,6 @@ import com.pient.app.data.FileNode
  * 已知边界：撤销栈、搜索卡状态为「本标签会话态」（切标签或切渲染模式即重置；编辑缓冲在 ChatState 里不丢）。
  */
 
-/** 撤销栈深度（快照式；条数上限，超出丢最旧） */
-private const val MdUndoDepth = 100
-
-/**
- * 一次文本编辑的差异（相对旧文本：从 [start] 起删掉 [removed] 个字符、插入 [inserted] 个字符）。
- * 用来判断「这次改动是什么动作」——撤销粒度只看动作，不看时间（用户 2026-09-11 口径）。
- */
-private data class MdEdit(val start: Int, val removed: Int, val inserted: Int)
-
-/**
- * 撤销 / 重做栈里的一步：文本 + 当时的光标/选区。
- * 撤销与重做都整步恢复该状态（含光标位置）——用户 2026-09-11：「取消撤销后光标位置也需要回到原位」。
- */
-private data class MdSnapshot(val text: String, val selection: TextRange)
-
-/** 选区按新文本长度夹取（撤销目标文本可能比当前短） */
-private fun clampSelection(range: TextRange, length: Int): TextRange = TextRange(
-    range.start.coerceIn(0, length),
-    range.end.coerceIn(0, length),
-)
-
-/**
- * 求前后文本的单段差异（公共前缀 + 公共后缀之间的那段）。
- * IME 组合态下每次按键只是改写同一段（拼音 → 候选字），单段假设成立；
- * 个别多段改写会被合成一段处理——对本编辑器的撤销粒度无影响。
- */
-private fun mdDiff(old: String, new: String): MdEdit? {
-    if (old == new) return null
-    val maxCommon = minOf(old.length, new.length)
-    var prefix = 0
-    while (prefix < maxCommon && old[prefix] == new[prefix]) prefix++
-    var suffix = 0
-    while (suffix < maxCommon - prefix && old[old.length - 1 - suffix] == new[new.length - 1 - suffix]) suffix++
-    return MdEdit(prefix, old.length - prefix - suffix, new.length - prefix - suffix)
-}
-
 /** 占位文字（取 Mdcito strings.xml：文本 / 链接文本 / 代码） */
 private const val MdPlaceholderText = "文本"
 private const val MdPlaceholderLinkText = "链接文本"
@@ -108,74 +71,39 @@ internal fun MarkdownSourceEditor(chatState: ChatState, node: FileNode, text: St
         }
     }
 
-    // ── 撤销 / 重做栈（快照式；粒度 = 编辑动作，不看时间；每步带光标位置）──
-    val undoStack = remember(key) { mutableStateListOf<MdSnapshot>() }
-    val redoStack = remember(key) { mutableStateListOf<MdSnapshot>() }
-    // 当前「连续输入段」：仍在进行 + 该段文本末尾偏移。只有逐字接续的输入才并入同一段，
-    // 删除 / 剪切 / 粘贴 / 工具栏动作 / 光标移动都会结束它
-    var runActive by remember(key) { mutableStateOf(false) }
-    var runEnd by remember(key) { mutableIntStateOf(0) }
-
-    /** 入栈当前状态（文本 + 光标），供撤销回来；新改动清空重做栈 */
-    fun pushSnapshot() {
-        if (undoStack.lastOrNull()?.text != value.text) {
-            if (undoStack.size >= MdUndoDepth) undoStack.removeAt(0)
-            undoStack.add(MdSnapshot(value.text, value.selection))
-        }
-        redoStack.clear()
-    }
+    // ── 撤销 / 重做（共用状态机 EditorUndoController：粒度 = 编辑动作、每步带光标）──
+    val history = remember(key) { EditorUndoController() }
 
     /**
-     * 键盘输入：按**编辑动作**决定是否并入上一步撤销（用户 2026-09-11 口径，不看时间）——
-     * - 逐字接续的输入（按下一次输入的末位继续打字）→ 并入同一段，整段算一步
-     * - IME 组合态（拼音改写/挑候选字）→ 并入当前段
-     * - 删除（含剪切选区）、粘贴、替换 → 各自单独一步（每删一个字符都能单独撤销）
-     * - 只改选区（移动光标）→ 不入栈，但结束当前输入段
+     * 键盘输入（含删除 / 粘贴 / IME 组合）：栈的并入/新开步由状态机按编辑动作判定。
+     * 仅选区变化（移动光标）不写编辑缓冲——否则单纯挪一下光标就会把文件标记成未保存。
      */
     fun onTyping(new: TextFieldValue) {
-        val edit = mdDiff(value.text, new.text)
-        if (edit == null) {
-            runActive = false           // 光标移动等无文本变化的改动 = 动作边界
-            value = new
-            return
-        }
-        val composing = new.composition != null || value.composition != null
-        val pureInsert = edit.removed == 0 && edit.inserted > 0
-        // 同一段的继续：纯插入且紧接上次输入末尾逐字打字，或正处于 IME 组合态
-        val continuesRun = runActive && pureInsert &&
-            ((edit.inserted == 1 && edit.start == runEnd) || composing)
-        if (!continuesRun) pushSnapshot()
-        runActive = pureInsert && (edit.inserted == 1 || composing)
-        runEnd = edit.start + edit.inserted
+        history.onTextChange(value, new)
+        if (new.text != value.text) chatState.editDraft(node, new.text)
         value = new
-        chatState.editDraft(node, new.text)
     }
 
     /** 工具栏 / 替换等结构动作：先入栈（保证每次动作都可单独撤销） */
     fun onAction(new: TextFieldValue) {
         if (new.text == value.text) return
-        pushSnapshot()
-        runActive = false
+        history.push(value)
         value = new
         chatState.editDraft(node, new.text)
     }
 
-    /** 撤销：整步恢复目标状态（文本 + 光标位置）；当前状态连同光标压入重做栈 */
+    /** 撤销：整步恢复目标状态（文本 + 光标位置） */
     fun undo() {
-        val prev = undoStack.removeLastOrNull() ?: return
-        redoStack.add(MdSnapshot(value.text, value.selection))
-        runActive = false
-        value = TextFieldValue(prev.text, clampSelection(prev.selection, prev.text.length))
-        chatState.editDraft(node, prev.text)
+        val restored = history.undo(value) ?: return
+        value = restored
+        chatState.editDraft(node, restored.text)
     }
 
     /** 重做：恢复被撤销掉的状态（文本 + 光标位置）——光标回到撤销前的原位 */
     fun redo() {
-        val next = redoStack.removeLastOrNull() ?: return
-        undoStack.add(MdSnapshot(value.text, value.selection))
-        runActive = false
-        value = TextFieldValue(next.text, clampSelection(next.selection, next.text.length))
-        chatState.editDraft(node, next.text)
+        val restored = history.redo(value) ?: return
+        value = restored
+        chatState.editDraft(node, restored.text)
     }
 
     // ── 搜索状态（卡在标签栏下方展开；本标签会话态）──
@@ -247,8 +175,8 @@ internal fun MarkdownSourceEditor(chatState: ChatState, node: FileNode, text: St
                 }
             }
             MarkdownEditorToolbar(
-                canUndo = undoStack.isNotEmpty(),
-                canRedo = redoStack.isNotEmpty(),
+                canUndo = history.canUndo,
+                canRedo = history.canRedo,
                 onUndo = { undo() },
                 onRedo = { redo() },
                 onFormat = { format -> onAction(applyMdFormat(value, format)) },
