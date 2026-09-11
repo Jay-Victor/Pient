@@ -85,10 +85,13 @@ import androidx.compose.ui.res.painterResource
 import androidx.documentfile.provider.DocumentFile
 import com.pient.app.R
 import com.pient.app.data.ChatState
+import com.pient.app.data.PanelMaterial
 import com.pient.app.data.Project
 import com.pient.app.data.ProjectFiles
 import com.pient.app.data.Session
 import com.pient.app.data.SessionGroup
+import com.pient.app.data.SettingsStore
+import com.pient.app.data.SidebarStyle
 import com.pient.app.data.groupSessionsByRecency
 import com.pient.app.data.relativeTimeLabel
 import com.pient.app.ui.components.ArcSpinner
@@ -97,7 +100,8 @@ import com.pient.app.ui.components.PientDialog
 import com.pient.app.ui.components.ProjectInfo
 import com.pient.app.ui.components.computeProjectInfo
 import com.pient.app.ui.theme.MonoFont
-import com.pient.app.ui.theme.PientPanel
+import com.pient.app.ui.theme.PientGlassSurface
+import com.kyant.backdrop.Backdrop
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -106,14 +110,22 @@ import java.util.Locale
 /**
  * 会话侧栏（P2，设计计划 3.2）：
  * 品牌 + 搜索 / 批量管理 / 新建会话 / 项目选择器（切换 + 新建；项目行三点菜单重命名/删除）/
- * 会话列表（按项目过滤、时间分组；关键字搜索；行尾三点菜单）/
+ * 会话列表（按项目过滤、时间分组；关键字搜索；行尾三点菜单）
  * 底部技能·插件·设置。宽度 296dp。
+ *
+ * 外观由「主题与外观 → 侧边栏设置」决定（2026-09-12）：
+ * - 侧边栏样式：贴边（默认，贴屏幕左缘、仅右侧两角 16dp 圆角）/ 悬浮（四周留白 + 四角全圆角 28dp）；
+ * - 侧边栏材质：简约（纯色面板，可调透明度）/ 磨砂玻璃 / 液态玻璃（见 [PientGlassSurface]）。
+ *
+ * @param backdrop 聊天页面板内容层的 backdrop（玻璃材质采样「侧栏背后透出的内容」；
+ *   该层与抽屉同级、不含抽屉自身，不会造成渲染树自引用）
  */
 @Composable
 fun SessionDrawer(
     chatState: ChatState,
     onClose: () -> Unit,
     onNavigate: (String) -> Unit,
+    backdrop: Backdrop? = null,
     modifier: Modifier = Modifier,
 ) {
     var projectPickerOpen by remember { mutableStateOf(false) }
@@ -182,14 +194,37 @@ fun SessionDrawer(
         projectSessions.filter { it.title.contains(searchQuery.trim(), ignoreCase = true) }
     } else projectSessions
 
+    // ── 侧边栏外观（侧边栏设置，2026-09-12）──
+    // 贴边 = 贴屏幕左缘、仅右侧两角 16dp（Operit drawerShape 同款）；
+    // 悬浮 = 四周留白（左/上/下 12dp）+ 四角全圆角 28dp（与「悬浮输入框」同口径），
+    //        像卡片一样浮在页面上（上下留白叠在状态栏/导航栏 inset 之外）。
+    val sidebarFloating = SettingsStore.sidebarStyle == SidebarStyle.FLOATING
+    val drawerShape = if (sidebarFloating) {
+        RoundedCornerShape(28.dp)
+    } else {
+        RoundedCornerShape(topEnd = 16.dp, bottomEnd = 16.dp)
+    }
+
     Box {
-        PientPanel(
+        PientGlassSurface(
+            material = SettingsStore.sidebarMaterial,
+            shape = drawerShape,
+            floating = sidebarFloating,
+            transparency = SettingsStore.sidebarTransparency,
+            frostIntensity = SettingsStore.sidebarFrostIntensity,
+            extraBackdrop = backdrop,
             modifier = modifier
+                .then(
+                    if (sidebarFloating) {
+                        Modifier.padding(start = 12.dp, top = 12.dp, bottom = 12.dp)
+                    } else {
+                        Modifier
+                    },
+                )
                 .width(296.dp)
                 .statusBarsPadding() // Operit 同款：padding(top=inset) 在 fillMaxHeight 之前，容器全高
-                .fillMaxHeight(),
-            // Operit drawerShape 同款：右侧 16dp 圆角（shapes.medium.copy），左侧贴屏缘直角
-            shape = RoundedCornerShape(topEnd = 16.dp, bottomEnd = 16.dp),
+                .fillMaxHeight()
+                .clip(drawerShape), // 悬浮时四角全圆角：内容（列表/底栏）随形状裁切
         ) {
             Column(
                 modifier = Modifier

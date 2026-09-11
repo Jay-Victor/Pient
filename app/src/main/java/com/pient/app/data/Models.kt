@@ -47,18 +47,27 @@ enum class FontSource { BUILTIN, CUSTOM }
 enum class InputBarStyle { BOTTOM, FLOATING }
 
 /**
- * 输入框材质（输入框设置标签，效果与依赖对齐 Mdcito 的卡片风格）：
+ * 面板材质（输入框设置 / 侧边栏设置共用，效果与依赖对齐 Mdcito 的卡片风格）：
  * - DEFAULT 简约（原「默认」）：实色面板 + hairline 描边，可调透明度（全应用统一容器材质，无玻璃）
  * - FROSTED 磨砂玻璃：采样背后内容并高斯模糊 + 边缘高光 + 投影，可调纹理强度（kyant backdrop）
  * - LIQUID 液态玻璃：水玻璃流体折射/色散/边缘曲率（fletchmckee liquid）
+ *
+ * 枚举名即 prefs 存储值（input_bar_material / sidebar_material）——改名会丢已持久化的选择。
  */
-enum class InputBarMaterial { DEFAULT, FROSTED, LIQUID }
+enum class PanelMaterial { DEFAULT, FROSTED, LIQUID }
+
+/**
+ * 侧边栏样式（侧边栏设置标签）：
+ * - EDGE 贴边侧边栏（默认）：贴屏幕左缘，仅右侧两角 16dp 圆角
+ * - FLOATING 悬浮侧边栏：四周留白、四角全圆角，像卡片一样浮在页面上
+ */
+enum class SidebarStyle { EDGE, FLOATING }
 
 /** 简约材质透明度滑轨范围（0 = 完全不透明，100 = 完全透明；口径对齐 Mdcito 卡片透明度） */
-const val INPUT_BAR_TRANSPARENCY_MAX = 100
+const val PANEL_TRANSPARENCY_MAX = 100
 
 /** 磨砂玻璃纹理强度滑轨范围（Mdcito 纹理强度 0..300：模糊 10 + 20×、叠加浓度 ×0.30） */
-const val INPUT_BAR_FROST_INTENSITY_MAX = 300
+const val PANEL_FROST_INTENSITY_MAX = 300
 
 /** 字体大小滑轨范围（sp） */
 const val FONT_SIZE_MIN = 12f
@@ -130,9 +139,16 @@ object SettingsStore {
     // ── 输入框设置（2026-09-12）：输入框样式（贴底/悬浮）+ 输入框材质（简约/磨砂玻璃/液态玻璃）
     //    + 材质各自的可调项（简约→透明度 0..100；磨砂玻璃→纹理强度 0..300，均对齐 Mdcito） ──
     var inputBarStyle by mutableStateOf(InputBarStyle.BOTTOM)
-    var inputBarMaterial by mutableStateOf(InputBarMaterial.DEFAULT)
+    var inputBarMaterial by mutableStateOf(PanelMaterial.DEFAULT)
     var inputBarTransparency by mutableStateOf(0f)      // 0..100：100 = 完全透明（仅简约材质）
     var inputBarFrostIntensity by mutableStateOf(50f)   // 0..300（仅磨砂玻璃材质；Mdcito 默认 50）
+
+    // ── 侧边栏设置（2026-09-12，与输入框设置同构）：侧边栏样式（贴边/悬浮）
+    //    + 侧边栏材质（简约/磨砂玻璃/液态玻璃）+ 同两档可调项 ──
+    var sidebarStyle by mutableStateOf(SidebarStyle.EDGE)
+    var sidebarMaterial by mutableStateOf(PanelMaterial.DEFAULT)
+    var sidebarTransparency by mutableStateOf(0f)      // 0..100（仅简约材质）
+    var sidebarFrostIntensity by mutableStateOf(50f)   // 0..300（仅磨砂玻璃材质）
 
     /** 当前主题下生效的主色：自定义开启时按色相生成暗/亮双变体，否则用预设 */
     fun accentFor(dark: Boolean): Color =
@@ -191,12 +207,22 @@ object SettingsStore {
             InputBarStyle.valueOf(p.getString("input_bar_style", "BOTTOM") ?: "BOTTOM")
         }.getOrDefault(InputBarStyle.BOTTOM)
         inputBarMaterial = runCatching {
-            InputBarMaterial.valueOf(p.getString("input_bar_material", "DEFAULT") ?: "DEFAULT")
-        }.getOrDefault(InputBarMaterial.DEFAULT)
+            PanelMaterial.valueOf(p.getString("input_bar_material", "DEFAULT") ?: "DEFAULT")
+        }.getOrDefault(PanelMaterial.DEFAULT)
         inputBarTransparency = p.getFloat("input_bar_transparency", 0f)
-            .coerceIn(0f, INPUT_BAR_TRANSPARENCY_MAX.toFloat())
+            .coerceIn(0f, PANEL_TRANSPARENCY_MAX.toFloat())
         inputBarFrostIntensity = p.getFloat("input_bar_frost_intensity", 50f)
-            .coerceIn(0f, INPUT_BAR_FROST_INTENSITY_MAX.toFloat())
+            .coerceIn(0f, PANEL_FROST_INTENSITY_MAX.toFloat())
+        sidebarStyle = runCatching {
+            SidebarStyle.valueOf(p.getString("sidebar_style", "EDGE") ?: "EDGE")
+        }.getOrDefault(SidebarStyle.EDGE)
+        sidebarMaterial = runCatching {
+            PanelMaterial.valueOf(p.getString("sidebar_material", "DEFAULT") ?: "DEFAULT")
+        }.getOrDefault(PanelMaterial.DEFAULT)
+        sidebarTransparency = p.getFloat("sidebar_transparency", 0f)
+            .coerceIn(0f, PANEL_TRANSPARENCY_MAX.toFloat())
+        sidebarFrostIntensity = p.getFloat("sidebar_frost_intensity", 50f)
+            .coerceIn(0f, PANEL_FROST_INTENSITY_MAX.toFloat())
     }
 
     /** 保存当前主题选择（外观模式 + 主题色 + 自定义主题色 + 深浅界面方案），重启后保持 */
@@ -236,6 +262,17 @@ object SettingsStore {
             .putString("input_bar_material", inputBarMaterial.name)
             .putFloat("input_bar_transparency", inputBarTransparency)
             .putFloat("input_bar_frost_intensity", inputBarFrostIntensity)
+            .apply()
+    }
+
+    /** 保存侧边栏设置（样式 + 材质 + 透明度/纹理强度），重启后保持 */
+    fun saveSidebar(androidCtx: android.content.Context) {
+        androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString("sidebar_style", sidebarStyle.name)
+            .putString("sidebar_material", sidebarMaterial.name)
+            .putFloat("sidebar_transparency", sidebarTransparency)
+            .putFloat("sidebar_frost_intensity", sidebarFrostIntensity)
             .apply()
     }
 

@@ -28,7 +28,7 @@ import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.Shadow
-import com.pient.app.data.InputBarMaterial
+import com.pient.app.data.PanelMaterial
 import io.github.fletchmckee.liquid.LiquidState
 import io.github.fletchmckee.liquid.liquid
 import io.github.fletchmckee.liquid.liquefiable
@@ -103,10 +103,10 @@ fun PientGlassProvisioning(
 }
 
 /**
- * 玻璃容器（输入框 / 后续卡片类玻璃面板共用）：
- * - [InputBarMaterial.DEFAULT] → 走全应用统一的 [PientPanel]（纯色底 + hairline 描边，无玻璃）；
- * - [InputBarMaterial.FROSTED] → kyant backdrop 背景模糊（Mdcito 磨砂玻璃卡片同款参数）；
- * - [InputBarMaterial.LIQUID] → fletchmckee 水玻璃流体折射（Mdcito 液态玻璃卡片同款参数）。
+ * 玻璃容器（输入框 / 侧边栏 / 后续卡片类玻璃面板共用）：
+ * - [PanelMaterial.DEFAULT] → 走全应用统一的 [PientPanel]（纯色底 + hairline 描边，无玻璃）；
+ * - [PanelMaterial.FROSTED] → kyant backdrop 背景模糊（Mdcito 磨砂玻璃卡片同款参数）；
+ * - [PanelMaterial.LIQUID] → fletchmckee 水玻璃流体折射（Mdcito 液态玻璃卡片同款参数）。
  *
  * ★ 采样范围（2026-09-12 修「输入框下像有遮罩、内容滑过不透」）：
  * 玻璃的观感取决于「它采样到了什么」。只采样主题背景层时，页面底色是纯色的场合
@@ -120,7 +120,7 @@ fun PientGlassProvisioning(
  */
 @Composable
 fun PientGlassSurface(
-    material: InputBarMaterial,
+    material: PanelMaterial,
     shape: Shape,
     modifier: Modifier = Modifier,
     containerColor: Color = MaterialTheme.colorScheme.surfaceContainer,
@@ -132,7 +132,7 @@ fun PientGlassSurface(
     extraBackdrop: Backdrop? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    if (material == InputBarMaterial.DEFAULT) {
+    if (material == PanelMaterial.DEFAULT) {
         PientPanel(
             modifier = modifier,
             shape = shape,
@@ -153,7 +153,7 @@ fun PientGlassSurface(
     }
 
     val isLightGlass = containerColor.luminance() >= 0.5f
-    val glassModifier = if (material == InputBarMaterial.FROSTED) {
+    val glassModifier = if (material == PanelMaterial.FROSTED) {
         // 纹理强度（Mdcito）：0..300 → 0..1；模糊 10dp + 20dp×因子、叠加浓度 0.30×因子
         val intensityFactor = (frostIntensity / 300f).coerceIn(0f, 1f)
         Modifier.frostedGlass(

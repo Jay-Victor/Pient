@@ -126,6 +126,14 @@ fun PientApp() {
         }.collect { SettingsStore.saveInputBar(context) }
     }
 
+    // 侧边栏设置持久化（样式 + 材质 + 透明度/纹理强度），重启后保持
+    LaunchedEffect(Unit) {
+        snapshotFlow {
+            SettingsStore.sidebarStyle to SettingsStore.sidebarMaterial to
+                SettingsStore.sidebarTransparency to SettingsStore.sidebarFrostIntensity
+        }.collect { SettingsStore.saveSidebar(context) }
+    }
+
     // 背景设置持久化（媒体类型/图片/视频/模糊/亮度/视频播放），重启后保持
     LaunchedEffect(Unit) {
         snapshotFlow {

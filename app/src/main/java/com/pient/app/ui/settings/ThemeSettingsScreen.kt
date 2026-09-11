@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -27,6 +28,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.AlignHorizontalLeft
+import androidx.compose.material.icons.automirrored.outlined.ViewSidebar
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Schedule
@@ -103,12 +106,13 @@ import com.pient.app.data.DarkSchemes
 import com.pient.app.data.FONT_SIZE_MAX
 import com.pient.app.data.FONT_SIZE_MIN
 import com.pient.app.data.FontSource
-import com.pient.app.data.INPUT_BAR_FROST_INTENSITY_MAX
-import com.pient.app.data.INPUT_BAR_TRANSPARENCY_MAX
-import com.pient.app.data.InputBarMaterial
+import com.pient.app.data.PANEL_FROST_INTENSITY_MAX
+import com.pient.app.data.PANEL_TRANSPARENCY_MAX
+import com.pient.app.data.PanelMaterial
 import com.pient.app.data.InputBarStyle
 import com.pient.app.data.LightSchemes
 import com.pient.app.data.SettingsStore
+import com.pient.app.data.SidebarStyle
 import com.pient.app.data.ThemeMode
 import com.pient.app.data.ThemeScheme
 import com.pient.app.data.VideoCropMode
@@ -139,6 +143,7 @@ private enum class ThemeTab(val label: String) {
     BACKGROUND("背景设置"),
     FONT("字体设置"),
     INPUT_BAR("输入框设置"),
+    SIDEBAR("侧边栏设置"),
 }
 
 /** 分段控制器展示顺序（用户指定：浅色 → 深色 → 跟随系统）与 ThemeMode 枚举的映射 */
@@ -205,6 +210,7 @@ fun ThemeSettingsScreen(nav: NavController) {
             ThemeTab.BACKGROUND -> BackgroundTabContent()
             ThemeTab.FONT -> FontTabContent()
             ThemeTab.INPUT_BAR -> InputBarTabContent()
+            ThemeTab.SIDEBAR -> SidebarTabContent()
         }
     }
 }
@@ -1276,7 +1282,7 @@ private fun InputBarTabContent() {
             Card {
                 InputBarStyleOptions.forEachIndexed { i, option ->
                     if (i > 0) DividerLine()
-                    InputBarOptionRow(
+                    PanelOptionRow(
                         icon = option.icon,
                         title = option.title,
                         desc = option.desc,
@@ -1290,9 +1296,9 @@ private fun InputBarTabContent() {
         item { SectionHeader("输入框材质", icon = Icons.Outlined.BlurOn) }
         item {
             Card {
-                InputBarMaterialOptions.forEachIndexed { i, option ->
+                PanelMaterialOptions.forEachIndexed { i, option ->
                     if (i > 0) DividerLine()
-                    InputBarOptionRow(
+                    PanelOptionRow(
                         icon = option.icon,
                         title = option.title,
                         desc = option.desc,
@@ -1303,23 +1309,23 @@ private fun InputBarTabContent() {
                     // 简约 → 透明度；磨砂玻璃 → 纹理强度；液态玻璃无可调项）
                     if (SettingsStore.inputBarMaterial == option.material) {
                         when (option.material) {
-                            InputBarMaterial.DEFAULT -> MaterialSliderRow(
+                            PanelMaterial.DEFAULT -> MaterialSliderRow(
                                 title = "透明度",
                                 value = SettingsStore.inputBarTransparency,
                                 onValueChange = { SettingsStore.inputBarTransparency = it },
-                                range = 0f..INPUT_BAR_TRANSPARENCY_MAX.toFloat(),
+                                range = 0f..PANEL_TRANSPARENCY_MAX.toFloat(),
                                 rangeLabel = "范围：0 - 100",
                                 valueLabel = "${SettingsStore.inputBarTransparency.roundToInt()}%",
                             )
-                            InputBarMaterial.FROSTED -> MaterialSliderRow(
+                            PanelMaterial.FROSTED -> MaterialSliderRow(
                                 title = "纹理强度",
                                 value = SettingsStore.inputBarFrostIntensity,
                                 onValueChange = { SettingsStore.inputBarFrostIntensity = it },
-                                range = 0f..INPUT_BAR_FROST_INTENSITY_MAX.toFloat(),
+                                range = 0f..PANEL_FROST_INTENSITY_MAX.toFloat(),
                                 rangeLabel = "范围：0 - 300",
                                 valueLabel = SettingsStore.inputBarFrostIntensity.roundToInt().toString(),
                             )
-                            InputBarMaterial.LIQUID -> Unit
+                            PanelMaterial.LIQUID -> Unit
                         }
                     }
                 }
@@ -1332,15 +1338,110 @@ private fun InputBarTabContent() {
 }
 
 /**
+ * 侧边栏设置（用户 spec 2026-09-12，与输入框设置标签同构）：
+ * - 侧边栏样式：贴边侧边栏（默认）/ 悬浮侧边栏（侧边栏变为悬浮的全圆角矩形）；
+ * - 侧边栏材质：简约（默认）/ 磨砂玻璃 / 液态玻璃（与输入框同一套材质与可调项）；
+ * 两处即时生效于聊天页会话侧栏，并写 prefs 持久化。
+ */
+@Composable
+private fun SidebarTabContent() {
+    LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
+        item { SectionHeader("侧边栏样式", icon = Icons.AutoMirrored.Outlined.ViewSidebar) }
+        item {
+            Card {
+                SidebarStyleOptions.forEachIndexed { i, option ->
+                    if (i > 0) DividerLine()
+                    PanelOptionRow(
+                        icon = option.icon,
+                        title = option.title,
+                        desc = option.desc,
+                        selected = SettingsStore.sidebarStyle == option.style,
+                        onClick = { SettingsStore.sidebarStyle = option.style },
+                    )
+                }
+            }
+        }
+
+        item { SectionHeader("侧边栏材质", icon = Icons.Outlined.BlurOn) }
+        item {
+            Card {
+                PanelMaterialOptions.forEachIndexed { i, option ->
+                    if (i > 0) DividerLine()
+                    PanelOptionRow(
+                        icon = option.icon,
+                        title = option.title,
+                        desc = option.desc,
+                        selected = SettingsStore.sidebarMaterial == option.material,
+                        onClick = { SettingsStore.sidebarMaterial = option.material },
+                    )
+                    // 与输入框设置同款：选中材质后在其下方展开该材质的可调项
+                    if (SettingsStore.sidebarMaterial == option.material) {
+                        when (option.material) {
+                            PanelMaterial.DEFAULT -> MaterialSliderRow(
+                                title = "透明度",
+                                value = SettingsStore.sidebarTransparency,
+                                onValueChange = { SettingsStore.sidebarTransparency = it },
+                                range = 0f..PANEL_TRANSPARENCY_MAX.toFloat(),
+                                rangeLabel = "范围：0 - 100",
+                                valueLabel = "${SettingsStore.sidebarTransparency.roundToInt()}%",
+                            )
+                            PanelMaterial.FROSTED -> MaterialSliderRow(
+                                title = "纹理强度",
+                                value = SettingsStore.sidebarFrostIntensity,
+                                onValueChange = { SettingsStore.sidebarFrostIntensity = it },
+                                range = 0f..PANEL_FROST_INTENSITY_MAX.toFloat(),
+                                rangeLabel = "范围：0 - 300",
+                                valueLabel = SettingsStore.sidebarFrostIntensity.roundToInt().toString(),
+                            )
+                            PanelMaterial.LIQUID -> Unit
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 卡片预览 ──
+        item { SidebarPreviewCard() }
+    }
+}
+
+/**
  * 输入框预览（2026-09-12 用户 spec；版式参考 Mdcito CardPreview）：
  * 渐变底容器（标题行「卡片预览」+ 当前材质徽标）+ 固定高度彩色预览区，
  * 区内渲染一枚按当前设置（样式 / 材质 / 透明度 / 纹理强度）实时生效的样例输入栏。
  */
 @Composable
 private fun InputBarPreviewCard() {
-    val material = SettingsStore.inputBarMaterial
-    val floating = SettingsStore.inputBarStyle == InputBarStyle.FLOATING
-    val materialTitle = InputBarMaterialOptions.firstOrNull { it.material == material }?.title ?: ""
+    PanelPreviewCard(material = SettingsStore.inputBarMaterial) {
+        InputBarPreviewArea(
+            material = SettingsStore.inputBarMaterial,
+            floating = SettingsStore.inputBarStyle == InputBarStyle.FLOATING,
+        )
+    }
+}
+
+/**
+ * 侧边栏预览（2026-09-12 用户 spec，版式与输入框预览同一外壳）：
+ * 彩色预览区内渲染一枚按当前设置（样式 / 材质 / 透明度 / 纹理强度）实时生效的样例侧栏
+ * ——贴边 = 贴预览区左缘、仅右侧两角圆角；悬浮 = 四周留白 + 四角全圆角。
+ */
+@Composable
+private fun SidebarPreviewCard() {
+    PanelPreviewCard(material = SettingsStore.sidebarMaterial) {
+        SidebarPreviewArea(
+            material = SettingsStore.sidebarMaterial,
+            floating = SettingsStore.sidebarStyle == SidebarStyle.FLOATING,
+        )
+    }
+}
+
+/**
+ * 预览卡外壳（输入框 / 侧边栏共用）：「卡片预览」标题行 + 当前材质徽标 + [preview] 预览区。
+ * 版式逐项对齐 Mdcito CardPreview（渐变底容器 + 圆角 + 描边 + 16dp 内边距）。
+ */
+@Composable
+private fun PanelPreviewCard(material: PanelMaterial, preview: @Composable () -> Unit) {
+    val materialTitle = PanelMaterialOptions.firstOrNull { it.material == material }?.title ?: ""
 
     Column(
         modifier = Modifier
@@ -1383,7 +1484,7 @@ private fun InputBarPreviewCard() {
             )
         }
         Spacer(Modifier.height(12.dp))
-        InputBarPreviewArea(material = material, floating = floating)
+        preview()
     }
 }
 
@@ -1393,10 +1494,10 @@ private fun InputBarPreviewCard() {
  * 与聊天页输入栏采样「页面背景 + 背后内容」的机制一致。
  */
 @Composable
-private fun InputBarPreviewArea(material: InputBarMaterial, floating: Boolean) {
+private fun InputBarPreviewArea(material: PanelMaterial, floating: Boolean) {
     val previewBackdrop = rememberLayerBackdrop()
     val waterGlassState = LocalWaterGlassState.current
-    val glassOn = material != InputBarMaterial.DEFAULT
+    val glassOn = material != PanelMaterial.DEFAULT
     val shape = if (floating) RoundedCornerShape(28.dp)
     else RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
 
@@ -1477,6 +1578,129 @@ private fun InputBarPreviewArea(material: InputBarMaterial, floating: Boolean) {
 }
 
 /**
+ * 侧边栏预览区：彩色渐变底 + 样例侧栏。
+ * 样例侧栏按真实侧栏比例缩到预览区里（宽 = 预览区 45%，圆角同比例缩小：
+ * 贴边 16dp→7dp 右侧两角；悬浮 28dp→13dp 四角 + 四周留白）。
+ * 玻璃材质下与输入框预览同机制：彩色底录成 backdrop 并标记液化层，样例侧栏采样它。
+ */
+@Composable
+private fun SidebarPreviewArea(material: PanelMaterial, floating: Boolean) {
+    val previewBackdrop = rememberLayerBackdrop()
+    val waterGlassState = LocalWaterGlassState.current
+    val glassOn = material != PanelMaterial.DEFAULT
+    val shape = if (floating) RoundedCornerShape(13.dp)
+    else RoundedCornerShape(topEnd = 7.dp, bottomEnd = 7.dp)
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(150.dp)
+            .clip(RoundedCornerShape(10.dp)),
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .then(if (glassOn) Modifier.layerBackdrop(previewBackdrop) else Modifier)
+                .then(
+                    if (glassOn && waterGlassState != null) {
+                        Modifier.liquefiable(waterGlassState)
+                    } else {
+                        Modifier
+                    },
+                )
+                .drawBehind {
+                    drawRect(
+                        brush = Brush.linearGradient(
+                            colors = listOf(Color(0xFF6B6BFF), Color(0xFF4ECDC4), Color(0xFFFF6B9D)),
+                            start = Offset.Zero,
+                            end = Offset(size.width, size.height),
+                        ),
+                    )
+                },
+        )
+        // 样例侧栏：贴边 = 贴预览区左缘（右侧两角圆角），悬浮 = 四周留白 + 四角全圆角
+        PientGlassSurface(
+            material = material,
+            shape = shape,
+            floating = floating,
+            transparency = SettingsStore.sidebarTransparency,
+            frostIntensity = SettingsStore.sidebarFrostIntensity,
+            extraBackdrop = previewBackdrop,
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .fillMaxHeight()
+                .fillMaxWidth(0.45f)
+                .padding(
+                    start = if (floating) 8.dp else 0.dp,
+                    top = if (floating) 8.dp else 0.dp,
+                    bottom = if (floating) 8.dp else 0.dp,
+                ),
+        ) {
+            SidebarPreviewContent()
+        }
+    }
+}
+
+/** 样例侧栏内容（骨架式）：品牌行 + 三行会话 + 底部入口三格——只表意不表文案 */
+@Composable
+private fun SidebarPreviewContent() {
+    val lineColor = MaterialTheme.colorScheme.surfaceVariant
+    val dotColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary),
+            )
+            Spacer(Modifier.size(6.dp, 0.dp))
+            Box(
+                Modifier
+                    .size(34.dp, 6.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)),
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        listOf(0.88f, 0.6f, 0.74f).forEach { w ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 8.dp),
+            ) {
+                Box(Modifier.size(6.dp).clip(CircleShape).background(dotColor))
+                Spacer(Modifier.size(6.dp, 0.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth(w)
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(lineColor),
+                )
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            repeat(3) {
+                Box(
+                    Modifier
+                        .size(8.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(dotColor),
+                )
+            }
+        }
+    }
+}
+
+/**
  * 材质可调项滑轨块（渲染在选中材质选项行下方）：
  * 标题行（透明度 / 纹理强度）+ PientSlider（整数吸附）+ 范围/实时数值行。
  * 取值为整数——显示值与滑块位置必须一致（同字体大小滑轨口径）。
@@ -1534,38 +1758,61 @@ private val InputBarStyleOptions = listOf(
     ),
 )
 
-/** 输入框材质选项（说明文案沿用 Mdcito 卡片风格的同名项） */
-private data class InputBarMaterialOption(
-    val material: InputBarMaterial,
+/** 侧边栏样式选项（顺序即卡片内排列顺序；「默认」项按用户 spec 写进标题） */
+private data class SidebarStyleOption(
+    val style: SidebarStyle,
     val icon: ImageVector,
     val title: String,
     val desc: String,
 )
 
-private val InputBarMaterialOptions = listOf(
-    InputBarMaterialOption(
-        material = InputBarMaterial.DEFAULT,
+private val SidebarStyleOptions = listOf(
+    SidebarStyleOption(
+        style = SidebarStyle.EDGE,
+        icon = Icons.AutoMirrored.Outlined.AlignHorizontalLeft,
+        title = "贴边侧边栏（默认）",
+        desc = "侧边栏贴屏幕左缘，仅右侧两角圆角。",
+    ),
+    SidebarStyleOption(
+        style = SidebarStyle.FLOATING,
+        icon = Icons.Outlined.RoundedCorner,
+        title = "悬浮侧边栏",
+        desc = "侧边栏变为悬浮的全圆角矩形，四周留白浮在页面上。",
+    ),
+)
+
+/** 面板材质选项（输入框材质 / 侧边栏材质共用；说明文案沿用 Mdcito 卡片风格的同名项） */
+private data class PanelMaterialOption(
+    val material: PanelMaterial,
+    val icon: ImageVector,
+    val title: String,
+    val desc: String,
+)
+
+private val PanelMaterialOptions = listOf(
+    PanelMaterialOption(
+        material = PanelMaterial.DEFAULT,
         icon = Icons.Outlined.Rectangle,
         title = "简约（默认）",
         desc = "实色面板、标准描边，清晰利落。",
     ),
-    InputBarMaterialOption(
-        material = InputBarMaterial.FROSTED,
+    PanelMaterialOption(
+        material = PanelMaterial.FROSTED,
         icon = Icons.Outlined.BlurLinear,
         title = "磨砂玻璃",
         desc = "半通透模糊效果，方向光照浮雕纹理。",
     ),
-    InputBarMaterialOption(
-        material = InputBarMaterial.LIQUID,
+    PanelMaterialOption(
+        material = PanelMaterial.LIQUID,
         icon = Icons.Outlined.WaterDrop,
         title = "液态玻璃",
         desc = "水润折射色散质感。",
     ),
 )
 
-/** 输入框设置选项行：图标 + 标题 + 说明 + 选中对勾（整行可点，选中态图标/标题变主色） */
+/** 设置选项行（输入框设置 / 侧边栏设置共用）：图标 + 标题 + 说明 + 选中对勾（整行可点，选中态图标/标题变主色） */
 @Composable
-private fun InputBarOptionRow(
+private fun PanelOptionRow(
     icon: ImageVector,
     title: String,
     desc: String,

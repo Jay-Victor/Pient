@@ -78,7 +78,7 @@ import com.pient.app.data.Attachment
 import com.pient.app.data.AttachmentKind
 import com.pient.app.data.ChatState
 import com.pient.app.data.DrawerMode
-import com.pient.app.data.InputBarMaterial
+import com.pient.app.data.PanelMaterial
 import com.pient.app.data.Msg
 import com.pient.app.data.Panel
 import com.pient.app.data.Quote
@@ -155,7 +155,15 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     // 从而「内容滑过输入栏时能从玻璃里透出模糊的内容」。输入栏与该层同级 → 不会渲染树自引用。
     val panelBackdrop = rememberLayerBackdrop()
     val waterGlassState = LocalWaterGlassState.current
-    val chatGlassOn = SettingsStore.inputBarMaterial != InputBarMaterial.DEFAULT
+    val chatGlassOn = SettingsStore.inputBarMaterial != PanelMaterial.DEFAULT
+    // 侧边栏玻璃（2026-09-12，侧边栏设置）：抽屉是面板内容层之上的浮层（zIndex 2 vs 1），
+    // 采样的是同一路「面板内容」backdrop —— 该层不含抽屉自身，故不会出现「采样层里套着
+    // 玻璃节点」的自引用（Mdcito 记录的红线 / 渲染树递归）。
+    // 抽屉顶栏那一条带采样不到内容层时会落到主题背景层（combined backdrop 的另一路），
+    // 观感与顶栏本身一致（都是浅色实面）。
+    val sidebarGlassOn = SettingsStore.sidebarMaterial != PanelMaterial.DEFAULT
+    // 内容层是否需要录层 / 标记液化层：任一玻璃开启即需要（两处玻璃共用这一路 backdrop）
+    val contentGlassOn = chatGlassOn || sidebarGlassOn
     var dockHeightPx by remember { mutableIntStateOf(0) }
     val dockInset = with(density) { dockHeightPx.toDp() }
 
@@ -358,10 +366,10 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                 Box(
                     Modifier
                         .fillMaxSize()
-                        // 仅在玻璃材质下录层/标记液化层：默认材质时不做额外合成
-                        .then(if (chatGlassOn) Modifier.layerBackdrop(panelBackdrop) else Modifier)
+                        // 仅在（任一处）玻璃材质下录层/标记液化层：默认材质时不做额外合成
+                        .then(if (contentGlassOn) Modifier.layerBackdrop(panelBackdrop) else Modifier)
                         .then(
-                            if (chatGlassOn && waterGlassState != null) {
+                            if (contentGlassOn && waterGlassState != null) {
                                 Modifier.liquefiable(waterGlassState)
                             } else {
                                 Modifier
@@ -467,6 +475,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                             if (!persistentDrawer) chatState.drawerOpen = false
                             nav.navigate(route)
                         },
+                        backdrop = panelBackdrop,
                         modifier = Modifier.graphicsLayer {
                             translationX = drawerOffset.toPx()
                             scaleX = drawerScale
@@ -521,6 +530,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                         chatState.drawerOpen = false
                         nav.navigate(route)
                     },
+                    backdrop = panelBackdrop,
                 )
             }
         }
