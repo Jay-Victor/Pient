@@ -514,7 +514,14 @@ data class Attachment(
 )
 
 sealed class Msg {
-    data class User(val text: String, val attachments: List<Attachment> = emptyList()) : Msg()
+    data class User(
+        val text: String,
+        val attachments: List<Attachment> = emptyList(),
+        /** 引用块（2026-09-11）：引用某条消息追问——对齐 Hermes(@assistant-ui) Quote part
+         *  [{ text, messageId }]：引用随消息一起存（重启/分支/fork 都跟着走），
+         *  发送时在正文前注入 markdown 块引用（> …）供模型读取。 */
+        val quote: Quote? = null,
+    ) : Msg()
 
     data class Assistant(
         val markdown: String,
@@ -546,6 +553,24 @@ sealed class Msg {
         val saved: Int,
         val summary: String,
     ) : Msg()
+}
+
+/**
+ * 引用块（消息引用/追问，2026-09-11）：
+ * text = 被引用消息的原文（UI 截断展示、注入时用全文）；
+ * role = "user" / "assistant"（引用来源角色，用于卡片标注「引用用户消息 / 引用 AI 回答」）。
+ */
+data class Quote(
+    val text: String,
+    val role: String,
+) {
+    /**
+     * 注入模型上下文的形态（markdown 块引用）：被引用内容逐行加 "> " 前缀 + 空行 + 用户正文。
+     * 与 pi/pi-web 无冲突——pi 的会话条目本就是文本消息，块引用是最通用的「引用+追问」表达。
+     */
+    fun toPrompt(userText: String): String =
+        text.trim().lines().joinToString("\n") { if (it.isEmpty()) ">" else "> $it" } +
+            "\n\n" + userText
 }
 
 /**

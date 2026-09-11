@@ -47,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -75,7 +76,9 @@ import com.pient.app.data.Attachment
 import com.pient.app.data.AttachmentKind
 import com.pient.app.data.ChatState
 import com.pient.app.data.DrawerMode
+import com.pient.app.data.Msg
 import com.pient.app.data.Panel
+import com.pient.app.data.Quote
 import com.pient.app.data.SettingsStore
 import com.pient.app.ui.components.isTabletLayout
 import com.pient.app.ui.components.StatusBadge
@@ -106,6 +109,11 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     val messagesListState = rememberLazyListState()
     // 长按消息 → fork 上下文菜单（2026-09-02 分支功能设计 §4）：目标消息下标 + 气泡根坐标
     var forkMenuTarget by remember { mutableStateOf<Pair<Int, Rect>?>(null) }
+    // 复制消息卡（2026-09-11）：内容在打开时快照，避免下标失效；null = 未打开
+    var copyCardText by remember { mutableStateOf<String?>(null) }
+    // 待发送引用块（引用某条消息追问；2026-09-11）
+    var pendingQuote by remember { mutableStateOf<Quote?>(null) }
+    var inputFocusTick by remember { mutableIntStateOf(0) }
     // 输入框文本与 @ 引用状态（提升到 ChatScreen：引用卡为悬浮浮层）。
     // TextFieldValue 承载光标位置：@ 选择文件后光标需落在 "@路径 " 末尾，
     // 且退格一键删除整段引用（String 状态无法控制光标）。
@@ -143,6 +151,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     // 仅当聊天主页无任何浮层/抽屉打开时拦截；浮层打开时返回键维持原默认行为。
     val overlaysClosed = !modelSheetOpen && !attachSheetOpen && !contextCardOpen &&
         !systemPromptOpen && !urlDialogOpen && forkMenuTarget == null && !mentionOpen &&
+        copyCardText == null &&
         !chatState.drawerOpen && !locatorOpen && chatState.closingTabIndex == null
     var lastBackPress by remember { mutableStateOf(0L) }
     BackHandler(enabled = overlaysClosed) {
@@ -350,10 +359,15 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                     onSend = { text ->
                         // 首条消息自动建会话（2026-09-08：无 mock 会话后，发送即建当前项目首会话）
                         if (chatState.currentSessionId == null) chatState.newSession()
-                        chatState.streamJob = scope.launch { chatState.streamReply(text) }
+                        val q = pendingQuote
+                        chatState.streamJob = scope.launch { chatState.streamReply(text, q) }
+                        pendingQuote = null // 引用随消息落库（Msg.User.quote），输入栏引用卡随之清空
                     },
                     onAbort = { chatState.abort() },
                     modelSelectorOpen = modelSheetOpen,
+                    quote = pendingQuote,
+                    onRemoveQuote = { pendingQuote = null },
+                    focusTick = inputFocusTick,
                     onChipPositioned = { chipTopY = it },
                     onDockTopPositioned = { dockTopY = it },
                 )
@@ -578,15 +592,50 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                 ForkContextMenu(
                     anchor = forkRect,
                     forkEnabled = !chatState.isStreaming && chatState.currentSession?.running != true,
+                    isAssistant = chatState.currentMessages.getOrNull(forkIdx) is Msg.Assistant,
+                    // 重新生成仅最下方一条消息支持（2026-09-11 用户定）：非末条不显示该项
+                    showRegenerate = forkIdx == chatState.currentMessages.lastIndex,
+                    regenerateEnabled = !chatState.isStreaming,
                     onFork = {
                         forkMenuTarget = null
                         chatState.forkSession(forkIdx)
                         Toast.makeText(context, "已创建新会话", Toast.LENGTH_SHORT).show()
                     },
                     onCopy = {
+                        // 打开时快照内容：Markdown 源码态 = 助手回答原文；用户消息 = 消息文本
+                        copyCardText = when (val m = chatState.currentMessages.getOrNull(forkIdx)) {
+                            is Msg.User -> m.text
+                            is Msg.Assistant -> m.markdown
+                            else -> null
+                        }
                         forkMenuTarget = null
-                        Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
                     },
+                    onQuote = {
+                        // 引用该条消息（可追问）：挂到输入栏引用块 + 聚焦输入框接着打字
+                        pendingQuote = when (val m = chatState.currentMessages.getOrNull(forkIdx)) {
+                            is Msg.User -> Quote(m.text, "user")
+                            is Msg.Assistant -> Quote(m.markdown, "assistant")
+                            else -> null
+                        }
+                        forkMenuTarget = null
+                        inputFocusTick++
+                    },
+                    onRegenerate = {
+                        forkMenuTarget = null
+                        scope.launch {
+                            val err = chatState.regenerateMessage(forkIdx)
+                            if (err != null) Toast.makeText(context, "重新生成失败：$err", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                )
+            }
+        }
+        // ── 复制消息卡（2026-09-11；页面根层：scrim 全屏覆盖顶栏与状态栏）──
+        if (copyCardText != null) {
+            Box(Modifier.fillMaxSize().zIndex(3f)) {
+                MessageCopyCard(
+                    text = copyCardText!!,
+                    onDismiss = { copyCardText = null },
                 )
             }
         }

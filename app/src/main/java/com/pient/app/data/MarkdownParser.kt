@@ -786,3 +786,62 @@ private fun decodeEntity(src: String, index: Int): Pair<Char, Int>? {
     }
     return ch to (semi + 1)
 }
+
+// ──────────────── Markdown → 纯文本（复制消息卡「纯文本」态） ────────────────
+
+/**
+ * Markdown → 适合直接粘贴的纯文本。参照 Operit `MarkdownPlainTextRenderer`：
+ * **复用同一份 AST**（parseMarkdown / parseMdInline），不另写解析——保证「复制出来的内容」
+ * 与屏幕上渲染的内容共享同一套块/行内边界判断。
+ *
+ * 规则（逐条对齐 Operit）：标题去 `#`；无序列表前缀「• 」、有序列表保留「N. 」、
+ * 任务项「[x]/[ ] 」；代码块取源码（有语言标注时按 Operit 加 `----lang-----` 头）；
+ * 表格行 `\n` 分隔、单元格 `\t` 分隔；链接「文字 (地址)」、图片取 alt；
+ * 分割线丢弃。相邻列表项单换行、其余块间空行，最后折叠多余空行并 trim
+ * （模型输出里残留的全角空格行会被折叠，避免多出空行）。
+ */
+fun markdownToPlainText(source: String): String {
+    val blocks = parseMarkdown(source).blocks
+    val sb = StringBuilder()
+    blocks.forEachIndexed { i, b ->
+        if (i > 0) {
+            val bothList = b is MdBlock.ListBlock && blocks[i - 1] is MdBlock.ListBlock
+            sb.append(if (bothList) "\n" else "\n\n")
+        }
+        sb.append(plainBlock(b))
+    }
+    return sb.toString().replace(Regex("\\h*\\n(?:\\h*\\n)+\\h*"), "\n\n").trim()
+}
+
+private fun plainBlock(b: MdBlock): String = when (b) {
+    is MdBlock.Heading -> plainInline(b.text)
+    is MdBlock.Paragraph -> plainInline(b.text)
+    is MdBlock.Code -> if (b.lang.isBlank()) b.code else "----${b.lang}-----\n${b.code}"
+    is MdBlock.Quote -> b.blocks
+        .map { plainBlock(it) }
+        .filter { it.isNotEmpty() }
+        .joinToString("\n\n")
+    is MdBlock.ListBlock -> b.items.mapIndexed { i, item ->
+        val marker = when {
+            item.task == true -> if (item.checked) "[x] " else "[ ] "
+            b.ordered -> "${b.start + i}. "
+            else -> "• "
+        }
+        val children = item.children.map { plainBlock(it) }.filter { it.isNotEmpty() }
+        marker + plainInline(item.text) + if (children.isEmpty()) "" else "\n" + children.joinToString("\n")
+    }.joinToString("\n")
+    is MdBlock.Table -> (listOf(b.head) + b.rows).joinToString("\n") { row ->
+        row.joinToString("\t") { plainInline(it) }
+    }
+    MdBlock.Hr -> ""
+}
+
+/** 行内：取纯文本；链接展开为「文字 (地址)」，图片取 alt，硬换行还原为换行 */
+private fun plainInline(text: String): String = parseMdInline(text).joinToString("") { s ->
+    when {
+        s.lineBreak -> "\n"
+        s.image != null -> s.text
+        s.link != null -> if (s.text.isBlank() || s.text == s.link) s.link else "${s.text} (${s.link})"
+        else -> s.text
+    }
+}

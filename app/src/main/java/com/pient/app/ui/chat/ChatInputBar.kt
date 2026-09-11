@@ -36,6 +36,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +45,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -62,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pient.app.data.AttachmentKind
 import com.pient.app.data.ChatState
+import com.pient.app.data.Quote
 import com.pient.app.ui.components.ContextIndicator
 import com.pient.app.ui.theme.PientPanel
 
@@ -84,11 +88,20 @@ fun ChatInputBar(
     onSend: (String) -> Unit,
     onAbort: () -> Unit,
     modelSelectorOpen: Boolean = false, // 模型弹窗开合状态：箭头上下指示
+    /** 待发送的引用块（引用某条消息追问；null = 无引用）。发送后由外部清空。 */
+    quote: Quote? = null,
+    onRemoveQuote: () -> Unit = {},
+    /** 递增计数：变化即聚焦输入框（菜单选「引用」后直接接着打字追问） */
+    focusTick: Int = 0,
     onChipPositioned: (Float) -> Unit = {}, // 模型按键上缘 y（root 坐标，px）：供弹窗底部锚定
     onDockTopPositioned: (Float) -> Unit = {}, // dock 上缘 y（root 坐标，px）：供 @ 引用卡锚定
 ) {
     var fullscreenOpen by rememberSaveable { mutableStateOf(false) }
     val streaming = chatState.isStreaming
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(focusTick) {
+        if (focusTick > 0) runCatching { focusRequester.requestFocus() }
+    }
     // @ 引用高亮（Operit MentionVisualTransformation 同款：主色 14% 底 + 主色字 + 0.88x + Medium）
     val mentionTransformation = rememberMentionVisualTransformation(mentionFiles)
 
@@ -105,6 +118,14 @@ fun ChatInputBar(
             .fillMaxWidth() // ★ 高度必须 wrap：fillMaxSize 会占满父级全部高度，把消息区挤没
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
+        // ── 引用块卡（引用某条消息追问；在附件 chip 行之上，2026-09-11） ──
+        if (quote != null) {
+            QuoteCard(
+                quote = quote,
+                onRemove = onRemoveQuote,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+        }
         // ── 附件 chip 行（输入框上方；Hermes AttachmentPill 规格 2026-08-28） ──
         // 左侧 = "+" 菜单附件；右侧 = @ 引用文件 chip（由输入文本派生，单一事实源）
         val refMatches = remember(text.text, mentionFiles) { findMentionPathMatches(text.text, mentionFiles) }
@@ -152,7 +173,9 @@ fun ChatInputBar(
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 minLines = 1,
                 maxLines = 6,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focusRequester),
                 decorationBox = { inner ->
                     if (text.text.isEmpty()) {
                         Text(

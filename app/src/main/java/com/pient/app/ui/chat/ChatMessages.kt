@@ -21,11 +21,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -38,9 +40,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Check
@@ -50,7 +55,9 @@ import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.ForkRight
+import androidx.compose.material.icons.outlined.FormatQuote
 import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Summarize
 import androidx.compose.material.icons.outlined.Sync
@@ -58,12 +65,15 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -83,29 +93,38 @@ import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationExceptio
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import android.widget.Toast
 import com.pient.app.data.Attachment
 import com.pient.app.data.Msg
+import com.pient.app.data.Quote
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ToolStatus
+import com.pient.app.data.markdownToPlainText
 import com.pient.app.ui.components.MarkdownText
 import com.pient.app.ui.components.PermissionRequestDialog
 import com.pient.app.ui.components.PientButton
+import com.pient.app.ui.components.PientSegmented
 import com.pient.app.ui.theme.LocalPientIsDark
 import com.pient.app.ui.theme.LocalPientUserBubble
 import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 消息区（P1 核心，设计计划 3.3；2026-09-08 消息框/回复样式重设计对齐 pi-web/pi/Operit）：
@@ -667,19 +686,27 @@ private fun precedingThinking(messages: List<Msg>, idx: Int): Msg.Thinking? {
     return null
 }
 
-// ───────────────────────────── 长按消息菜单（fork 入口） ─────────────────────────────
+// ───────────────────────────── 长按消息菜单（分支 + 复制 + 重新生成） ─────────────────────────────
 
 /**
- * 长按消息气泡的上下文菜单（2026-09-02 分支功能设计 §4.1）：
- * 「从此处创建新会话」= fork（官方 RPC 原型）；「复制」= mock Toast。
+ * 长按消息气泡的上下文菜单（2026-09-02 分支功能设计 §4.1；2026-09-11 按 Operit 补两项）：
+ * - 「从此处创建新会话」= fork（官方 RPC 原型）；
+ * - 「复制消息」= 打开复制卡片（纯文本 / Markdown 源码分段，见 [MessageCopyCard]）；
+ * - 「重新生成」= 重新请求该条**助手消息**（Operit `单条重新生成` 同款，仅 AI 消息显示）。
  * 锚定气泡：默认在气泡下方，近屏幕底部时翻转到上方；点外关闭无 scrim（外层处理）。
  */
 @Composable
 fun ForkContextMenu(
     anchor: Rect,
     forkEnabled: Boolean,
+    isAssistant: Boolean,
+    /** 重新生成仅最下方一条消息支持（2026-09-11 用户定）：非末条不显示该项 */
+    showRegenerate: Boolean,
+    regenerateEnabled: Boolean,
     onFork: () -> Unit,
     onCopy: () -> Unit,
+    onQuote: () -> Unit,
+    onRegenerate: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val configuration = LocalConfiguration.current
@@ -687,7 +714,8 @@ fun ForkContextMenu(
     val screenW = configuration.screenWidthDp.dp
     val screenH = configuration.screenHeightDp.dp
     val menuW = 208.dp
-    val menuH = 96.dp // 两行 44dp + 上下 4dp padding
+    val rows = 2 + 1 + (if (showRegenerate) 1 else 0) // fork + 复制消息 + 引用 (+ 重新生成)
+    val menuH = 44.dp * rows + 8.dp // 44dp/行 + 上下 4dp padding
     val x = with(density) { anchor.left.toDp() }.coerceIn(8.dp, screenW - menuW - 8.dp)
     val belowY = with(density) { anchor.bottom.toDp() } + 8.dp
     val y = if (belowY + menuH < screenH - 8.dp) belowY
@@ -707,10 +735,187 @@ fun ForkContextMenu(
             )
             MenuRow(
                 icon = Icons.Outlined.ContentCopy,
-                label = "复制",
+                label = "复制消息",
                 enabled = true,
                 onClick = onCopy,
             )
+            MenuRow(
+                icon = Icons.Outlined.FormatQuote,
+                label = "引用",
+                enabled = true,
+                onClick = onQuote,
+            )
+            if (showRegenerate) {
+                MenuRow(
+                    icon = Icons.Outlined.Refresh,
+                    label = "重新生成",
+                    enabled = regenerateEnabled,
+                    onClick = onRegenerate,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 引用块卡片（消息引用/追问，2026-09-11）：
+ * 左侧 2dp 主色竖线 + 引用来源标签 + 引用原文（2 行省略）+ 可选右侧 × 取消。
+ * 输入栏（待发送）与消息气泡（已发送）共用同一张卡——对齐 Hermes(@assistant-ui)
+ * ComposerPrimitive.Quote/QuoteText/QuoteDismiss 与消息 Quote part 的同源形态。
+ */
+@Composable
+fun QuoteCard(
+    quote: Quote,
+    modifier: Modifier = Modifier,
+    onRemove: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            // ★ 高度必须由内容决定（IntrinsicSize.Min）：竖线用 fillMaxHeight 且父级高度无界时，
+            //   会把它撑到父级最大高度（输入栏 dock 变全屏高、卡片跑到屏幕顶部 —— 2026-09-11 实测踩过）
+            .height(IntrinsicSize.Min)
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .padding(vertical = 6.dp),
+    ) {
+        Box(
+            Modifier
+                .width(2.dp)
+                .fillMaxHeight()
+                .background(MaterialTheme.colorScheme.primary),
+        )
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 8.dp, end = 4.dp),
+        ) {
+            Text(
+                if (quote.role == "assistant") "引用 AI 回答" else "引用用户消息",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                quote.text.trim().replace("\n", " "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        if (onRemove != null) {
+            IconButton(
+                onClick = onRemove,
+                modifier = Modifier.size(28.dp),
+            ) {
+                Icon(
+                    Icons.Outlined.Close, "取消引用",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 复制消息卡片（2026-09-11；参照 Operit `MessageCopyPreviewBottomSheet`）：
+ * 标题「复制消息」+ 分段控制器（纯文本 / Markdown 源码）+ 内容区（可选中文本、可滚动）
+ * + 右下「复制纯文本」/「复制 Markdown 源码」按键（文案随分段变化，Operit 同款）。
+ * Pient 浮层家族：PientPanel + scrim 点外关闭、无右上 ×（与点外关闭重复的元素不加）。
+ */
+@Composable
+fun MessageCopyCard(
+    text: String,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val configuration = LocalConfiguration.current
+    var mode by remember(text) { mutableIntStateOf(0) }
+    // 纯文本态：按 Operit 一样用同一份 AST 转换（不放主线程——长回答逐字符转换可感）
+    var plain by remember(text) { mutableStateOf<String?>(null) }
+    LaunchedEffect(text) {
+        plain = withContext(Dispatchers.Default) { markdownToPlainText(text) }
+    }
+    val display = if (mode == 0) plain.orEmpty() else text
+
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.scrim)
+                .clickable(onClick = onDismiss),
+        )
+        PientPanel(
+            modifier = modifier
+                .width((configuration.screenWidthDp - 48).dp)
+                .heightIn(max = (configuration.screenHeightDp * 0.6f).dp)
+                // 卡片自身吞掉点击，避免点卡片内容穿透到点外关闭层
+                .clickable(
+                    onClick = {},
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                ),
+            shape = RoundedCornerShape(16.dp),
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text(
+                    "复制消息",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                PientSegmented(
+                    labels = listOf("纯文本", "Markdown 源码"),
+                    selected = mode,
+                    onSelect = { mode = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                )
+                SelectionContainer(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
+                        .padding(top = 12.dp),
+                ) {
+                    if (mode == 0 && plain == null) {
+                        // 转换中（Operit 同款：先出转圈再出内容）
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(120.dp),
+                            contentAlignment = Alignment.Center,
+                        ) { CircularProgressIndicator() }
+                    } else {
+                        Text(
+                            display,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(
+                        enabled = mode == 1 || plain != null,
+                        onClick = {
+                            clipboard.setText(AnnotatedString(display))
+                            Toast.makeText(context, "消息已复制到剪贴板", Toast.LENGTH_SHORT).show()
+                        },
+                    ) {
+                        Text(if (mode == 0) "复制纯文本" else "复制 Markdown 源码")
+                    }
+                }
+            }
         }
     }
 }
@@ -794,6 +999,15 @@ private fun UserBubble(msg: Msg.User) {
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.End,
     ) {
+        // 引用块（2026-09-11）：气泡上方右对齐，宽与气泡同口径（85%）
+        if (msg.quote != null) {
+            BoxWithConstraints(Modifier.padding(bottom = 4.dp)) {
+                QuoteCard(
+                    quote = msg.quote,
+                    modifier = Modifier.widthIn(max = maxWidth * 0.85f),
+                )
+            }
+        }
         if (msg.attachments.isNotEmpty()) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),

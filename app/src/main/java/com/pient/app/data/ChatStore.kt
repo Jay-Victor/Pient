@@ -196,6 +196,12 @@ object ChatStore {
         is Msg.User -> JSONObject()
             .put("type", "user")
             .put("text", m.text)
+            .put(
+                "quote",
+                m.quote?.let { q ->
+                    JSONObject().put("text", q.text).put("role", q.role)
+                } ?: JSONObject.NULL,
+            )
             .put("attachments", JSONArray().apply {
                 m.attachments.forEach { a ->
                     put(
@@ -257,7 +263,13 @@ object ChatStore {
                         )
                     }
                 }
-                Msg.User(o.optString("text"), atts)
+                Msg.User(
+                    o.optString("text"),
+                    atts,
+                    o.optJSONObject("quote")?.let { q ->
+                        Quote(q.optString("text"), q.optString("role", "user"))
+                    },
+                )
             }
             "assistant" -> {
                 val u = o.optJSONObject("usage")

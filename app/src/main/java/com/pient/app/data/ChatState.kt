@@ -322,13 +322,13 @@ class ChatState {
      * 思考/工具条目），system prompt 走 ChatState.systemPrompt；思考级别/流式开关/
      * 模型参数均来自输入栏与配置页状态。请求失败以 error 助手消息呈现（不进 API 上下文）。
      */
-    suspend fun streamReply(userText: String) {
+    suspend fun streamReply(userText: String, quote: Quote? = null) {
         isStreaming = true
         streamDraft = ""
         // ★ 历史快照必须先于消息上屏：buildApiHistory 读 currentMessages，
         //   上屏后再取会把本条用户消息算进历史、又被末尾显式追加一次 = 重复（2026-09-09 修复）
         val historyBefore = buildApiHistory()
-        appendEntry(Msg.User(userText, attachments.toList()))
+        appendEntry(Msg.User(userText, attachments.toList(), quote))
         attachments.clear()
         touchSession(userText)
         markRunning(true)
@@ -351,39 +351,15 @@ class ChatState {
         val effectiveModel = model.name.takeIf { cfg.models.contains(it) }
             ?: cfg.models.firstOrNull().orEmpty()
 
-        val history = historyBefore + ("user" to userText)
+        // 引用消息：正文以 markdown 块引用注入（Quote.toPrompt；UI 仍只显示用户正文）
+        val history = historyBefore + ("user" to (quote?.toPrompt(userText) ?: userText))
         val trimmedHistory = trimToContextBudget(history, cfg.ctxLenK)
-        val thinking = if (thinkingEnabled) thinkingLevel else null
         try {
-            var usage: Usage? = null
-            if (streamingOutputEnabled) {
-                val sb = StringBuilder()
-                AiBackend.chatStream(
-                    cfg = cfg.copy(modelList = effectiveModel),
-                    systemPrompt = systemPrompt,
-                    history = trimmedHistory,
-                    thinkingLevel = thinking,
-                ).collect { ev ->
-                    when (ev) {
-                        is ChatEvent.TextDelta -> {
-                            sb.append(ev.text)
-                            streamDraft = sb.toString()
-                        }
-                        is ChatEvent.UsageEvent -> usage = ev.usage
-                        is ChatEvent.Failed -> throw AiException(ev.message)
-                        ChatEvent.Done -> Unit
-                    }
-                }
-                appendEntry(Msg.Assistant(sb.toString(), usage, effectiveModel))
-            } else {
-                val result = AiBackend.chat(
-                    cfg = cfg.copy(modelList = effectiveModel),
-                    systemPrompt = systemPrompt,
-                    history = trimmedHistory,
-                    thinkingLevel = thinking,
-                )
-                appendEntry(Msg.Assistant(result.text, result.usage, effectiveModel))
-            }
+            val (text, usage) = runChat(
+                cfg = cfg.copy(modelList = effectiveModel),
+                history = trimmedHistory,
+            ) { draft -> streamDraft = draft }
+            appendEntry(Msg.Assistant(text, usage, effectiveModel))
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e // abort：保留 abort() 对 draft 的处理
         } catch (e: Exception) {
@@ -400,12 +376,115 @@ class ChatState {
         }
     }
 
+    /**
+     * 重新生成指定助手消息（消息流下标；长按菜单「重新生成」入口，参照 Operit
+     * `regenerateSingleAiMessage` 语义）：
+     * 用「该消息之前的历史」（含其前一条用户消息）重新请求，结果**原位替换**该条消息
+     * （条目树位置不变，分支结构不受影响）；流式开启时逐片刷新，用户可见打字过程。
+     * 失败**回退原内容**并返回错误文案（调用方 Toast）——不把用户已看到的内容清空。
+     *
+     * @return null = 成功；非空 = 失败原因（含运行中被拒的口径）
+     */
+    suspend fun regenerateMessage(index: Int): String? {
+        val list = currentMessages
+        val original = list.getOrNull(index) as? Msg.Assistant
+            ?: return "该条消息无法重新生成"
+        // 只有最下方一条消息支持重新生成（2026-09-11 用户定）：中间消息重生成会与其后的
+        // 对话上下文脱节（后续消息引用的正是旧回答），仅在会话末尾语义成立。
+        if (index != list.lastIndex) return "仅最后一条消息支持重新生成"
+        if (isStreaming) return "当前已有消息在处理中，请稍后再试"
+        val model = selectedModel ?: return "尚未配置可用模型"
+        val cfg = AiConfigStore.configs[model.provider] ?: return "尚未配置可用模型"
+        // 历史 = 该消息之前的部分（其前一条用户消息已包含在内），不含本条与之后内容
+        val history = trimToContextBudget(apiHistoryOf(list.subList(0, index)), cfg.ctxLenK)
+        if (history.isEmpty()) return "缺少可用的上下文"
+        val effectiveModel = model.name.takeIf { cfg.models.contains(it) }
+            ?: cfg.models.firstOrNull().orEmpty()
+
+        isStreaming = true
+        streamDraft = ""
+        markRunning(true)
+        return try {
+            val (text, usage) = runChat(
+                cfg = cfg.copy(modelList = effectiveModel),
+                history = history,
+            ) { draft -> replaceMessageAt(index, Msg.Assistant(draft, null, effectiveModel)) }
+            replaceMessageAt(index, Msg.Assistant(text, usage, effectiveModel))
+            null
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            replaceMessageAt(index, original)   // 中止：恢复原内容
+            throw e
+        } catch (e: Exception) {
+            replaceMessageAt(index, original)
+            e.message ?: "未知错误"
+        } finally {
+            streamDraft = ""
+            isStreaming = false
+            markRunning(false)
+        }
+    }
+
+    /**
+     * 单次对话请求（流式 / 非流式共用一条路径，2026-09-11 抽出供发送与重新生成复用）：
+     * 流式逐片回调 onDelta，返回 (完整文本, usage)。
+     */
+    private suspend fun runChat(
+        cfg: ProviderConfig,
+        history: List<Pair<String, String>>,
+        onDelta: (String) -> Unit,
+    ): Pair<String, Usage?> {
+        val thinking = if (thinkingEnabled) thinkingLevel else null
+        if (!streamingOutputEnabled) {
+            val result = AiBackend.chat(cfg, systemPrompt, history, thinking)
+            return result.text to result.usage
+        }
+        val sb = StringBuilder()
+        var usage: Usage? = null
+        AiBackend.chatStream(cfg, systemPrompt, history, thinking).collect { ev ->
+            when (ev) {
+                is ChatEvent.TextDelta -> {
+                    sb.append(ev.text)
+                    onDelta(sb.toString())
+                }
+                is ChatEvent.UsageEvent -> usage = ev.usage
+                is ChatEvent.Failed -> throw AiException(ev.message)
+                ChatEvent.Done -> Unit
+            }
+        }
+        return sb.toString() to usage
+    }
+
+    /**
+     * 原位替换消息流第 index 条消息（条目树同步）：leaf 路径第 index 个条目 = 该消息，
+     * 只改其 msg、不动树结构——分支画布的节点/连线与 leaf 保持不变。
+     */
+    fun replaceMessageAt(index: Int, msg: Msg) {
+        val sid = currentSessionId ?: return
+        val list = messagesBySession[sid] ?: return
+        if (index !in list.indices) return
+        list[index] = msg
+        val entries = entriesBySession[sid] ?: return
+        val byId = entries.associateBy { it.id }
+        val path = mutableListOf<SessionEntry>()
+        var cur = leafBySession[sid]?.let { byId[it] }
+        while (cur != null) {
+            path += cur
+            cur = cur.parentId?.let { byId[it] }
+        }
+        path.reverse()
+        val target = path.getOrNull(index) ?: return
+        val i = entries.indexOfFirst { it.id == target.id }
+        if (i >= 0) entries[i] = entries[i].copy(msg = msg)
+    }
+
     /** API 上下文重建：仅 User/Assistant 且跳过 error 消息（上限 40 条防过长） */
-    private fun buildApiHistory(): List<Pair<String, String>> {
+    private fun buildApiHistory(): List<Pair<String, String>> = apiHistoryOf(currentMessages)
+
+    private fun apiHistoryOf(msgs: List<Msg>): List<Pair<String, String>> {
         val out = mutableListOf<Pair<String, String>>()
-        currentMessages.forEach { m ->
+        msgs.forEach { m ->
             when (m) {
-                is Msg.User -> out += "user" to m.text
+                is Msg.User -> out += "user" to (m.quote?.toPrompt(m.text) ?: m.text)
                 is Msg.Assistant -> if (!m.error) out += "assistant" to m.markdown
                 else -> Unit // 思考/工具/结果/压缩不参与基本对话上下文
             }
