@@ -143,7 +143,8 @@ fun TreeCanvasPanel(chatState: ChatState) {
     val zoomNow by rememberUpdatedState(zoom)
     val selectedNow by rememberUpdatedState(selectedId)
 
-    // 初始视口：平移 + 缩放使活跃路径完整可见（一次）
+    // 初始视口：缩放使活跃路径尽量完整可见；长链在最小缩放下仍放不下时，
+    // 锚定**活跃叶子**（当前所在节点 = 最右节点）——否则两端都会被裁掉、看不到当前位置
     LaunchedEffect(viewport, tree) {
         if (fitted || viewport == IntSize.Zero || layout.isEmpty()) return@LaunchedEffect
         val actives = layout.filter { it.node.active }
@@ -156,10 +157,18 @@ fun TreeCanvasPanel(chatState: ChatState) {
         val bbH = maxY - minY
         zoom = min((viewport.width - margin * 2) / bbW, (viewport.height - margin * 2) / bbH)
             .coerceIn(0.6f, 1.5f)
-        pan = Offset(
-            (viewport.width - bbW * zoom) / 2f - minX * zoom,
-            (viewport.height - bbH * zoom) / 2f - minY * zoom,
-        )
+        pan = if (bbW * zoom <= viewport.width - margin * 2) {
+            Offset(
+                (viewport.width - bbW * zoom) / 2f - minX * zoom,
+                (viewport.height - bbH * zoom) / 2f - minY * zoom,
+            )
+        } else {
+            // 放不下：活跃叶子贴右侧边距、垂直居中
+            Offset(
+                (viewport.width - margin) - maxX * zoom,
+                viewport.height / 2f - (maxY - cardH / 2f) * zoom,
+            )
+        }
         fitted = true
     }
 
