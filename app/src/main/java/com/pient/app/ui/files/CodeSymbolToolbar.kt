@@ -31,41 +31,40 @@ import androidx.compose.ui.unit.dp
  * 按键为等宽字体的文字键（代码符号看等宽字形更直观）。
  *
  * 插入语义（代码编辑器惯例，同 VSCode / Acode 的自动配对）：
- * - 成对符号（`(` `[` `{` `"` `'` `` ` ``）：无选区 → 插入一对、光标落在中间；有选区 → 包裹选区
+ * - 成对符号（`()` `[]` `{}` `<>` 与 `"` `'` `` ` ``）：无选区 → 插入一对、光标落在中间；有选区 → 包裹选区
  * - 其余符号：插入到光标处（有选区 → 替换选区）
  *
  * 键距（2026-09-11 用户口径，两轮收紧）：**同种符号之间更紧、其余间距不变**——
- * 成对键（同一 [CodeSymbol.kind]，如 `()` `[]` `{}` `<>`）键宽收窄 14dp + 字形向心内移
- * [EditorToolbarPairShift]（3.5dp）：「同种」字形间距 32dp → 11dp；「异种」与分组竖线两侧
- * 的距离经守恒计算保持原样（推导见 [EditorToolbarButton]）。
+ * 成对键（同一 [CodeSymbol.kind]）键宽收窄 14dp + 字形向心内移 [EditorToolbarPairShift]（3.5dp）；
+ * 距离经守恒计算（推导见 [EditorToolbarButton]）。**注意**：括号族已按用户要求合并成一枚键
+ * （`()` `[]` `{}` `<>`），每个 kind 只剩一枚键 → 目前表里不存在「同种相邻」，该机制对当前数据
+ * 不产生位移（整排为标准键距）；将来若有同 kind 的相邻键，它会照旧生效。
  */
 
 /**
  * 符号键：[text] = 插入文本，[close] = 成对符号的闭合符（null = 非成对），[desc] = 无障碍名/点击语义，
- * [kind] = 「同种符号」标识（同类符号相邻排布时工具栏会把后者横向收窄，视觉上成对贴合：`()` `[]` `{}` `<>`）。
+ * [kind] = 「同种符号」标识，[label] = 键面显示（默认 = [text]；同种括号合并成一枚键时显示整对，如 `()`）。
  */
 internal data class CodeSymbol(
     val text: String,
     val close: String? = null,
     val desc: String,
     val kind: String? = null,
+    val label: String? = null,
 )
 
 /**
  * 符号分组（分组之间有竖线分隔；组内顺序 = 屏上顺序）。
- * 「同种符号」= 同一 [CodeSymbol.kind] 的相邻键（括号的开/闭为一对），组内成对贴合、其余键距不变。
+ * 括号族：**同种括号（开 + 闭）合并成一枚按键**（2026-09-11 用户口径）——点一下插入一对、
+ * 光标落中间，有选区时包裹选区（由 [insertCodeSymbol] 处理）。
  */
 internal val CodeSymbolGroups: List<List<CodeSymbol>> = listOf(
-    // 括号族（尖括号在代码里同属括号语义：泛型 / HTML 标签 / 比较）
+    // 括号族（同种括号合并：() [] {} <>，键面显示整对）
     listOf(
-        CodeSymbol("(", ")", "左圆括号", kind = "round"),
-        CodeSymbol(")", null, "右圆括号", kind = "round"),
-        CodeSymbol("[", "]", "左方括号", kind = "square"),
-        CodeSymbol("]", null, "右方括号", kind = "square"),
-        CodeSymbol("{", "}", "左花括号", kind = "curly"),
-        CodeSymbol("}", null, "右花括号", kind = "curly"),
-        CodeSymbol("<", null, "小于号", kind = "angle"),
-        CodeSymbol(">", null, "大于号", kind = "angle"),
+        CodeSymbol("(", ")", "圆括号", kind = "round", label = "()"),
+        CodeSymbol("[", "]", "方括号", kind = "square", label = "[]"),
+        CodeSymbol("{", "}", "花括号", kind = "curly", label = "{}"),
+        CodeSymbol("<", ">", "尖括号", kind = "angle", label = "<>"),
     ),
     // 引号族（成对插入）
     listOf(
@@ -197,7 +196,7 @@ internal fun CodeSymbolToolbar(
                     val gap = boundaryGap(prevNudge, glyphShift, pairShift)
                     if (gap > 0.dp) Spacer(Modifier.width(gap))
                     EditorToolbarButton(
-                        text = symbol.text,
+                        text = symbol.label ?: symbol.text,   // 合并键显示整对（如 `()`）
                         desc = symbol.desc,
                         monospace = true,
                         compact = inSameKindRun,
