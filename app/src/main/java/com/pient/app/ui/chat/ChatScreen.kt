@@ -147,20 +147,36 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
         chatState.refreshFileTree(context)
     }
 
-    // ── 二次退出（Operit MainActivity.setupBackPressHandler 同款：2000ms 内再按返回即退出）──
-    // 仅当聊天主页无任何浮层/抽屉打开时拦截；浮层打开时返回键维持原默认行为。
-    val overlaysClosed = !modelSheetOpen && !attachSheetOpen && !contextCardOpen &&
-        !systemPromptOpen && !urlDialogOpen && forkMenuTarget == null && !mentionOpen &&
-        copyCardText == null &&
-        !chatState.drawerOpen && !locatorOpen && chatState.closingTabIndex == null
+    // ── 返回键优先级链（2026-09-11 修复：此前侧栏展开时单击返回直接退出应用）──
+    // 按渲染层级从高到低逐层关闭最上层浮层/抽屉（zIndex 3 浮层的渲染顺序见下方 when 分支，
+    // 后渲染者在上；侧栏为 zIndex 2 故最后关），全部关完才进入二次退出。
+    // 旧实现 `BackHandler(enabled = overlaysClosed)` 在浮层/抽屉打开时**禁用**拦截，而
+    // Pient 的浮层都是自绘「点外关闭」面板、全项目仅 ChatScreen 与 ModelConfigScreen 两处
+    // BackHandler → 返回键落到系统默认行为 = finish Activity，即抽屉展开时单击返回 = 退出。
     var lastBackPress by remember { mutableStateOf(0L) }
-    BackHandler(enabled = overlaysClosed) {
-        val now = System.currentTimeMillis()
-        if (now - lastBackPress > 2000L) {
-            lastBackPress = now
-            Toast.makeText(context, "再按一次退出应用", Toast.LENGTH_SHORT).show()
-        } else {
-            (context as? Activity)?.finish()
+    BackHandler {
+        when {
+            locatorOpen -> locatorOpen = false
+            copyCardText != null -> copyCardText = null
+            forkMenuTarget != null -> forkMenuTarget = null
+            mentionOpen -> mentionOpen = false
+            urlDialogOpen -> urlDialogOpen = false
+            attachSheetOpen -> attachSheetOpen = false
+            systemPromptOpen -> systemPromptOpen = false
+            contextCardOpen -> contextCardOpen = false
+            modelSheetOpen -> modelSheetOpen = false
+            // 文件关闭确认弹窗（文件预览页内，同样是自绘浮层）
+            chatState.closingTabIndex != null -> chatState.closingTabIndex = null
+            chatState.drawerOpen -> chatState.drawerOpen = false
+            else -> {
+                val now = System.currentTimeMillis()
+                if (now - lastBackPress > 2000L) {
+                    lastBackPress = now
+                    Toast.makeText(context, "再按一次退出应用", Toast.LENGTH_SHORT).show()
+                } else {
+                    (context as? Activity)?.finish()
+                }
+            }
         }
     }
 
