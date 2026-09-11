@@ -42,6 +42,31 @@ object AiConfigStore {
     /** AI 是否通过连接测试（聊天页首次引导第二步；测试连接成功即置真并持久化） */
     var aiConfigured by mutableStateOf(false)
 
+    // ── 模型定价（2026-09-11 按 Operit 的处理方式实现）──
+    // 内置表（ModelPricingDefaults：assets/model_pricing.tsv）+ 用户覆盖（此处的 pricing）。
+    // 覆盖键 = "provider:model"（Operit providerModel 同款键形态）；有覆盖用覆盖，否则用内置默认。
+    val pricing = mutableStateMapOf<String, ModelPricing>()
+
+    /** 美元 → 人民币汇率（内置价为 USD 的模型按此折算展示；Operit 汇率设置同款） */
+    var usdToCnyRate by mutableStateOf(ModelPricingDefaults.DEFAULT_USD_TO_CNY_RATE)
+
+    /** 覆盖键：`provider:model`（provider 小写） */
+    fun pricingKey(providerId: String, model: String): String =
+        "${providerId.trim().lowercase()}:${model.trim()}"
+
+    /** 生效定价：用户覆盖 > 内置表（三级查找） */
+    fun effectivePricing(providerId: String, model: String): ModelPricing =
+        pricing[pricingKey(providerId, model)] ?: ModelPricingDefaults.defaultFor(providerId, model)
+
+    fun setPricing(providerId: String, model: String, value: ModelPricing) {
+        pricing[pricingKey(providerId, model)] = value
+    }
+
+    /** 恢复该模型为内置默认（清除覆盖） */
+    fun clearPricing(providerId: String, model: String) {
+        pricing.remove(pricingKey(providerId, model))
+    }
+
     private fun file(context: Context) = File(context.filesDir, "pient_data/ai_config.json")
 
     fun load(context: Context) {
@@ -50,6 +75,30 @@ object AiConfigStore {
         try {
             val root = JSONObject(f.readText())
             aiConfigured = root.optBoolean("aiConfigured", false)
+            usdToCnyRate = root.optDouble("usdToCnyRate", ModelPricingDefaults.DEFAULT_USD_TO_CNY_RATE)
+            // 用户覆盖定价（键 = provider:model；无 key 时用内置表默认）
+            root.optJSONObject("pricing")?.let { obj ->
+                for (key in obj.keys()) {
+                    val v = obj.optJSONObject(key) ?: continue
+                    pricing[key] = ModelPricing(
+                        billingMode = if (v.optString("mode").equals("COUNT", ignoreCase = true)) {
+                            BillingMode.COUNT
+                        } else {
+                            BillingMode.TOKEN
+                        },
+                        inputPerMillion = v.optDouble("input", 0.0),
+                        outputPerMillion = v.optDouble("output", 0.0),
+                        cachedInputPerMillion = v.optDouble("cachedInput", 0.0),
+                        pricePerRequest = v.optDouble("pricePerRequest", 0.0),
+                        cacheWritePerMillion = v.optDouble("cacheWrite", 0.0),
+                        currency = if (v.optString("currency").equals("USD", ignoreCase = true)) {
+                            PricingCurrency.USD
+                        } else {
+                            PricingCurrency.CNY
+                        },
+                    )
+                }
+            }
             val arr = root.optJSONArray("providers") ?: return
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
@@ -98,6 +147,22 @@ object AiConfigStore {
                 )
             }
             root.put("providers", arr)
+            root.put("usdToCnyRate", usdToCnyRate)
+            root.put("pricing", JSONObject().apply {
+                for ((key, p) in pricing) {
+                    put(
+                        key,
+                        JSONObject()
+                            .put("mode", p.billingMode.name)
+                            .put("input", p.inputPerMillion)
+                            .put("output", p.outputPerMillion)
+                            .put("cachedInput", p.cachedInputPerMillion)
+                            .put("cacheWrite", p.cacheWritePerMillion)
+                            .put("pricePerRequest", p.pricePerRequest)
+                            .put("currency", p.currency.code),
+                    )
+                }
+            })
             val f = file(context)
             f.parentFile?.mkdirs()
             val tmp = File(f.parentFile, "ai_config.json.tmp")

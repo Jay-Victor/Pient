@@ -222,6 +222,7 @@ object ChatStore {
                     .put("in", u.inTokens)
                     .put("out", u.outTokens)
                     .put("cache", u.cacheTokens)
+                    .put("cacheWrite", u.cacheWriteTokens)
                     .put("cost", u.costUsd)
             } ?: JSONObject.NULL)
         is Msg.Thinking -> JSONObject()
@@ -276,7 +277,13 @@ object ChatStore {
                 Msg.Assistant(
                     markdown = o.optString("markdown"),
                     usage = u?.let {
-                        Usage(it.optInt("in"), it.optInt("out"), it.optInt("cache"), it.optDouble("cost"))
+                        Usage(
+                            inTokens = it.optInt("in"),
+                            outTokens = it.optInt("out"),
+                            cacheTokens = it.optInt("cache"),
+                            costUsd = it.optDouble("cost"),
+                            cacheWriteTokens = it.optInt("cacheWrite"),
+                        )
                     },
                     model = if (o.isNull("model")) null else o.optString("model"),
                     error = o.optBoolean("error", false),

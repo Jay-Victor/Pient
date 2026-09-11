@@ -264,18 +264,39 @@ object AiBackend {
     private fun JSONObject.strOrEmpty(key: String): String =
         if (isNull(key)) "" else optString(key)
 
+    /**
+     * OpenAI 协议 usage → Usage（pi 同口径，见 packages/ai/src/api/openai-completions.ts）：
+     * 输入 = prompt_tokens − 缓存读取 − 缓存写入（缓存单独计费）；缓存读取取值链
+     * prompt_tokens_details.cached_tokens → prompt_cache_hit_tokens（DeepSeek）→ cached_tokens（Kimi）。
+     */
+    private fun openAiUsage(u: JSONObject): Usage {
+        val details = u.optJSONObject("prompt_tokens_details")
+        val cacheRead = details?.optInt("cached_tokens")
+            ?: u.optInt("prompt_cache_hit_tokens").takeIf { it > 0 }
+            ?: u.optInt("cached_tokens")
+        val cacheWrite = details?.optInt("cache_write_tokens") ?: 0
+        return Usage(
+            inTokens = maxOf(0, u.optInt("prompt_tokens") - cacheRead - cacheWrite),
+            outTokens = u.optInt("completion_tokens"),
+            cacheTokens = cacheRead,
+            costUsd = 0.0,
+            cacheWriteTokens = cacheWrite,
+        )
+    }
+
+    /** Anthropic 协议 usage → Usage（input_tokens 本身不含缓存读取；缓存写入 = cache_creation_input_tokens） */
+    private fun anthropicUsage(u: JSONObject): Usage = Usage(
+        inTokens = u.optInt("input_tokens"),
+        outTokens = u.optInt("output_tokens"),
+        cacheTokens = u.optInt("cache_read_input_tokens"),
+        costUsd = 0.0,
+        cacheWriteTokens = u.optInt("cache_creation_input_tokens"),
+    )
+
     private fun parseOpenAiFull(root: JSONObject): ChatResult {
         val text = root.optJSONArray("choices")?.optJSONObject(0)
             ?.optJSONObject("message")?.let { it.strOrEmpty("content") } ?: ""
-        val u = root.optJSONObject("usage")
-        val usage = u?.let {
-            Usage(
-                inTokens = it.optInt("prompt_tokens"),
-                outTokens = it.optInt("completion_tokens"),
-                cacheTokens = it.optJSONObject("prompt_tokens_details")?.optInt("cached_tokens") ?: 0,
-                costUsd = 0.0,
-            )
-        }
+        val usage = root.optJSONObject("usage")?.let { openAiUsage(it) }
         return ChatResult(text, usage)
     }
 
@@ -288,15 +309,7 @@ object AiBackend {
                 if (b.optString("type") == "text") sb.append(b.strOrEmpty("text"))
             }
         }
-        val u = root.optJSONObject("usage")
-        val usage = u?.let {
-            Usage(
-                inTokens = it.optInt("input_tokens"),
-                outTokens = it.optInt("output_tokens"),
-                cacheTokens = it.optInt("cache_read_input_tokens"),
-                costUsd = 0.0,
-            )
-        }
+        val usage = root.optJSONObject("usage")?.let { anthropicUsage(it) }
         return ChatResult(sb.toString(), usage)
     }
 
@@ -314,15 +327,7 @@ object AiBackend {
                 val content = delta.strOrEmpty("content")
                 if (content.isNotEmpty()) emit(ChatEvent.TextDelta(content))
                 // reasoning_content（DeepSeek 等推理模型）暂不展示，仅取最终回答
-                o.optJSONObject("usage")?.let { u ->
-                    usage = Usage(
-                        inTokens = u.optInt("prompt_tokens"),
-                        outTokens = u.optInt("completion_tokens"),
-                        cacheTokens = u.optJSONObject("prompt_tokens_details")
-                            ?.optInt("cached_tokens") ?: 0,
-                        costUsd = 0.0,
-                    )
-                }
+                o.optJSONObject("usage")?.let { usage = openAiUsage(it) }
             } catch (_: Exception) {
                 // 忽略无法解析的分片
             }
@@ -334,6 +339,7 @@ object AiBackend {
         var inTokens = 0
         var outTokens = 0
         var cacheTokens = 0
+        var cacheWriteTokens = 0
         while (true) {
             val line = source.readUtf8Line() ?: break
             if (!line.startsWith("data:")) continue
@@ -352,6 +358,7 @@ object AiBackend {
                     "message_start" -> o.optJSONObject("message")?.optJSONObject("usage")?.let {
                         inTokens = it.optInt("input_tokens")
                         cacheTokens = it.optInt("cache_read_input_tokens")
+                        cacheWriteTokens = it.optInt("cache_creation_input_tokens")
                     }
                     "message_delta" -> o.optJSONObject("usage")?.let {
                         outTokens = it.optInt("output_tokens")
@@ -367,8 +374,8 @@ object AiBackend {
                 // 忽略无法解析的分片
             }
         }
-        if (inTokens > 0 || outTokens > 0) {
-            emit(ChatEvent.UsageEvent(Usage(inTokens, outTokens, cacheTokens, 0.0)))
+        if (inTokens > 0 || outTokens > 0 || cacheTokens > 0 || cacheWriteTokens > 0) {
+            emit(ChatEvent.UsageEvent(Usage(inTokens, outTokens, cacheTokens, 0.0, cacheWriteTokens)))
         }
     }
 

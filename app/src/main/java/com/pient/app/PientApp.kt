@@ -30,8 +30,10 @@ import androidx.navigation.compose.rememberNavController
 import com.pient.app.data.AiConfigStore
 import com.pient.app.data.ChatState
 import com.pient.app.data.ChatStore
+import com.pient.app.data.ModelPricingDefaults
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ThemeMode
+import com.pient.app.data.UsageStore
 import com.pient.app.ui.chat.ChatScreen
 import com.pient.app.ui.onboarding.OnboardingScreen
 import com.pient.app.ui.plugins.PluginsScreen
@@ -75,9 +77,13 @@ fun PientApp() {
     var onboarded by remember { mutableStateOf(prefs.getBoolean("onboarded", false)) }
     val chatState = remember {
         ChatState().also {
+            // 内置模型价格表（assets/model_pricing.tsv，Operit 式内置定价）
+            ModelPricingDefaults.load(context)
             // 会话记录与 AI 配置恢复（2026-09-09：项目/会话/消息记录跨重启保留）
             AiConfigStore.load(context)
             ChatStore.load(context, it)
+            // 用量台账恢复（2026-09-11：模型用量信息页的真实数据源）
+            UsageStore.load(context)
         }
     }
     val nav = rememberNavController()
@@ -132,10 +138,16 @@ fun PientApp() {
         }.collect { SettingsStore.saveFont(context) }
     }
 
-    // AI 配置持久化（2026-09-09：服务商/密钥/模型/参数 + 连接测试标记），重启后保持
+    // AI 配置持久化（2026-09-09：服务商/密钥/模型/参数 + 连接测试标记；2026-09-11 加模型定价与汇率），重启后保持
     LaunchedEffect(Unit) {
-        snapshotFlow { AiConfigStore.configs.mapValues { it.value } to AiConfigStore.aiConfigured }
-            .collect { AiConfigStore.save(context) }
+        snapshotFlow {
+            listOf(
+                AiConfigStore.configs.mapValues { it.value },
+                AiConfigStore.aiConfigured,
+                AiConfigStore.pricing.toMap(),
+                AiConfigStore.usdToCnyRate,
+            )
+        }.collect { AiConfigStore.save(context) }
     }
 
     // 项目会话记录持久化（2026-09-09：项目/会话/消息记录全量落盘），重启后保持。
@@ -153,6 +165,13 @@ fun PientApp() {
                     chatState.streamingOutputEnabled)
         }.debounce(800).collect {
             withContext(Dispatchers.IO) { ChatStore.save(context, chatState) }
+        }
+    }
+
+    // 用量台账持久化（2026-09-11：每次回复记一笔，防抖落盘 usage.json）
+    LaunchedEffect(Unit) {
+        snapshotFlow { UsageStore.records.toList() }.debounce(800).collect {
+            withContext(Dispatchers.IO) { UsageStore.save(context) }
         }
     }
 

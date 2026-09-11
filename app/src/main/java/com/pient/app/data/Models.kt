@@ -605,10 +605,14 @@ data class SessionTreeNode(
 enum class ToolStatus { RUNNING, DONE, FAILED }
 
 data class Usage(
+    /** 输入（**不含**缓存读取/写入——pi 同口径：input = prompt − cacheRead − cacheWrite） */
     val inTokens: Int,
     val outTokens: Int,
+    /** 缓存读取（命中缓存、按缓存读取价计费） */
     val cacheTokens: Int,
     val costUsd: Double,
+    /** 缓存写入（Anthropic cache_creation / OpenRouter cache_write；按缓存写入价计费） */
+    val cacheWriteTokens: Int = 0,
 )
 
 // ─────────────────────────────────────────────────────────────

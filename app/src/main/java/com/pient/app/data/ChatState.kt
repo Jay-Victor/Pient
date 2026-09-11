@@ -360,6 +360,8 @@ class ChatState {
                 history = trimmedHistory,
             ) { draft -> streamDraft = draft }
             appendEntry(Msg.Assistant(text, usage, effectiveModel))
+            // 用量台账（用量页数据源）：完成即记一笔（usage 为空 = 服务商未返回用量，不记）
+            UsageStore.record(cfg.providerId, effectiveModel, usage)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e // abort：保留 abort() 对 draft 的处理
         } catch (e: Exception) {
@@ -410,6 +412,8 @@ class ChatState {
                 history = history,
             ) { draft -> replaceMessageAt(index, Msg.Assistant(draft, null, effectiveModel)) }
             replaceMessageAt(index, Msg.Assistant(text, usage, effectiveModel))
+            // 重新生成同样计入用量台账（一次真实请求 = 一笔用量）
+            UsageStore.record(cfg.providerId, effectiveModel, usage)
             null
         } catch (e: kotlinx.coroutines.CancellationException) {
             replaceMessageAt(index, original)   // 中止：恢复原内容
