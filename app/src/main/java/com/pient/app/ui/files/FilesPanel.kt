@@ -29,7 +29,10 @@ import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.InsertDriveFile
+import androidx.compose.material.icons.outlined.Movie
+import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.Icon
@@ -304,10 +307,14 @@ private fun FileTabBar(chatState: ChatState, onSave: (FileNode) -> Unit) {
     }
 }
 
-/** 按扩展名区分文件图标（细线 Outlined 风格） */
+/**
+ * 按扩展名区分文件图标（细线 Outlined 风格）：图片 / 视频 / 音频各用专属图案，
+ * 其余类型仍为通用文件图标。扩展名集合与文件预览共用（PREVIEW_*_EXTS），
+ * 保证文件树、标签栏、预览区三处对同一文件的判定一致。
+ */
 fun fileIcon(ext: String): ImageVector = when (ext) {
-    "md", "txt" -> Icons.Outlined.InsertDriveFile
-    "kt", "kts", "java", "xml", "gradle", "py", "js", "ts" -> Icons.Outlined.InsertDriveFile
-    "png", "jpg", "jpeg", "webp", "gif" -> Icons.Outlined.InsertDriveFile
+    in PREVIEW_IMAGE_EXTS -> Icons.Outlined.Image
+    in PREVIEW_VIDEO_EXTS -> Icons.Outlined.Movie
+    in PREVIEW_AUDIO_EXTS -> Icons.Outlined.MusicNote
     else -> Icons.Outlined.InsertDriveFile
 }

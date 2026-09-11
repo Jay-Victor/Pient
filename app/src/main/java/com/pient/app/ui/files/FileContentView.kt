@@ -519,13 +519,13 @@ private val CodeFontSize = 12.sp
 private val CodeLineHeight = 20.sp
 
 /** 真实解码预览的图片扩展名（Operit workspaceMimeTypeForPath 的 image 分支口径） */
-private val PREVIEW_IMAGE_EXTS = setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "heic", "heif")
+internal val PREVIEW_IMAGE_EXTS = setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "heic", "heif")
 
 /** 视频扩展名（Operit workspaceMimeTypeForPath 的 video 分支） */
-private val PREVIEW_VIDEO_EXTS = setOf("webm", "mp4", "m4v", "mov", "mkv", "avi", "3gp")
+internal val PREVIEW_VIDEO_EXTS = setOf("webm", "mp4", "m4v", "mov", "mkv", "avi", "3gp")
 
 /** 音频扩展名（Operit workspaceMimeTypeForPath 的 audio 分支） */
-private val PREVIEW_AUDIO_EXTS = setOf("mp3", "wav", "m4a", "aac", "ogg", "opus", "flac")
+internal val PREVIEW_AUDIO_EXTS = setOf("mp3", "wav", "m4a", "aac", "ogg", "opus", "flac")
 
 /** 无行号的纯文本（用户 2026-09-10 定：txt 侧边不加行号） */
 private val PLAIN_TEXT_EXTS = setOf("txt", "text")
