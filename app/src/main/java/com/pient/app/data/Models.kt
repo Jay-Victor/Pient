@@ -549,10 +549,21 @@ sealed class Msg {
 }
 
 /**
- * 会话树节点（P12 /tree 画布页数据源；原型由 mock 提供，
- * 接入 pi 运行时后由 get_state 会话树 / SDK navigateTree() 驱动）。
+ * 会话条目（pi session-format v3 同构，2026-09-11）：会话全部条目按 id/parentId
+ * 链接成树（首条 parentId = null），leaf = 当前所在位置。
+ * 会话内分支的真实承载：切分支 = 移动 leaf（不新建会话、不丢条目）；
+ * 在旧条目下继续追加消息 = 长出新的兄弟分支，原分支条目保留在树里。
+ */
+data class SessionEntry(
+    val id: String,          // 8 位 hex（pi 同款）
+    val parentId: String?,   // 父条目 id；null = 根
+    val msg: Msg,
+)
+
+/**
+ * 会话树节点（P12 /tree 画布页数据源；2026-09-11 起由真实条目树派生）。
  * 节点 = 一条用户消息；exchange = 该节点代表的那次对话（用户消息 + 后续至
- * 下一条用户消息前的全部条目，含 AI 回答）。
+ * 下一条用户消息前的全部条目，含 AI 回答）；children = 从该节点长出的分支。
  */
 data class SessionTreeNode(
     val id: String,

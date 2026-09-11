@@ -39,6 +39,71 @@ class ChatState {
     val sessions = mutableStateMapOf<String, SnapshotStateList<Session>>()
     val messagesBySession = mutableStateMapOf<String, SnapshotStateList<Msg>>()
 
+    // ── 会话条目树（pi session-format v3 同构，2026-09-11：会话内分支的真实承载）──
+    // entriesBySession = 会话**全部**条目（含被放弃的分支），id/parentId 链接成树；
+    // leafBySession = 当前所在位置（活跃分支末尾条目 id）；messagesBySession
+    // 只保存 root→leaf 派生出的上屏消息流（重建见 rebuildMessagesFromLeaf）。
+    val entriesBySession = mutableStateMapOf<String, SnapshotStateList<SessionEntry>>()
+    val leafBySession = mutableStateMapOf<String, String?>()
+
+    private fun entriesOf(sid: String): SnapshotStateList<SessionEntry> =
+        entriesBySession.getOrPut(sid) { mutableStateListOf() }
+
+    /** 新条目 id：pi 同款 8 位 hex，同会话内不重复 */
+    private fun newEntryId(existing: List<SessionEntry>): String {
+        while (true) {
+            val id = java.util.UUID.randomUUID().toString().replace("-", "").take(8)
+            if (existing.none { it.id == id }) return id
+        }
+    }
+
+    /**
+     * 追加一条会话条目（父 = 当前 leaf，pi appendMessage 同语义）：写入条目树 +
+     * 上屏 + 推进 leaf。navigateToNode 之后再追加即从旧条目长出**新的兄弟分支**
+     * （原分支条目保留在树里，不丢）。
+     */
+    fun appendEntry(msg: Msg) {
+        val sid = currentSessionId ?: return
+        val list = entriesOf(sid)
+        val id = newEntryId(list)
+        list += SessionEntry(id, leafBySession[sid], msg)
+        leafBySession[sid] = id
+        messagesBySession.getOrPut(sid) { mutableStateListOf() } += msg
+    }
+
+    /** 由 root→leaf 重建上屏消息流（切分支后调用；条目树本身不动） */
+    fun rebuildMessagesFromLeaf(sid: String) {
+        val entries = entriesBySession[sid] ?: return
+        val byId = entries.associateBy { it.id }
+        val path = mutableListOf<Msg>()
+        var cur = leafBySession[sid]?.let { byId[it] }
+        while (cur != null) {
+            path += cur.msg
+            cur = cur.parentId?.let { byId[it] }
+        }
+        path.reverse()
+        messagesBySession[sid] = path.toMutableStateList()
+    }
+
+    /**
+     * 老记录迁移（无条目树的历史会话）：按消息流建线性链，leaf = 末条目。
+     * 2026-09-11 之前 state.json 只有扁平消息流，迁移后才能参与 /tree 分支切换。
+     */
+    fun migrateEntriesIfNeeded(sid: String) {
+        if (entriesBySession[sid]?.isNotEmpty() == true) return
+        val msgs = messagesBySession[sid]?.toList().orEmpty()
+        if (msgs.isEmpty()) return
+        val chain = mutableStateListOf<SessionEntry>()
+        var parent: String? = null
+        msgs.forEach { m ->
+            val id = newEntryId(chain)
+            chain += SessionEntry(id, parent, m)
+            parent = id
+        }
+        entriesBySession[sid] = chain
+        leafBySession[sid] = parent
+    }
+
     /**
      * 添加项目（2026-09-02 实现真实功能）：
      * 「新建文件夹」= filesDir/Projects/<name> 真实目录；「选择本地文件夹」= SAF tree URI。
@@ -108,6 +173,8 @@ class ChatState {
         list.add(0, Session(id, "新建会话", proj, updatedAt = System.currentTimeMillis()))
         currentSessionId = id
         messagesBySession[id] = mutableStateListOf()
+        entriesBySession[id] = mutableStateListOf()
+        leafBySession[id] = null
         activePanel = Panel.MESSAGES
         return id
     }
@@ -147,6 +214,8 @@ class ChatState {
         val proj = currentProject ?: return
         sessions[proj]?.removeAll { it.id == id }
         messagesBySession.remove(id)
+        entriesBySession.remove(id)
+        leafBySession.remove(id)
         if (currentSessionId == id) currentSessionId = sessionsFor(proj).firstOrNull()?.id
         // 删除最后一个会话后自动新建（2026-09-09 用户定：侧边栏会话列表恒有会话）
         if (sessionsFor(proj).isEmpty()) newSession()
@@ -158,6 +227,8 @@ class ChatState {
             if (list.removeAll { it.id == id }) break
         }
         messagesBySession.remove(id)
+        entriesBySession.remove(id)
+        leafBySession.remove(id)
         if (currentSessionId == id) {
             currentSessionId = sessionsFor(currentProject ?: "").firstOrNull()?.id
         }
@@ -228,7 +299,11 @@ class ChatState {
      */
     fun removeProject(name: String) {
         if (!projects.removeAll { it.name == name }) return
-        sessions.remove(name)?.forEach { s -> messagesBySession.remove(s.id) }
+        sessions.remove(name)?.forEach { s ->
+            messagesBySession.remove(s.id)
+            entriesBySession.remove(s.id)
+            leafBySession.remove(s.id)
+        }
         if (currentProject == name) {
             currentProject = projects.firstOrNull()?.name
             currentSessionId = sessionsFor(currentProject ?: "").firstOrNull()?.id
@@ -253,7 +328,7 @@ class ChatState {
         // ★ 历史快照必须先于消息上屏：buildApiHistory 读 currentMessages，
         //   上屏后再取会把本条用户消息算进历史、又被末尾显式追加一次 = 重复（2026-09-09 修复）
         val historyBefore = buildApiHistory()
-        currentMessages += Msg.User(userText, attachments.toList())
+        appendEntry(Msg.User(userText, attachments.toList()))
         attachments.clear()
         touchSession(userText)
         markRunning(true)
@@ -261,9 +336,11 @@ class ChatState {
         val model = selectedModel
         val cfg = model?.provider?.let { AiConfigStore.configs[it] }
         if (cfg == null || model == null) {
-            currentMessages += Msg.Assistant(
-                "⚠️ 尚未配置可用模型：请在「服务商与模型配置」中添加服务商，填入 API 密钥后填写模型列表或点「刷新」拉取。",
-                error = true,
+            appendEntry(
+                Msg.Assistant(
+                    "⚠️ 尚未配置可用模型：请在「服务商与模型配置」中添加服务商，填入 API 密钥后填写模型列表或点「刷新」拉取。",
+                    error = true,
+                )
             )
             isStreaming = false
             streamDraft = ""
@@ -297,7 +374,7 @@ class ChatState {
                         ChatEvent.Done -> Unit
                     }
                 }
-                currentMessages += Msg.Assistant(sb.toString(), usage, effectiveModel)
+                appendEntry(Msg.Assistant(sb.toString(), usage, effectiveModel))
             } else {
                 val result = AiBackend.chat(
                     cfg = cfg.copy(modelList = effectiveModel),
@@ -305,14 +382,16 @@ class ChatState {
                     history = trimmedHistory,
                     thinkingLevel = thinking,
                 )
-                currentMessages += Msg.Assistant(result.text, result.usage, effectiveModel)
+                appendEntry(Msg.Assistant(result.text, result.usage, effectiveModel))
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e // abort：保留 abort() 对 draft 的处理
         } catch (e: Exception) {
-            currentMessages += Msg.Assistant(
-                "⚠️ 请求失败：${e.message ?: "未知错误"}",
-                error = true,
+            appendEntry(
+                Msg.Assistant(
+                    "⚠️ 请求失败：${e.message ?: "未知错误"}",
+                    error = true,
+                )
             )
         } finally {
             streamDraft = ""
@@ -368,45 +447,98 @@ class ChatState {
     fun abort() {
         streamJob?.cancel()
         if (streamDraft.isNotEmpty()) {
-            currentMessages += Msg.Assistant(streamDraft, null)
+            appendEntry(Msg.Assistant(streamDraft, null))
             streamDraft = ""
         }
         isStreaming = false
         markRunning(false)
     }
 
-    // ── 分支（2026-09-02 分支功能设计：/tree 画布页 + fork）──
-
-    /** /tree 画布页会话树（2026-09-08 起无 mock 树——原型期无演示会话，接入运行时后由会话树数据驱动） */
-    val branchTree: SessionTreeNode? get() = null
+    // ── 分支（2026-09-02 分支功能设计：/tree 画布页 + fork；2026-09-11 真实化）──
 
     /**
-     * /tree 画布页切到目标节点：把根→目标的路径节点 exchange 展平为当前消息列表
-     * （2026-09-08 起不再向聊天流注入分支切换条——会话内分支在 /tree 画布页展示，
-     * 会话外分支在会话列表展示，聊天流内无分支卡片）。
+     * /tree 画布页会话树（2026-09-11 起由真实条目树派生，不再是 mock/null）：
+     * 节点 = 一条用户消息；exchange = 该节点回合条目（用户消息 + 其后单链非用户条目
+     * = AI 回答/思考/工具过程）；children = 从该节点长出的用户消息分支；
+     * active = 当前 leaf 上溯路径上的节点（活跃分支）。
+     * 接入 pi 运行时后改由 SDK `getTree()` 同源数据驱动。
      */
-    fun navigateToNode(nodeId: String): Boolean {
-        val tree = branchTree ?: return false
-        val path = mutableListOf<SessionTreeNode>()
-        if (!collectNodePath(tree, nodeId, path)) return false
-        val newMsgs = mutableListOf<Msg>()
-        path.forEach { node -> newMsgs += node.exchange }
-        currentSessionId?.let { messagesBySession[it] = newMsgs.toMutableStateList() }
-        return true
+    val branchTree: SessionTreeNode? get() = buildBranchTree(currentSessionId)
+
+    fun buildBranchTree(sid: String?): SessionTreeNode? {
+        if (sid == null) return null
+        val entries = entriesBySession[sid]?.toList().orEmpty()
+        if (entries.isEmpty()) return null
+        val byId = entries.associateBy { it.id }
+        val childrenOf = entries.groupBy { it.parentId }
+
+        // 回合链：用户条目 → 其后「唯一非用户子条目」链（遇用户子条目 = 下一条对话，停）
+        fun turnChain(u: SessionEntry): List<SessionEntry> {
+            val out = mutableListOf(u)
+            var cur = u
+            while (true) {
+                val next = childrenOf[cur.id].orEmpty().filter { it.msg !is Msg.User }
+                if (next.size != 1) break
+                out += next[0]
+                cur = next[0]
+            }
+            return out
+        }
+
+        // 归属节点：条目自身向上找最近的用户条目祖先（跳过 AI 回答/工具条目）
+        fun ownerIdOf(e: SessionEntry): String? {
+            var p = e.parentId?.let { byId[it] }
+            while (p != null) {
+                if (p.msg is Msg.User) return p.id
+                p = p.parentId?.let { byId[it] }
+            }
+            return null
+        }
+
+        val userEntries = entries.filter { it.msg is Msg.User }
+        val userChildrenOf = userEntries.groupBy { ownerIdOf(it) }
+
+        // 活跃路径：当前 leaf 上溯遇到的用户条目（含 leaf 所在回合的节点）
+        val activeIds = mutableSetOf<String>()
+        var cur = leafBySession[sid]?.let { byId[it] }
+        while (cur != null) {
+            if (cur.msg is Msg.User) activeIds += cur.id
+            cur = cur.parentId?.let { byId[it] }
+        }
+
+        fun node(u: SessionEntry): SessionTreeNode = SessionTreeNode(
+            id = u.id,
+            userText = (u.msg as Msg.User).text,
+            exchange = turnChain(u).map { it.msg },
+            children = userChildrenOf[u.id].orEmpty().map { node(it) },
+            branchLabel = null,
+            active = u.id in activeIds,
+        )
+
+        return userChildrenOf[null].orEmpty().firstOrNull()?.let { node(it) }
     }
 
-    private fun collectNodePath(
-        node: SessionTreeNode,
-        id: String,
-        out: MutableList<SessionTreeNode>,
-    ): Boolean {
-        out += node
-        if (node.id == id) return true
-        for (child in node.children) {
-            if (collectNodePath(child, id, out)) return true
-            out.removeAt(out.lastIndex)
+    /**
+     * /tree 画布页切到目标节点（会话内分支，pi `branch(entryId)` / pi-web 封装命令
+     * `navigate_tree`（底层 SDK `navigateTree()`）同语义）：leaf 移到该节点**回合末尾**
+     * （用户消息 + 其 AI 回答），上屏消息流由 root→leaf 重建——满足验收口径「返回消息区
+     * 最后一条对话消息 = 所选节点那次对话的末尾消息」。
+     * 非破坏性：不删任何条目，被切走的分支仍留在条目树里；此后继续发消息 = 从该节点
+     * 长出新的兄弟分支。
+     */
+    fun navigateToNode(nodeId: String): Boolean {
+        val sid = currentSessionId ?: return false
+        val entries = entriesBySession[sid]?.toList().orEmpty()
+        val u = entries.firstOrNull { it.id == nodeId && it.msg is Msg.User } ?: return false
+        var end = u
+        while (true) {
+            val next = entries.filter { it.parentId == end.id && it.msg !is Msg.User }
+            if (next.size != 1) break
+            end = next[0]
         }
-        return false
+        leafBySession[sid] = end.id
+        rebuildMessagesFromLeaf(sid)
+        return true
     }
 
     /**
@@ -425,6 +557,17 @@ class ChatState {
         val list = sessions.getOrPut(proj) { mutableStateListOf() }
         list.add(0, Session(newId, forkTitle(src, entryIndex), proj, updatedAt = System.currentTimeMillis()))
         messagesBySession[newId] = prefix
+        // 新会话条目树 = 前缀线性链（全新 id，leaf = 末条目）：新会话自带完整上下文、
+        // 并能独立继续分叉（/tree 画布页与继续发消息都可用）
+        val chain = mutableStateListOf<SessionEntry>()
+        var parent: String? = null
+        prefix.forEach { m ->
+            val eid = newEntryId(chain)
+            chain += SessionEntry(eid, parent, m)
+            parent = eid
+        }
+        entriesBySession[newId] = chain
+        leafBySession[newId] = parent
         currentSessionId = newId
         activePanel = Panel.MESSAGES
         return newId

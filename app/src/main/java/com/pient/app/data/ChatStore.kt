@@ -62,6 +62,27 @@ object ChatStore {
             }
             root.put("messages", messages)
 
+            // 会话条目树（pi session-format v3 同构）：全部分支条目 + 当前 leaf
+            val entries = JSONObject()
+            state.entriesBySession.forEach { (id, list) ->
+                if (list.isEmpty()) return@forEach
+                val arr = JSONArray()
+                list.forEach { e ->
+                    arr.put(
+                        JSONObject()
+                            .put("id", e.id)
+                            .put("parentId", e.parentId ?: JSONObject.NULL)
+                            .put("msg", serializeMsg(e.msg)),
+                    )
+                }
+                entries.put(id, arr)
+            }
+            root.put("entries", entries)
+
+            val leaves = JSONObject()
+            state.leafBySession.forEach { (id, leaf) -> if (leaf != null) leaves.put(id, leaf) }
+            root.put("leaves", leaves)
+
             val f = file(context)
             f.parentFile?.mkdirs()
             val tmp = File(f.parentFile, "state.json.tmp")
@@ -121,6 +142,38 @@ object ChatStore {
                         deserializeMsg(arr.getJSONObject(i))?.let { list += it }
                     }
                 }
+            }
+
+            // 会话条目树（pi session-format v3）：全部分支条目 + 当前 leaf
+            val entries = root.optJSONObject("entries")
+            if (entries != null) {
+                for (key in entries.keys()) {
+                    val list = state.entriesBySession.getOrPut(key) {
+                        androidx.compose.runtime.mutableStateListOf()
+                    }
+                    val arr = entries.getJSONArray(key)
+                    for (i in 0 until arr.length()) {
+                        val e = arr.getJSONObject(i)
+                        val msg = e.optJSONObject("msg")?.let { deserializeMsg(it) } ?: continue
+                        list += SessionEntry(
+                            id = e.optString("id"),
+                            parentId = if (e.isNull("parentId")) null else e.optString("parentId"),
+                            msg = msg,
+                        )
+                    }
+                }
+            }
+            val leaves = root.optJSONObject("leaves")
+            if (leaves != null) {
+                for (key in leaves.keys()) {
+                    state.leafBySession[key] = leaves.optString(key).takeIf { it.isNotEmpty() }
+                }
+            }
+            // 条目树优先：有树 → 按 leaf 重建上屏消息流（记录里的 messages 只是派生缓存）；
+            // 无树（2026-09-11 之前的老记录）→ 按扁平消息流迁移成线性链
+            for (sid in state.messagesBySession.keys + state.entriesBySession.keys) {
+                if (state.entriesBySession[sid]?.isNotEmpty() == true) state.rebuildMessagesFromLeaf(sid)
+                else state.migrateEntriesIfNeeded(sid)
             }
 
             state.currentProject = root.optString("currentProject").takeIf { it.isNotEmpty() }

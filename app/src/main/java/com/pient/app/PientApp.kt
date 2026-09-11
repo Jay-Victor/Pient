@@ -145,6 +145,8 @@ fun PientApp() {
             chatState.projects.toList() to
                 chatState.sessions.mapValues { it.value.toList() } to
                 chatState.messagesBySession.mapValues { it.value.toList() } to
+                chatState.entriesBySession.mapValues { it.value.toList() } to
+                chatState.leafBySession.toMap() to
                 (chatState.currentProject to chatState.currentSessionId) to
                 chatState.selectedModelId to
                 (chatState.thinkingEnabled to chatState.thinkingLevel to
