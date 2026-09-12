@@ -10,6 +10,11 @@ import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
+import com.pient.app.runtime.PiAgentEvent
+import com.pient.app.runtime.PiChat
+import com.pient.app.runtime.PiHost
+import com.pient.app.runtime.PiHostState
+import com.pient.app.runtime.PiSessions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -118,13 +123,43 @@ class ChatState {
      * 上屏 + 推进 leaf。navigateToNode 之后再追加即从旧条目长出**新的兄弟分支**
      * （原分支条目保留在树里，不丢）。
      */
-    fun appendEntry(msg: Msg) {
-        val sid = currentSessionId ?: return
+    fun appendEntry(msg: Msg): Int {
+        val sid = currentSessionId ?: return -1
+        val at = runInsertAt
+        if (at != null) {
+            insertEntryAt(at, msg)
+            runInsertAt = at + 1
+            return at
+        }
         val list = entriesOf(sid)
         val id = newEntryId(list)
         list += SessionEntry(id, leafBySession[sid], msg)
         leafBySession[sid] = id
-        messagesBySession.getOrPut(sid) { mutableStateListOf() } += msg
+        val screen = messagesBySession.getOrPut(sid) { mutableStateListOf() }
+        screen += msg
+        return screen.lastIndex
+    }
+
+    /**
+     * 在主屏消息流的 [index] 处插入一条条目（条目树同步：新条目父 = 原 index-1 位置的条目，
+     * 原 index 位置的条目改挂到新条目下，叶子与分支关系不变）。
+     * 重新生成时本轮的思考/工具卡/结果都走这里——插在目标回答**之前**，不追加到末尾。
+     */
+    private fun insertEntryAt(index: Int, msg: Msg) {
+        val sid = currentSessionId ?: return
+        val screen = messagesBySession.getOrPut(sid) { mutableStateListOf() }
+        if (index !in 0..screen.size) return
+        val entries = entriesBySession[sid] ?: return
+        val path = leafPath(sid)
+        val parent = path.getOrNull(index - 1)
+        val child = path.getOrNull(index)
+        val id = newEntryId(entries)
+        entries += SessionEntry(id, parent?.id, msg)
+        if (child != null) {
+            val ci = entries.indexOfFirst { it.id == child.id }
+            if (ci >= 0) entries[ci] = entries[ci].copy(parentId = id)
+        }
+        screen.add(index, msg)
     }
 
     /** 由 root→leaf 重建上屏消息流（切分支后调用；条目树本身不动） */
@@ -389,6 +424,9 @@ class ChatState {
     var liveThinkingIndex by mutableStateOf(-1)
     var streamJob: Job? = null
 
+    /** 待回答的工具授权询问（权限守门扩展经扩展 UI 子协议抛上来的；null = 无） */
+    var pendingPermission by mutableStateOf<PendingPermission?>(null)
+
     /**
      * 发送消息并请求 AI 回复：历史重建 = 当前会话的 User/Assistant（跳过错误消息与
      * 思考/工具条目），system prompt 走 ChatState.systemPrompt；思考级别/流式开关/
@@ -399,6 +437,7 @@ class ChatState {
         streamDraft = ""
         streamThinking = ""
         streamThinkingStartedAt = 0L
+        hostThinkingFlushed = false   // 落库标记按轮复位（上一轮中止/重新生成留下的标记不得吞掉本轮思考）
         // ★ 历史快照必须先于消息上屏：buildApiHistory 读 currentMessages，
         //   上屏后再取会把本条用户消息算进历史、又被末尾显式追加一次 = 重复（2026-09-09 修复）
         val historyBefore = buildApiHistory()
@@ -426,6 +465,15 @@ class ChatState {
             ?: cfg.models.firstOrNull().orEmpty()
 
         // 引用消息：正文以 markdown 块引用注入（Quote.toPrompt；UI 仍只显示用户正文）
+        // 宿主在跑：先把宿主切到「当前 Pient 会话」对应的 pi 会话（映射见 PiSessions），
+        // 否则换会话后宿主会接着用上一条会话的上下文
+        if (PiHost.state.value is PiHostState.Running) {
+            PiHost.appContextOrNull()?.let { ctx ->
+                PiSessions.ensure(
+                    ctx, currentSessionId.orEmpty(), historyBefore, cfg.providerId, effectiveModel,
+                )
+            }
+        }
         val history = historyBefore + ("user" to (quote?.toPrompt(userText) ?: userText))
         val trimmedHistory = trimToContextBudget(history, cfg.ctxLenK)
         try {
@@ -434,9 +482,10 @@ class ChatState {
                 history = trimmedHistory,
                 onDelta = { draft -> streamDraft = draft },
                 onThinking = { noteThinkingDelta(it) },
+                onTool = ::handleToolEvent,
             )
             // 思考先于回答落库：条目顺序 = [思考, 回答]，列表层把思考并入紧随其后的回答卡
-            appendThinkingEntry(outcome)
+            if (hostThinkingFlushed) hostThinkingFlushed = false else appendThinkingEntry(outcome)
             appendEntry(Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
             // 用量台账（用量页数据源）：完成即记一笔（usage 为空 = 服务商未返回用量，不记）
             UsageStore.record(cfg.providerId, effectiveModel, outcome.usage)
@@ -483,31 +532,50 @@ class ChatState {
         val effectiveModel = model.name.takeIf { cfg.models.contains(it) }
             ?: cfg.models.firstOrNull().orEmpty()
 
+        // 宿主在跑：与发送路径同一口径——先把宿主切到本会话对应的 pi 会话。
+        // 宿主不会随抽屉切会话自动跟随（ensure 只在发消息时调），应用重启后宿主也是新会话，
+        // 少了这一步「重新生成」会打到别的会话上下文上
+        if (PiHost.state.value is PiHostState.Running) {
+            PiHost.appContextOrNull()?.let { ctx ->
+                PiSessions.ensure(
+                    ctx, currentSessionId.orEmpty(), history, cfg.providerId, effectiveModel,
+                )
+            }
+        }
         isStreaming = true
         streamDraft = ""
         streamThinking = ""
         streamThinkingStartedAt = 0L
+        hostThinkingFlushed = false   // 同上：重新生成也按轮复位
+        // 本轮宿主事件产生的条目（思考/工具卡/结果）一律插到目标回答**之前**：
+        // 目标回答就在末位，按追加语义写会让工具轮渲染到回答之后（2026-09-12 修）
+        runInsertAt = index
         markRunning(true)
         return try {
             val outcome = runChat(
                 cfg = cfg.copy(modelList = effectiveModel),
                 history = history,
-                onDelta = { draft -> replaceMessageAt(index, Msg.Assistant(draft, null, effectiveModel)) },
+                onDelta = { draft ->
+                    val at = runInsertAt ?: index
+                    replaceMessageAt(at, Msg.Assistant(draft, null, effectiveModel))
+                },
                 onThinking = { noteThinkingDelta(it) },
+                onTool = ::handleToolEvent,
             )
-            // 思考条目与回答同位替换：该条前面已有思考 → 原位替换；没有则插入（下标随之 +1）
-            val target = upsertThinkingBefore(index, outcome)
+            // 思考条目与回答同位替换（游标 = 目标回答当前位置）：前面已有思考 → 原位替换；没有则插入
+            val target = upsertThinkingBefore(runInsertAt ?: index, outcome)
             replaceMessageAt(target, Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
             // 重新生成同样计入用量台账（一次真实请求 = 一笔用量）
             UsageStore.record(cfg.providerId, effectiveModel, outcome.usage)
             null
         } catch (e: kotlinx.coroutines.CancellationException) {
-            replaceMessageAt(index, original)   // 中止：恢复原内容
+            replaceMessageAt(runInsertAt ?: index, original)   // 中止：恢复原内容
             throw e
         } catch (e: Exception) {
-            replaceMessageAt(index, original)
+            replaceMessageAt(runInsertAt ?: index, original)
             e.message ?: "未知错误"
         } finally {
+            runInsertAt = null
             streamDraft = ""
             streamThinking = ""
             streamThinkingStartedAt = 0L
@@ -525,12 +593,44 @@ class ChatState {
         history: List<Pair<String, String>>,
         onDelta: (String) -> Unit,
         onThinking: (String) -> Unit = {},
+        onTool: (PiAgentEvent) -> Unit = {},
     ): ChatOutcome {
         // 思考模式的总开关：null = 不给服务商发思考参数、且**服务商自带的推理内容一律不展示不落库**
         // （DeepSeek-R1 / GLM / Kimi 思考系列不靠 reasoning_effort 也会回 reasoning_content，
         //   开关关着却把推理显示出来＝越权；2026-09-12 用户报「关了思考模式，流式期间仍显示思考内容、
         //   回答完又消失」即此处漏门控——流式分支当时漏了判 `thinking != null`，只落了「不落库」）。
         val thinking = if (thinkingEnabled) thinkingLevel else null
+        // 宿主在跑且有模型 → 走宿主（pi agent 循环：工具真的会被调用）；否则退回 Kotlin 直连旧路径
+        if (PiHost.state.value is PiHostState.Running) {
+            val sb = StringBuilder()
+            val th = StringBuilder()
+            var usage: Usage? = null
+            val finalText = PiChat.prompt(history.lastOrNull()?.second.orEmpty()) { ev ->
+                when (ev) {
+                    is PiAgentEvent.TextDelta -> {
+                        sb.append(ev.text)
+                        onDelta(sb.toString())
+                    }
+                    is PiAgentEvent.ThinkingDelta -> if (thinking != null) {
+                        th.append(ev.text)
+                        onThinking(th.toString())
+                    }
+                    is PiAgentEvent.UsageEvent -> {
+                        usage = ev.usage
+                        updateContextPercent(ev.usage, cfg)
+                    }
+                    is PiAgentEvent.ToolStart -> {
+                        // 工具卡之前已把当前思考块落库（flushStreamingThinking）→ 清掉累计，
+                        // 让 outcome.thinking 只代表**最后一条** assistant 消息的思考块
+                        // （pi 的思考块是每条 assistant 消息一块，跨消息累加会把两块拼成一块）
+                        th.clear()
+                        onTool(ev)
+                    }
+                    else -> onTool(ev)
+                }
+            }
+            return ChatOutcome(finalText, usage, th.toString())
+        }
         if (!streamingOutputEnabled) {
             val result = AiBackend.chat(cfg, systemPrompt, history, thinking)
             val th = result.thinking.orEmpty().takeIf { thinking != null }.orEmpty()
@@ -561,18 +661,111 @@ class ChatState {
     /** 单次请求结果：正文 + usage + 思考文本（思考模式关闭时为空串） */
     private data class ChatOutcome(val text: String, val usage: Usage?, val thinking: String)
 
+    /**
+     * 上下文占用百分比：本轮用量（输入 + 缓存读/写 + 输出）÷ 配置的上下文长度。
+     * 数据源从宿主 pi 的 usage 来（不再用占位值）；配置里长度缺失/为 0 时不改。
+     */
+    private fun updateContextPercent(usage: Usage, cfg: ProviderConfig) {
+        val limitK = cfg.ctxLenK.trim().toIntOrNull() ?: return
+        if (limitK <= 0) return
+        val used = usage.inTokens + usage.cacheTokens + usage.cacheWriteTokens + usage.outTokens
+        if (used <= 0) return
+        contextPercent = (used * 100f / (limitK * 1000f)).coerceIn(0f, 100f)
+    }
+
+    /**
+     * 回答工具授权询问。**必须回一个结果**——宿主那边（权限守门扩展的 `tool_call` 钩子）正阻塞
+     * 等待，只有扩展里设的超时（5 分钟）才会自动按拒绝处理。
+     * 「始终允许」= 写一条该工具的 ALLOW 例外（策略文件 App 侧唯一写者）；
+     * 「拒绝」只作用于本次调用——要彻底不允许该工具，用工具卡授权按钮/权限中心设 FORBID。
+     */
+    fun answerPermission(allowOnce: Boolean = false, always: Boolean = false, deny: Boolean = false) {
+        val ask = pendingPermission ?: return
+        pendingPermission = null
+        val ctx = PiHost.appContextOrNull()
+        when {
+            always -> {
+                if (ctx != null) ToolPolicy.setToolPolicy(ctx, ask.toolName, ToolPolicy.ALLOW)
+                PiHost.respondUi(ask.id, value = ToolPolicy.OPT_ALWAYS)
+            }
+            deny -> PiHost.respondUi(ask.id, value = ToolPolicy.OPT_DENY)
+            allowOnce -> PiHost.respondUi(ask.id, value = ToolPolicy.OPT_ONCE)
+            else -> PiHost.respondUi(ask.id, cancelled = true)
+        }
+    }
+
+    /** 手动设某工具的策略（工具卡授权按钮 / 后续权限中心；值取 ToolPolicy.ALLOW|ASK|FORBID） */
+    fun setToolPolicy(tool: String, policy: String) {
+        PiHost.appContextOrNull()?.let { ToolPolicy.setToolPolicy(it, tool, policy) }
+    }
+
+    /**
+     * 宿主工具事件落库（2026-09-12 宿主驱动对话）：ToolStart → 追加 RUNNING 工具卡；
+     * ToolEnd → 把最近一条 RUNNING 工具卡原位改成终态，并补一条结果条目
+     * （渲染层按「ToolCall + 紧随其后的 ToolResult」成对展示，见 ChatMessages）。
+     */
+    private fun handleToolEvent(ev: PiAgentEvent) {
+        when (ev) {
+            is PiAgentEvent.ToolStart -> {
+                flushStreamingThinking()
+                appendEntry(Msg.ToolCall(ev.name, ev.args, ToolStatus.RUNNING))
+            }
+            is PiAgentEvent.UiRequest -> pendingPermission =
+                PendingPermission(ev.id, ev.toolName, ev.argsSummary, ev.dangerous)
+
+            is PiAgentEvent.ToolEnd -> {
+                val list = currentMessages
+                val idx = list.indexOfLast { it is Msg.ToolCall && it.status == ToolStatus.RUNNING }
+                if (idx >= 0) {
+                    val call = list[idx] as Msg.ToolCall
+                    replaceMessageAt(
+                        idx,
+                        call.copy(
+                            status = if (ev.isError) ToolStatus.FAILED else ToolStatus.DONE,
+                            detail = ev.output.take(400),
+                        ),
+                    )
+                }
+                appendEntry(Msg.ToolResult(ev.name, ev.output.take(200), ev.output))
+            }
+            else -> Unit
+        }
+    }
+
     /** 首个思考增量到达时记起点（思考行右侧计时与落库 durationMs 都用它） */
     private fun noteThinkingDelta(text: String) {
+        // 当前块已随工具卡落库，又来了思考增量 = agent 开了新一条 assistant 消息（pi 每条消息一个思考块）：
+        // 复位「已落库」标记与计时，让新块自己落库、自己计时
+        //（旧实现把标记按整轮用 → 工具轮里最后一块被吞掉，见工具层交接记录）
+        if (hostThinkingFlushed) {
+            hostThinkingFlushed = false
+            streamThinkingStartedAt = 0L
+        }
         if (streamThinkingStartedAt == 0L) streamThinkingStartedAt = System.currentTimeMillis()
         streamThinking = text
+    }
+
+    /**
+     * 流式期间的思考先落库（工具调用/回答到来之前）——宿主事件顺序是
+     * 思考 → 工具调用 → 工具结果 → 回答，思考条目必须赶在工具条目前面落。
+     */
+    private fun flushStreamingThinking() {
+        if (hostThinkingFlushed) return
+        val text = streamThinking.trim()
+        if (text.isEmpty() || !thinkingEnabled) return
+        val started = streamThinkingStartedAt
+        val duration = if (started > 0L) System.currentTimeMillis() - started else null
+        liveThinkingIndex = appendEntry(Msg.Thinking(thinkingLevel.piValue, text, duration))
+        hostThinkingFlushed = true
+        // 已落库：流式预览不该再显示同一块（否则工具卡下方重复一块「思考中」）
+        streamThinking = ""
     }
 
     /** 本轮思考落库为 [Msg.Thinking]（无思考内容时不落条目）；返回落下的条目 */
     private fun appendThinkingEntry(outcome: ChatOutcome): Msg.Thinking? {
         val msg = thinkingMsgOf(outcome) ?: return null
-        appendEntry(msg)
         // 记下它的上屏下标：回答落地后该块保持展开（Hermes live preview 的 latch）
-        liveThinkingIndex = messagesBySession[currentSessionId]?.lastIndex ?: -1
+        liveThinkingIndex = appendEntry(msg)
         return msg
     }
 
@@ -603,15 +796,7 @@ class ChatState {
             replaceMessageAt(index - 1, msg)
             return index
         }
-        val entries = entriesBySession[sid] ?: return index
-        val path = leafPath(sid)
-        val parent = path.getOrNull(index - 1) ?: return index
-        val child = path.getOrNull(index) ?: return index
-        val id = newEntryId(entries)
-        entries += SessionEntry(id, parent.id, msg)
-        val ci = entries.indexOfFirst { it.id == child.id }
-        if (ci >= 0) entries[ci] = entries[ci].copy(parentId = id)
-        list.add(index, msg)
+        insertEntryAt(index, msg)
         return index + 1
     }
 
@@ -857,7 +1042,17 @@ class ChatState {
         }
 
     // ── 输入栏：上下文指示器（数据源 = get_state 同源口径） ──
-    var contextPercent by mutableStateOf(34f)
+    var contextPercent by mutableStateOf(0f)
+
+    /** 宿主路径下思考条目是否已在工具条目之前落库（避免回答落地时重复落一份） */
+    private var hostThinkingFlushed = false
+
+    /**
+     * 本轮运行条目的插入游标（null = 追加到 leaf，发送路径语义）。
+     * 重新生成时 = 目标回答的上屏下标：宿主事件产生的思考/工具条目插到它之前，每插一条自增，
+     * 始终指向目标回答的当前位置（见 [appendEntry] / [insertEntryAt]）。
+     */
+    private var runInsertAt: Int? = null
     var windowTokens by mutableStateOf(61200)
     var maxWindowTokens by mutableStateOf(180000)
     var connectionLabel by mutableStateOf("已连接")

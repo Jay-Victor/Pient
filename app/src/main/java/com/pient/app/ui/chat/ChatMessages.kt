@@ -98,6 +98,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -113,8 +114,10 @@ import androidx.compose.ui.unit.sp
 import android.widget.Toast
 import com.pient.app.data.Attachment
 import com.pient.app.data.Msg
+import com.pient.app.data.PendingPermission
 import com.pient.app.data.Quote
 import com.pient.app.data.SettingsStore
+import com.pient.app.data.ToolPolicy
 import com.pient.app.data.ToolStatus
 import com.pient.app.data.markdownToPlainText
 import com.pient.app.ui.components.MarkdownText
@@ -161,9 +164,24 @@ fun ChatMessages(
     onShowEarlier: () -> Int = { 0 },
     onOpenLocator: () -> Unit,
     onMessageLongPress: ((Int, Rect) -> Unit)? = null,
+    /** 待回答的工具授权询问（权限守门扩展抛上来的）——非空时必须给结果（见 ChatState.answerPermission） */
+    pendingPermission: PendingPermission? = null,
+    onPermOnce: () -> Unit = {},
+    onPermAlways: () -> Unit = {},
+    onPermDeny: () -> Unit = {},
+    /** 工具卡授权按钮：给该工具写策略（ToolPolicy.ALLOW / FORBID） */
+    onPolicySet: (String, String) -> Unit = { _, _ -> },
 ) {
     val scope = rememberCoroutineScope()
-    var showPermDemo by remember { mutableStateOf(false) }
+    // 工具卡「授权」按钮的手动策略设置（工具名 → 参数摘要）
+    var manualPolicyAsk by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+    // 权限弹窗打开时**收起键盘**：弹窗底部按键会被 IME 盖住（实测：点「拒绝」落到 Gboard 上、
+    // 还往输入框打进了字符）——弹窗期间用户唯一该做的事就是回答它。
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(pendingPermission?.id) {
+        if (pendingPermission != null) keyboard?.hide()
+    }
 
     // 进入会话（首次组合 / 切换会话 / 分支换叶）默认落在消息最底部。
     //
@@ -308,8 +326,11 @@ fun ChatMessages(
                 val msg = messages[idx]
                 // 成对工具结果（ToolCall 紧跟 ToolResult）已并入工具卡渲染，此处跳过
                 if (msg is Msg.ToolResult && idx > 0 && messages[idx - 1] is Msg.ToolCall) return@items
-                // 思考块并入 AI 回答块（其后存在助手回答时跳过独立渲染，由助手卡内折叠行承载）
-                if (msg is Msg.Thinking && followedByAssistant(messages, idx)) return@items
+                // 思考块并入 AI 回答块（其后存在助手回答、且两者之间没隔着会渲染的条目时才跳过独立渲染，
+                // 由助手卡内折叠行承载）；与回答之间隔着工具卡时在自己的位置就地成块——视觉顺序对齐 pi：
+                // 思考 → 工具 → 回答（流式时思考本就先于工具卡出现，落库后不该改序）
+                val standaloneThinking = msg is Msg.Thinking && thinkingSeparatedByTool(messages, idx)
+                if (msg is Msg.Thinking && !standaloneThinking && followedByAssistant(messages, idx)) return@items
                 // 长按 fork 入口：仅 User/Assistant 气泡响应（2026-09-02 分支功能设计 §4.1）
                 val longPressable = msg is Msg.User || msg is Msg.Assistant
                 Box(
@@ -351,7 +372,11 @@ fun ChatMessages(
                         // 展开初值：刚流式完的思考块（本运行内的 live preview）保持展开，历史载入的收起
                         thinkingExpandedDefault = (thinkingIdx >= 0 && thinkingIdx == liveThinkingIndex) ||
                             (msg is Msg.Thinking && idx == liveThinkingIndex),
-                        onRequestPermission = { showPermDemo = true },
+                        onRequestPermission = {
+                            val call = msg as? Msg.ToolCall
+                            manualPolicyAsk = (call?.name ?: "") to (call?.params ?: "")
+                        },
+                        standaloneThinking = standaloneThinking,
                     )
                 }
             }
@@ -459,17 +484,39 @@ fun ChatMessages(
         }
     }
 
-    // 权限请求弹窗（原型演示：工具调用时的三选授权，设计计划第 7 章）
-    if (showPermDemo) {
+    // 工具级授权（开发计划 §6.3）：权限守门扩展在工具**执行前**问上来的（宿主正阻塞等待回答）
+    // ——点外关闭按「拒绝」处理，绝不能只关弹窗不回话（否则要等到扩展的 5 分钟超时）。
+    pendingPermission?.let { ask ->
         Box(Modifier.fillMaxSize()) {
             PermissionRequestDialog(
-                toolName = "bash",
-                paramSummary = "rm -rf /data/local/tmp/pient-test/ && echo done",
-                dangerous = true,
-                onAllowOnce = { showPermDemo = false },
-                onAlwaysAllow = { showPermDemo = false },
-                onDeny = { showPermDemo = false },
-                onDismiss = { showPermDemo = false },
+                toolName = ask.toolName,
+                paramSummary = ask.argsSummary,
+                dangerous = ask.dangerous,
+                onAllowOnce = onPermOnce,
+                onAlwaysAllow = onPermAlways,
+                onDeny = onPermDeny,
+                onDismiss = onPermDeny,
+            )
+        }
+    }
+
+    // 工具卡「授权」按钮：手动给该工具设策略（调用已发生过，所以「仅本次允许」只关弹窗）
+    manualPolicyAsk?.let { (tool, args) ->
+        Box(Modifier.fillMaxSize()) {
+            PermissionRequestDialog(
+                toolName = tool,
+                paramSummary = args,
+                dangerous = false,
+                onAllowOnce = { manualPolicyAsk = null },
+                onAlwaysAllow = {
+                    onPolicySet(tool, ToolPolicy.ALLOW)
+                    manualPolicyAsk = null
+                },
+                onDeny = {
+                    onPolicySet(tool, ToolPolicy.FORBID)
+                    manualPolicyAsk = null
+                },
+                onDismiss = { manualPolicyAsk = null },
             )
         }
     }
@@ -751,11 +798,13 @@ private fun MessageCard(
     thinking: Msg.Thinking? = null,
     thinkingExpandedDefault: Boolean = false,
     onRequestPermission: () -> Unit,
+    /** 思考块与回答之间隔着工具卡：就地渲染（无卡片外框，与流式期间同一形态） */
+    standaloneThinking: Boolean = false,
 ) {
     when (msg) {
         is Msg.User -> UserBubble(msg)
         is Msg.Assistant -> AssistantCard(msg, thinking, thinkingExpandedDefault)
-        is Msg.Thinking -> ThinkingCard(msg, thinkingExpandedDefault)
+        is Msg.Thinking -> ThinkingCard(msg, thinkingExpandedDefault, boxed = !standaloneThinking)
         is Msg.ToolCall -> ToolCallCard(msg, toolResult, onRequestPermission)
         is Msg.ToolResult -> ToolResultCard(msg)   // 仅未成对的结果走独立卡
         is Msg.Compaction -> CompactionCard(msg)
@@ -777,17 +826,35 @@ private fun followedByAssistant(messages: List<Msg>, idx: Int): Boolean {
     return false
 }
 
-/** idx 之前最近的思考块**下标**（跨工具卡/结果/压缩条目扫描；遇用户/助手消息即止，无则 -1） */
+/** idx 之前最近的思考块**下标**（跨工具结果/压缩条目扫描；遇工具卡或用户/助手消息即止，无则 -1） */
 private fun precedingThinkingIndex(messages: List<Msg>, idx: Int): Int {
     var i = idx - 1
     while (i >= 0) {
         when (messages[i]) {
             is Msg.Thinking -> return i
-            is Msg.User, is Msg.Assistant -> return -1
+            // 隔着会渲染的工具卡 → 该思考块已在自己的位置成块，不再并入本条回答
+            //（与 thinkingSeparatedByTool 对称；不对称会把同一块渲染两次）
+            is Msg.ToolCall, is Msg.User, is Msg.Assistant -> return -1
             else -> i--
         }
     }
     return -1
+}
+
+/**
+ * 思考块与紧随其后的回答之间是否隔着会渲染的条目（工具卡）。
+ * 隔着 → 思考块就地成块，视觉顺序保持 pi 的流式顺序：思考 → 工具（卡）→ 回答。
+ */
+private fun thinkingSeparatedByTool(messages: List<Msg>, idx: Int): Boolean {
+    var i = idx + 1
+    while (i < messages.size) {
+        when (messages[i]) {
+            is Msg.ToolCall -> return true
+            is Msg.User, is Msg.Thinking, is Msg.Assistant -> return false
+            else -> i++
+        }
+    }
+    return false
 }
 
 // ───────────────────────────── 长按消息菜单（分支 + 复制 + 重新生成） ─────────────────────────────
@@ -1329,18 +1396,25 @@ private fun ThinkingLabel(label: String, live: Boolean) {
 }
 
 /**
- * 独立思考卡（其后没有助手回答时的兜底：进行中/被中止的交换）：
- * 保留 Pient 的卡片外框（surfaceContainerLow 0.6 + 1dp 描边、6dp 圆角），
- * 内部仍是同一份 [ThinkingDisclosure]，不再各写一套标题/箭头。
+ * 独立思考块（其后没有助手回答时的兜底：进行中/被中止的交换；与回答之间隔着工具卡时也走这里）：
+ * 内部统一是同一份 [ThinkingDisclosure]，不再各写一套标题/箭头。
+ * [boxed] = true 保留 Pient 的卡片外框（surfaceContainerLow 0.6 + 1dp 描边、6dp 圆角）；
+ * false = 无外框形态，与「思考并入回答卡」以及流式期间（[StreamingCard] 内的同一份
+ * ThinkingDisclosure）视觉连续——同一块思考不该因为中间插了工具卡就换一副壳。
  */
 @Composable
-private fun ThinkingCard(msg: Msg.Thinking, expandedDefault: Boolean = false) {
-    Column(
-        modifier = Modifier
+private fun ThinkingCard(msg: Msg.Thinking, expandedDefault: Boolean = false, boxed: Boolean = true) {
+    val frame = if (boxed) {
+        Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
-            .padding(horizontal = 10.dp),
+            .padding(horizontal = 10.dp)
+    } else {
+        Modifier.fillMaxWidth()
+    }
+    Column(
+        modifier = frame,
     ) {
         ThinkingDisclosure(
             text = msg.text,

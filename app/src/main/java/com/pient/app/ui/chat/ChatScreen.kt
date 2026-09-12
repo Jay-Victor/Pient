@@ -214,6 +214,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
     var lastBackPress by remember { mutableStateOf(0L) }
     BackHandler {
         when {
+            // 工具授权弹窗在最上层：返回键 = 拒绝（必须回话，否则宿主阻塞到扩展的 5 分钟超时）
+            chatState.pendingPermission != null -> chatState.answerPermission(deny = true)
             locatorOpen -> locatorOpen = false
             copyCardText != null -> copyCardText = null
             forkMenuTarget != null -> forkMenuTarget = null
@@ -964,5 +966,11 @@ private fun MessagesPanel(
         },
         onOpenLocator = onOpenLocator,
         onMessageLongPress = onMessageLongPress,
+        // 工具级授权：权限守门扩展的询问 → 三选弹窗 → 回 extension_ui_response
+        pendingPermission = chatState.pendingPermission,
+        onPermOnce = { chatState.answerPermission(allowOnce = true) },
+        onPermAlways = { chatState.answerPermission(always = true) },
+        onPermDeny = { chatState.answerPermission(deny = true) },
+        onPolicySet = { tool, policy -> chatState.setToolPolicy(tool, policy) },
     )
 }
