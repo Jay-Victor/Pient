@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
+import android.widget.Toast
 import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -38,6 +39,7 @@ import com.pient.app.data.AiConfigStore
 import com.pient.app.data.ChatState
 import com.pient.app.data.ChatStore
 import com.pient.app.data.ModelPricingDefaults
+import com.pient.app.data.SafWorkspace
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ThemeMode
 import com.pient.app.data.UsageStore
@@ -63,7 +65,9 @@ import com.pient.app.ui.terminal.TerminalSetupScreen
 import com.pient.app.ui.theme.AppBackgroundLayer
 import com.pient.app.ui.theme.PientGlassProvisioning
 import com.pient.app.ui.theme.PientTheme
+import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.withContext
@@ -173,10 +177,38 @@ fun PientApp() {
     // SAF 项目没有可给 agent 的文件系统路径 → 保持随包工作区（见 PiRuntime.setWorkspace）
     LaunchedEffect(ready) {
         if (!ready) return@LaunchedEffect
+        // 已物化过的 (项目名, SAF uri)：项目列表本身变动时不要重复物化（4080 文件的目录要几十秒）
+        var staged: Pair<String, String?>? = null
         snapshotFlow { chatState.currentProject to chatState.projects.toList() }
             .collect { (name, projects) ->
                 val proj = projects.firstOrNull { it.name == name }
-                PiRuntime.setWorkspaceForProject(context, proj?.path, proj?.uri != null)
+                when {
+                    proj == null -> PiRuntime.setWorkspace(context, null)
+                    proj.uri == null -> {
+                        staged = null
+                        PiRuntime.setWorkspace(context, File(proj.path))
+                    }
+                    else -> {
+                        // SAF 项目：agent 只吃真路径 → 物化到 files/saf_work/<名>（切回本项目会重新物化）。
+                        // **先切工作区、物化转后台**：几千个文件的 SAF 目录要几十秒，卡在这里会把
+                        // 后续的项目切换全部排队堵住（实测踩过）。
+                        val key = proj.name to proj.uri
+                        PiRuntime.setWorkspace(context, SafWorkspace.stageDir(context, proj.name))
+                        if (staged != key) {
+                            staged = key
+                            launch(Dispatchers.IO) {
+                                val (files, bytes) = SafWorkspace.stage(context, proj)
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(
+                                        context,
+                                        "AI 副本已同步：$files 个文件（${bytes / 1048576}MB）",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            }
+                        }
+                    }
+                }
             }
     }
 

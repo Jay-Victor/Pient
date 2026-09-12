@@ -118,7 +118,7 @@ object ProjectFiles {
     // ── SAF：每个目录一次 cursor 查询（大目录防护的核心，2026-09-12）──
 
     /** SAF 子项条目（一次 query 取回的全部元数据） */
-    private class SafEntry(
+    internal class SafEntry(
         val docId: String,
         val name: String,
         val isDir: Boolean,
@@ -142,7 +142,7 @@ object ProjectFiles {
      * ContentResolver 查询（androidx.documentfile 1.0.1 字节码实测）——即每个文件 4 次 IPC。
      * 这里直接把需要的列一次查出（MIME 判目录、size/时间直接读游标）。
      */
-    private fun listSafChildren(context: Context, treeUri: Uri, parentDocId: String): List<SafEntry> {
+    internal fun listSafChildren(context: Context, treeUri: Uri, parentDocId: String): List<SafEntry> {
         val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
         val out = ArrayList<SafEntry>()
         context.contentResolver.query(childrenUri, SAF_PROJECTION, null, null, null)?.use { c ->
@@ -158,6 +158,23 @@ object ProjectFiles {
             }
         }
         return out
+    }
+
+    /**
+     * 递归遍历 SAF 目录（每个目录一次 query，粒度同 [listSafChildren]）——SafWorkspace 物化时用。
+     * [onEntry] 收到 (目录项, 相对根的路径)。
+     */
+    internal fun safWalk(context: Context, treeUri: Uri, onEntry: (SafEntry, String) -> Unit) {
+        val rootDocId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull() ?: return
+        fun recurse(parentDocId: String, prefix: String, depth: Int) {
+            if (depth > MAX_DEPTH) return
+            for (e in listSafChildren(context, treeUri, parentDocId)) {
+                val rel = if (prefix.isEmpty()) e.name else "$prefix/${e.name}"
+                onEntry(e, rel)
+                if (e.isDir) recurse(e.docId, rel, depth + 1)
+            }
+        }
+        recurse(rootDocId, "", 0)
     }
 
     private fun loadSafRoot(context: Context, treeUri: Uri, budget: ScanBudget): FileNode? {

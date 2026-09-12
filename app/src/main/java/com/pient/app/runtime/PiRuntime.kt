@@ -160,10 +160,6 @@ object PiRuntime {
         }.onFailure { Log.w(TAG, "工作区写入失败：${it.message}") }
     }
 
-    /** 由当前项目推导工作区（本地项目才可用；SAF 项目见 [setWorkspace] 说明） */
-    fun setWorkspaceForProject(context: Context, path: String?, isSaf: Boolean) {
-        setWorkspace(context, if (!isSaf && !path.isNullOrBlank()) File(path) else null)
-    }
 
     /**
      * 终端层准备（宿主启动、终端会话启动、切换权限档位时各调一次；幂等）：
