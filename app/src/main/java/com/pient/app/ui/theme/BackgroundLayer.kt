@@ -37,6 +37,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.pient.app.R
 import com.pient.app.data.BackgroundMediaType
 import com.pient.app.data.SettingsStore
+import kotlinx.coroutines.launch
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.effect.RgbAdjustment
@@ -75,20 +76,59 @@ fun AppBackgroundLayer(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * 背景图片内存缓存（2026-09-12 修「打开 Pient 一瞬间背景没加载出来」）：
+ * 按 `uri@宽x高` 缓存解码结果，冷启动时由 [preloadBackgroundImage] 在进程启动阶段
+ * 提前解码（与 Compose 启动重叠），聊天页首帧就能同步命中缓存、不再等 IO。
+ * 只留最近 2 张（换背景时旧图很快被淘汰）。
+ */
+private val backgroundImageCache = android.util.LruCache<String, ImageBitmap>(2)
+
+private fun backgroundCacheKey(uri: String, w: Int, h: Int): String = "$uri@${w}x$h"
+
+/**
+ * 解码（或取缓存）背景图片；可供启动阶段预加载与 [ImageBackground] 共用。
+ * 命中缓存直接返回，未命中才走磁盘解码（应在 IO 线程调用）。
+ */
+suspend fun loadBackgroundImage(
+    context: Context,
+    uri: String,
+    targetW: Int,
+    targetH: Int,
+): ImageBitmap? {
+    val key = backgroundCacheKey(uri, targetW, targetH)
+    backgroundImageCache.get(key)?.let { return it }
+    val bmp = withContext(Dispatchers.IO) {
+        runCatching {
+            decodeSampled(context, Uri.parse(uri), targetW = targetW, targetH = targetH)?.asImageBitmap()
+        }.getOrNull()
+    } ?: return null
+    backgroundImageCache.put(key, bmp)
+    return bmp
+}
+
+/** 启动阶段预加载（MainActivity onCreate 调用；未设图片背景时直接返回） */
+fun preloadBackgroundImage(context: Context) {
+    val uri = SettingsStore.backgroundImageUri ?: return
+    if (SettingsStore.backgroundMediaType != BackgroundMediaType.IMAGE) return
+    val metrics = context.resources.displayMetrics
+    kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+        loadBackgroundImage(context.applicationContext, uri, metrics.widthPixels, metrics.heightPixels)
+    }
+}
+
 /** 图片背景：降采样解码 + 模糊（Modifier.blur，Operit 同款）+ ColorMatrix 亮度缩放 */
 @Composable
 private fun ImageBackground(uri: String, blur: Boolean, blurRadiusDp: Float, brightness: Float) {
     val context = LocalContext.current
-    var bitmap by remember(uri) { mutableStateOf<ImageBitmap?>(null) }
+    // 先同步命中缓存（启动阶段预加载完成后即有值 → 首帧就带背景），未命中再异步解码
+    val metrics = remember { context.resources.displayMetrics }
+    var bitmap by remember(uri) {
+        mutableStateOf(backgroundImageCache.get(backgroundCacheKey(uri, metrics.widthPixels, metrics.heightPixels)))
+    }
     LaunchedEffect(uri) {
-        bitmap = withContext(Dispatchers.IO) {
-            // 按屏幕分辨率精确解码（2026-09-01 画质修复）：原 maxDim=1600 低于屏高 2400，
-            // 2 的幂采样会把正常照片降半后放大 2 倍 = 画质下降；现在目标=屏幕尺寸、Cover 语义缩放。
-            val metrics = context.resources.displayMetrics
-            runCatching {
-                decodeSampled(context, Uri.parse(uri), targetW = metrics.widthPixels, targetH = metrics.heightPixels)
-                    ?.asImageBitmap()
-            }.getOrNull()
+        if (bitmap == null) {
+            bitmap = loadBackgroundImage(context, uri, metrics.widthPixels, metrics.heightPixels)
         }
     }
     val bmp = bitmap ?: return
