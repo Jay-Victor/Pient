@@ -726,16 +726,23 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
         // ── 消息定位弹窗（2026-09-09 从消息区提升到页面根层：scrim 全屏覆盖顶栏与状态栏） ──
         if (locatorOpen) {
             Box(Modifier.fillMaxSize().zIndex(3f)) {
+                val total = chatState.currentMessages.size
+                val windowStart = chatState.messageWindowStart(chatState.currentSessionId, total)
                 MessageLocatorDialog(
                     messages = chatState.currentMessages,
                     listState = messagesListState,
+                    windowStart = windowStart,
                     onDismiss = { locatorOpen = false },
                     onJump = { idx ->
                         // 跳转必须用 ChatScreen 根层的 scope：弹窗内 own scope 会随
                         // onDismiss 一起被取消，animateScrollToItem 启动即中止（点条目不跳转的根因）。
                         // 先关弹窗再滚动，跳转动画在聊天列表上完整可见。
+                        // 目标可能是被窗口挡住的更早消息：先把它纳入窗口再滚（2026-09-12）
+                        chatState.ensureMessageVisible(chatState.currentSessionId, total, idx)
+                        val start = chatState.messageWindowStart(chatState.currentSessionId, total)
+                        val row = idx - start + (if (start > 0) 1 else 0)
                         locatorOpen = false
-                        scope.launch { messagesListState.animateScrollToItem(idx) }
+                        scope.launch { messagesListState.animateScrollToItem(row.coerceAtLeast(0)) }
                     },
                 )
             }
@@ -882,6 +889,17 @@ private fun MessagesPanel(
         streamDraft = chatState.streamDraft,
         listState = listState,
         bottomInset = bottomInset,
+        // 长会话只上屏最近一页（更早的靠「显示更早的消息」翻页，2026-09-12）
+        startIndex = chatState.messageWindowStart(
+            chatState.currentSessionId,
+            chatState.currentMessages.size,
+        ),
+        onShowEarlier = {
+            chatState.showEarlierMessages(
+                chatState.currentSessionId,
+                chatState.currentMessages.size,
+            )
+        },
         onOpenLocator = onOpenLocator,
         onMessageLongPress = onMessageLongPress,
     )

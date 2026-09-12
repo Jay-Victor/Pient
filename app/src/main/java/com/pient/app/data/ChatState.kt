@@ -21,6 +21,15 @@ import kotlinx.coroutines.withContext
 /** 顶栏右下方区域内容（消息区 / 文件内容预览区 / 终端页 / 分支画布 四态切换） */
 enum class Panel { MESSAGES, FILES, TERMINAL, TREE }
 
+/** 长会话首屏上屏的消息条数（更早的由「显示更早的消息」翻页加载，2026-09-12） */
+private const val MESSAGE_WINDOW_INITIAL = 40
+
+/** 「显示更早的消息」每次新增的条数（Hermes showEarlier 一页一翻口径） */
+private const val MESSAGE_WINDOW_PAGE = 40
+
+/** 隐藏的更早消息少于该条数时不分页（直接全显，避免按钮离底部太近显得像坏了） */
+private const val MESSAGE_WINDOW_MARGIN = 8
+
 /**
  * 聊天主页应用状态（跨导航保活：提升到 NavHost 外层）。
  * UI 原型阶段：状态以内存承载；接入 Pi 运行时后由 SessionManager /
@@ -740,6 +749,42 @@ class ChatState {
 
     fun togglePanel(p: Panel) {
         activePanel = if (activePanel == p) Panel.MESSAGES else p
+    }
+
+    // ── 消息窗口（长会话防护，2026-09-12）──────────────────
+    // 参考 Hermes 桌面端长会话（components/assistant-ui/thread/list.tsx 的 showEarlier）：
+    // 只把最近一页消息交给列表渲染，更早的靠「显示更早的消息」一页一页往前翻。
+    // 本实现按消息条数计价（Pient 的列表项就是 Msg），每会话独立记窗口，仅内存态不落盘。
+    private val messageWindowBySession = mutableStateMapOf<String, Int>()
+
+    /**
+     * 上屏窗口起点（0 = 全部消息都在窗口内）。
+     * 更早消息不足 [MESSAGE_WINDOW_MARGIN] 条时不再分页（按钮不出现，直接全显）——
+     * 对应 Hermes「Never offer Show earlier over fewer turns than this」的 8 turn 下限。
+     */
+    fun messageWindowStart(sessionId: String?, total: Int): Int {
+        if (sessionId == null) return 0
+        val shown = messageWindowBySession[sessionId] ?: MESSAGE_WINDOW_INITIAL
+        val hidden = total - shown
+        return if (hidden <= MESSAGE_WINDOW_MARGIN) 0 else hidden
+    }
+
+    /** 「显示更早的消息」：窗口再放一页；返回**本次新增条数**（列表据此保持视口锚点） */
+    fun showEarlierMessages(sessionId: String?, total: Int): Int {
+        if (sessionId == null) return 0
+        val cur = messageWindowStart(sessionId, total)
+        val next = (cur - MESSAGE_WINDOW_PAGE).coerceAtLeast(0)
+        if (next == cur) return 0
+        messageWindowBySession[sessionId] = total - next
+        return cur - next
+    }
+
+    /** 定位跳转前把目标消息纳入窗口（跳转到更早消息时自动翻页到能看见它） */
+    fun ensureMessageVisible(sessionId: String?, total: Int, index: Int) {
+        if (sessionId == null || index < 0) return
+        val start = messageWindowStart(sessionId, total)
+        if (index >= start) return
+        messageWindowBySession[sessionId] = total - index
     }
 
     // ── 文件页状态 ────────────────────────────────────────

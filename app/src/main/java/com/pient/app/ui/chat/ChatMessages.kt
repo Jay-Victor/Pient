@@ -142,6 +142,13 @@ fun ChatMessages(
     streamDraft: String,
     listState: LazyListState,
     bottomInset: Dp = 0.dp,
+    /**
+     * 上屏窗口起点（长会话防护，2026-09-12）：< startIndex 的更早消息不进列表，
+     * 列表首行改为「显示更早的消息」胶囊按钮；0 = 全部消息都在窗口内。
+     */
+    startIndex: Int = 0,
+    /** 点「显示更早的消息」：返回本次新增条数（调用方据此保持视口锚点） */
+    onShowEarlier: () -> Int = { 0 },
     onOpenLocator: () -> Unit,
     onMessageLongPress: ((Int, Rect) -> Unit)? = null,
 ) {
@@ -160,8 +167,25 @@ fun ChatMessages(
             if (total > 0) listState.scrollToItem(total - 1)
         }
     }
-    // 各消息气泡的根坐标（长按菜单锚点；LazyColumn 回收后需重新上报）
-    val bubbleBounds = remember { mutableStateMapOf<Int, Rect>() }
+    // 各消息气泡的根坐标（长按菜单锚点；LazyColumn 回收后需重新上报）。
+    // ★ 必须是**普通 HashMap**而不是 mutableStateMapOf：写入发生在 onGloballyPositioned
+    // （布局阶段），而长按回调里读它——用快照 Map 会让每次布局都写状态、又反查到组合里，
+    // 每个可见项在每帧都多走一轮组合（长会话卡顿源之一，2026-09-12 修复）。
+    // 该 Map 只在长按那一刻被读，不需要参与重组。
+    val bubbleBounds = remember { HashMap<Int, Rect>() }
+    // 「显示更早的消息」翻页后的视口锚点：窗口状态变化生效后再落滚动（否则按旧条目数滚动），
+    // 并且做一次实测误差校正（2026-09-12）
+    var pendingAnchor by remember { mutableStateOf<PendingAnchor?>(null) }
+    LaunchedEffect(startIndex) {
+        val anchor = pendingAnchor ?: return@LaunchedEffect
+        pendingAnchor = null
+        listState.scrollToItem(anchor.row, 0)
+        withFrameNanos { }
+        val now = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == anchor.row }?.offset
+        if (now != null && now != anchor.containerOffset) {
+            listState.scrollToItem(anchor.row, now - anchor.containerOffset)
+        }
+    }
     // 长按超时配置（消息长按 fork 检测用）
     val viewConfig = LocalViewConfiguration.current
 
@@ -193,12 +217,14 @@ fun ChatMessages(
         }
     }
 
-    // 定位器进度：当前可见首项在全部消息中的位置
+    // 定位器进度：当前可见首项在全部消息中的位置（按**绝对**消息下标算，
+    // 让进度条在只加载了尾部窗口时也能反映真实位置，2026-09-12）
     val locatorProgress by remember {
         derivedStateOf {
-            val total = listState.layoutInfo.totalItemsCount
+            val total = messages.size
             if (total <= 1) 0f
-            else (listState.firstVisibleItemIndex.toFloat() / (total - 1).toFloat()).coerceIn(0f, 1f)
+            else ((startIndex + listState.firstVisibleItemIndex).toFloat() / (total - 1).toFloat())
+                .coerceIn(0f, 1f)
         }
     }
 
@@ -233,7 +259,47 @@ fun ChatMessages(
             ),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            items(messages.size, key = { it }) { idx ->
+            // 「显示更早的消息」（长会话防护，2026-09-12；Hermes showEarlier 同款胶囊按钮）：
+            // 仅当更早消息被窗口挡住时出现，点击往前翻一页并保持视口锚点（内容不被抽走）
+            if (startIndex > 0) {
+                item(key = "show-earlier") {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Text(
+                            "显示更早的消息",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                                .border(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f),
+                                    RoundedCornerShape(50),
+                                )
+                                .clickable {
+                                    // 锚点 = 第一条可见的**消息行**（按钮自身不算；
+                                    // Hermes anchorBeforePrepend 同口径）。记下它此刻在容器内的
+                                    // 偏移，翻页后先滚回该行再按实测误差二次校正 ——
+                                    // scrollToItem 的偏移量与布局内边距/夹取的口径不完全一致，
+                                    // 实测校正比推导单位可靠
+                                    val info = listState.layoutInfo
+                                    val firstVisible = listState.firstVisibleItemIndex
+                                    val anchorRow =
+                                        if (firstVisible == 0 && startIndex > 0) 1 else firstVisible
+                                    val anchorOffset = info.visibleItemsInfo
+                                        .firstOrNull { it.index == anchorRow }
+                                        ?.offset
+                                        ?: listState.firstVisibleItemScrollOffset
+                                    val added = onShowEarlier()
+                                    if (added > 0) pendingAnchor = PendingAnchor(anchorRow + added, anchorOffset)
+                                }
+                                .padding(horizontal = 12.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+            }
+            items(messages.size - startIndex, key = { startIndex + it }) { i ->
+                val idx = startIndex + i
                 val msg = messages[idx]
                 // 成对工具结果（ToolCall 紧跟 ToolResult）已并入工具卡渲染，此处跳过
                 if (msg is Msg.ToolResult && idx > 0 && messages[idx - 1] is Msg.ToolCall) return@items
@@ -407,10 +473,17 @@ fun ChatMessages(
 fun MessageLocatorDialog(
     messages: List<Msg>,
     listState: LazyListState,
+    /**
+     * 上屏窗口起点（长会话只加载尾部时 > 0）：行下标 → **绝对**消息下标换算用
+     * `windowStart + row - rowOffset`（rowOffset = 存在「显示更早的消息」按钮时占 1 行）。
+     */
+    windowStart: Int = 0,
     onDismiss: () -> Unit,
     onJump: (Int) -> Unit,
 ) {
-    val currentIndex = listState.firstVisibleItemIndex.coerceIn(0, (messages.size - 1).coerceAtLeast(0))
+    val rowOffset = if (windowStart > 0) 1 else 0
+    val currentIndex = (windowStart + listState.firstVisibleItemIndex - rowOffset)
+        .coerceIn(0, (messages.size - 1).coerceAtLeast(0))
     var locatorQuery by remember { mutableStateOf("") }
     var locatorFilter by remember { mutableStateOf(0) } // 0=全部 1=用户 2=AI
     var filterMenuOpen by remember { mutableStateOf(false) }
@@ -1495,6 +1568,12 @@ private fun CompactionCard(msg: Msg.Compaction) {
 // 聊天流内不再出现分支卡片。
 
 // ───────────────────────────── 流式输出卡 ─────────────────────────────
+
+/**
+ * 「显示更早的消息」翻页的视口锚点（2026-09-12）：
+ * [row] = 翻页后该行在列表中的新行下标，[containerOffset] = 翻页前它在容器内的偏移（px）。
+ */
+private class PendingAnchor(val row: Int, val containerOffset: Int)
 
 /** 消息定位预览文案（换行折叠为空格，超长由列表行 Ellipsis 截断） */
 private fun locatorPreview(msg: Msg): String = when (msg) {
