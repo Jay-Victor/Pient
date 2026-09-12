@@ -68,6 +68,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -88,6 +89,7 @@ import com.pient.app.data.ChatState
 import com.pient.app.data.PanelMaterial
 import com.pient.app.data.Project
 import com.pient.app.data.ProjectFiles
+import com.pient.app.data.SafWorkspace
 import com.pient.app.data.Session
 import com.pient.app.data.SessionGroup
 import com.pient.app.data.SettingsStore
@@ -106,6 +108,9 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 悬浮侧边栏的四周留白（左/上/下 12dp，与「悬浮输入框」同口径 28dp 圆角配套）。
@@ -402,7 +407,8 @@ fun SessionDrawer(
                     modifier = Modifier.size(16.dp),
                 )
             }
-            val path = chatState.projects.firstOrNull { it.name == chatState.currentProject }?.path ?: ""
+            val proj = chatState.projects.firstOrNull { it.name == chatState.currentProject }
+            val path = proj?.path ?: ""
             Text(
                 path,
                 style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFont, fontSize = 10.sp),
@@ -410,6 +416,37 @@ fun SessionDrawer(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            // SAF 项目：agent 的工具只吃真路径，SAF 只给令牌 → AI 在物化副本上工作，回写是显式动作
+            // （不自动回写：原目录可能同时被别的 App 改，静默覆盖会丢东西）
+            if (proj?.uri != null) {
+                val scope = rememberCoroutineScope()
+                val context = LocalContext.current
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 6.dp),
+                ) {
+                    Text(
+                        "AI 副本（SAF）",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        "保存回原目录",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable {
+                                scope.launch {
+                                    val n = withContext(Dispatchers.IO) { SafWorkspace.saveBack(context, proj) }
+                                    Toast.makeText(context, "已回写 $n 个文件到原目录", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+            }
             // 项目选择层（项目行限高滚动；新建项目行固定在最底部不被挤走）
             AnimatedVisibility(visible = projectPickerOpen) {
                 Column(Modifier.padding(top = 10.dp)) {
