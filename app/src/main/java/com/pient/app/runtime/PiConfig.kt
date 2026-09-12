@@ -33,6 +33,9 @@ object PiConfig {
     fun modelsFile(context: Context): File = File(agentDir(context), "models.json")
     fun authFile(context: Context): File = File(agentDir(context), "auth.json")
 
+    /** pi 全局设置（`~/.pi/agent/settings.json`）：目前只用来落终端层的 shellPath */
+    fun settingsFile(context: Context): File = File(agentDir(context), "settings.json")
+
     /** 写入 pi 配置；返回写入的服务商数量（0 = 没有可用配置，宿主会以无模型状态启动） */
     fun sync(context: Context): Int {
         val configs = AiConfigStore.configs.values.filter { it.endpoint.isNotBlank() && it.models.isNotEmpty() }
@@ -65,8 +68,25 @@ object PiConfig {
 
         writeJson(modelsFile(context), JSONObject().put("providers", providers))
         writeJson(authFile(context), auth)
+        syncShellPath(context)
         Log.i(TAG, "pi 配置已写入：$count 个服务商 → ${modelsFile(context).absolutePath}")
         return count
+    }
+
+    /**
+     * 终端层接线：把 pi 的 `shellPath` 指向随包分发的包装脚本（→ rootfs 里的 GNU bash）。
+     *
+     * **合并写**：settings.json 里可能已经有 pi 自己落的键（思考档位、信任策略等），整体覆盖会抹掉它们。
+     * pi 只在启动时读一次设置，所以必须在本进程拉起宿主**之前**写好（[sync] 的调用点在宿主启动前）。
+     */
+    private fun syncShellPath(context: Context) {
+        val file = settingsFile(context)
+        val json = runCatching {
+            if (file.exists()) JSONObject(file.readText()) else JSONObject()
+        }.getOrDefault(JSONObject())
+        json.put("shellPath", PiRuntime.shellPath(context).absolutePath)
+        writeJson(file, json)
+        Log.i(TAG, "pi shellPath 已写入：${PiRuntime.shellPath(context).absolutePath}")
     }
 
     /** pi 的服务商 id：允许字母数字与 `-._`，其余归一为 `-`（pi 侧 id 会出现在模型 id 里） */

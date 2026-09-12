@@ -62,6 +62,11 @@ val pientRuntimeCacheDir = rootProject.layout.projectDirectory
 val pientRuntimeLibDir = rootProject.layout.projectDirectory
     .dir("runtime/cache/usr/lib")
     .asFile
+// 终端层（Ubuntu rootfs + PRoot）缓存，见 runtime/scripts/fetch_rootfs.py
+val pientRootfsCacheDir = rootProject.layout.projectDirectory
+    .dir("runtime/cache/rootfs-$pientRuntimeAbi")
+    .asFile
+val pientRootfsLibDir = File(pientRootfsCacheDir, "usr/lib")
 
 // ABI 策略（2026-09-12 拍板，与 Operit 同口径）：**单 ABI 出包**——运行时 260MB，
 // fat APK 会翻倍；ABI 切分（AAB）只在走 Play 分发时才有意义。默认 x86_64 供模拟器开发，
@@ -93,12 +98,36 @@ val syncPientRuntime = tasks.register<Copy>("syncPientRuntimeBinaries") {
     into(pientJniRoot.map { it.dir(pientJniAbi) })
 }
 
+/**
+ * 终端层：PRoot 主程序与它的 ELF loader 也必须以 native lib 形态随包——
+ * 两者都是「被 execve 的可执行文件」，放私有目录会被 SELinux 拒（同 Node 的坑）。
+ * rootfs 里成千上万个 GNU 程序不进 APK：它们由 loader 以 mmap 方式加载（只要求 execute 权限，
+ * SELinux 给），所以 rootfs 可以留在私有目录、首启解包。
+ */
+val syncPientTerminalBinaries = tasks.register<Copy>("syncPientTerminalBinaries") {
+    description = "把 PRoot 与 loader 以 lib*.so 形式放入 jniLibs 目录"
+    onlyIf { File(pientRootfsCacheDir, "bin/proot").isFile }
+    from(File(pientRootfsCacheDir, "bin/proot")) { rename { "libpient_proot.so" } }
+    from(File(pientRootfsCacheDir, "libexec/proot/loader")) { rename { "libpient_proot_loader.so" } }
+    // pi 的 bash 工具要一个「shellPath」：shebang 脚本在私有目录同样不能 exec（实测 EACCES），
+    // 所以包装脚本也走 native lib 目录，构建期从 runtime/terminal/pient-shell.sh 复制过来。
+    from(File(rootProject.projectDir, "runtime/terminal/pient-shell.sh")) {
+        rename { "libpient_shell.so" }
+    }
+    into(pientJniRoot.map { it.dir(pientJniAbi) })
+}
+
 // 打包形态 = 混合（2026-09-12 拍板）：**随包带 node + 核心库**（可 execve 的二进制必须在
 // native lib 目录，被加载的依赖也一并随包 → 离线可起宿主），**pi npm 包按需下载**（可独立升级）。
 val syncPientRuntimeLibs = tasks.register<Copy>("syncPientRuntimeLibs") {
     description = "把 Node 动态依赖以 libpient_*.so 形式放入 jniLibs 目录"
     onlyIf { pientRuntimeLibDir.isDirectory }
     from(pientRuntimeLibDir) {
+        include("*.so", "*.so.*")
+        rename { name -> pientJniLibName(name) }
+    }
+    // 终端层的依赖库（PRoot 的 libtalloc / libandroid-shmem）同走这条路
+    from(pientRootfsLibDir) {
         include("*.so", "*.so.*")
         rename { name -> pientJniLibName(name) }
     }
@@ -115,8 +144,10 @@ val writePientRuntimeLibsManifest = tasks.register("writePientRuntimeLibsManifes
     doLast {
         val f = pientRuntimeLibsManifest.get().asFile
         f.parentFile.mkdirs()
-        val lines = if (pientRuntimeLibDir.isDirectory) {
-            (pientRuntimeLibDir.listFiles() ?: emptyArray())
+        val libFiles = listOf(pientRuntimeLibDir, pientRootfsLibDir)
+            .flatMap { dir -> (dir.listFiles() ?: emptyArray()).toList() }
+        val lines = if (libFiles.isNotEmpty()) {
+            libFiles
                 .filter { it.isFile && (it.name.endsWith(".so") || it.name.contains(".so.")) }
                 .sortedBy { it.name }
                 .map { "${it.name} ${pientJniLibName(it.name)}" }
@@ -129,7 +160,8 @@ val writePientRuntimeLibsManifest = tasks.register("writePientRuntimeLibsManifes
 android.sourceSets.getByName("main").jniLibs.srcDir(pientJniRoot)
 android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/pientAssets"))
 tasks.named("preBuild") {
-    dependsOn(syncPientRuntime, syncPientRuntimeLibs, writePientRuntimeLibsManifest)
+    dependsOn(syncPientRuntime, syncPientRuntimeLibs, syncPientTerminalBinaries,
+        writePientRuntimeLibsManifest)
 }
 
 kotlin {
