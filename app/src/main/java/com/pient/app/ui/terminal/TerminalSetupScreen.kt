@@ -1,5 +1,6 @@
 package com.pient.app.ui.terminal
 
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import com.pient.app.runtime.PiRuntime
+import com.pient.app.runtime.PiTerminal
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -37,20 +46,29 @@ import com.pient.app.ui.theme.PientPanel
 /**
  * 环境配置页（设计计划 5.4；Operit SetupScreen 导航形态参考）：
  * 终端页快捷按键栏右端「环境配置」进入。rootfs 就绪检测 → 一键配置 → 完成返回。
- * UI 原型：mock 状态（ChatState.envReady）；接入运行时后由 rootfs 解压/挂载进度驱动。
+ * 检测与就绪判定都是真实的（文件系统判定 + 一条真跑出来的探针命令）；尚未实现的是
+ * 「缺 rootfs 时的一键解包」——ROOTFS 目前由 runtime/scripts 部署（首启解包见开发计划）。
  */
-@Composable
-fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
-    var configuring by remember { mutableStateOf(false) }
-    val envReady = chatState.envReady
-    var step by remember { mutableStateOf(if (envReady) 3 else 0) }
+/** 环境自检探针：一条命令同时验证 rootfs 能跑、GNU bash、发行版与内核 */
+private const val PROBE_CMD =
+    """ . /etc/os-release; echo "${'$'}PRETTY_NAME · ${'$'}(uname -sr) · ${'$'}(bash --version | head -1)""""
 
-    val items = listOf(
-        "Ubuntu 24.04 ARM64 rootfs",
-        "bash + coreutils + apt（minbase）",
-        "PRoot 挂载（数据目录映射）",
-        "组件安装（git / python / build-essential）",
-    )
+@Composable
+fun TerminalSetupScreen(nav: NavController) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var configuring by remember { mutableStateOf(false) }
+    // 真实检测：文件系统判定（rootfs / bash / PRoot / 包装脚本）+ 一条真跑出来的探针输出
+    var checks by remember { mutableStateOf(PiRuntime.terminalChecks(context)) }
+    var probe by remember { mutableStateOf("") }
+    var envReady by remember { mutableStateOf(false) }
+
+    suspend fun refresh() {
+        checks = withContext(Dispatchers.IO) { PiRuntime.terminalChecks(context) }
+        probe = withContext(Dispatchers.IO) { PiTerminal.execOnce(context, PROBE_CMD) }
+        envReady = checks.all { it.second } && probe.isNotEmpty()
+    }
+    LaunchedEffect(Unit) { refresh() }
 
     Column(Modifier.fillMaxSize()) {
         // 顶栏：返回 + 标题
@@ -88,11 +106,11 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.padding(14.dp),
                 ) {
-                    items.forEachIndexed { i, label ->
+                    checks.forEachIndexed { i, (label, ok) ->
                         EnvRow(
                             label = label,
-                            done = envReady || step > i,
-                            configuring = configuring && step <= i,
+                            done = ok,
+                            configuring = configuring && !ok && i == 0,
                         )
                     }
                 }
@@ -100,8 +118,9 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
 
             // 状态说明
             Text(
-                if (envReady) "环境就绪 · 进入终端后与 Agent bash 工具共用同一 rootfs"
-                else "检测到 rootfs 尚未初始化 · 点击「一键配置」自动完成（原型演示）",
+                if (envReady) "环境就绪 · $probe\n终端页与 Agent 的 bash 工具共用同一 rootfs"
+                else "缺少：" + checks.filterNot { it.second }.joinToString("、") { it.first } +
+                    "\n（开发形态用 runtime/scripts 部署；首启解包待实现）",
                 style = MaterialTheme.typography.labelSmall,
                 color = if (envReady) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -109,14 +128,19 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
 
             // 一键配置 / 完成
             PientButton(
-                text = if (envReady) "完成" else "一键配置",
+                text = if (envReady) "完成" else "重新检测",
                 onClick = {
                     if (envReady) {
                         nav.popBackStack()
                     } else {
-                        configuring = true
-                        step = 3
-                        chatState.envReady = true
+                        scope.launch {
+                            configuring = true
+                            refresh()
+                            configuring = false
+                            if (!envReady) {
+                                Toast.makeText(context, "仍缺少组件：见上方清单", Toast.LENGTH_SHORT).show()
+                            }
+                        }
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(44.dp),

@@ -1,6 +1,7 @@
 package com.pient.app.runtime
 
 import android.content.Context
+import android.os.Build
 import android.system.Os
 import android.util.Log
 import java.io.File
@@ -91,6 +92,26 @@ object PiRuntime {
      * 可以留在私有目录，不必像 node/proot 那样进 APK 的 native lib 目录）。
      */
     fun rootfsDir(context: Context): File = File(root(context), "rootfs")
+
+    /** 终端环境的检测清单（环境配置页用；纯文件系统判定，不起进程） */
+    fun terminalChecks(context: Context): List<Pair<String, Boolean>> {
+        val rootfs = rootfsDir(context)
+        val bash = rootfsBash(context)
+        return listOf(
+            "Ubuntu 24.04 rootfs（${abiLabel()}，已解包）" to (bash.isFile && File(rootfs, "etc/os-release").exists()),
+            "GNU bash + coreutils（minbase）" to (bash.isFile && File(rootfs, "usr/bin/env").isFile),
+            "PRoot 运行时（proot + ELF loader）" to (prootBinary(context).isFile && prootLoader(context).isFile),
+            "shell 包装脚本（随 APK 分发）" to shellPath(context).isFile,
+        )
+    }
+
+    /** 当前出包的 ABI（单 ABI 出包，取主 ABI 即是本包运行时的架构） */
+    private fun abiLabel(): String = when (Build.SUPPORTED_ABIS.firstOrNull()) {
+        "arm64-v8a" -> "arm64"
+        "x86_64" -> "amd64"
+        "armeabi-v7a" -> "armhf"
+        else -> Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"
+    }
 
     /** rootfs 里的 GNU bash（终端环境唯一入口，pi 的 bash 工具 shellPath 指它） */
     fun rootfsBash(context: Context): File = File(rootfsDir(context), "bin/bash")

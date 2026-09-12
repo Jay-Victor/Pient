@@ -1320,7 +1320,6 @@ class ChatState {
 
     // ── 终端页状态 ────────────────────────────────────────
     var terminalIndex by mutableIntStateOf(0)
-    var envReady by mutableStateOf(false)        // rootfs 就绪检测（一键环境配置）
 }
 
 /**
