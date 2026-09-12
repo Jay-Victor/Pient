@@ -936,7 +936,6 @@ private fun MessagesPanel(
         // 关掉即不再显示，且同一口径：思考模式关闭 = 思考内容永不上屏）。
         streamThinking = if (chatState.thinkingEnabled) chatState.streamThinking else "",
         streamThinkingStartedAt = if (chatState.thinkingEnabled) chatState.streamThinkingStartedAt else 0L,
-        streamThinkingLevel = if (chatState.thinkingEnabled) chatState.thinkingLevel.piValue else "",
         liveThinkingIndex = chatState.liveThinkingIndex,
         bottomInset = bottomInset,
         // 长会话上屏窗口：按**内容高度**计价（≈2 屏内容，早于它的靠「显示更早的消息」翻页）

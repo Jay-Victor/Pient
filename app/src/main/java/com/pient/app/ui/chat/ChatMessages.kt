@@ -149,8 +149,6 @@ fun ChatMessages(
     streamThinking: String = "",
     /** 本轮思考起点（毫秒；0 = 无）——实时计时用 */
     streamThinkingStartedAt: Long = 0L,
-    /** 本轮思考级别（pi 字面量，如 medium）——流式思考行的级别徽标 */
-    streamThinkingLevel: String = "",
     /** 本次运行内流式思考块所在下标（-1 = 无）：回答落地后该块保持展开（Hermes live preview） */
     liveThinkingIndex: Int = -1,
     bottomInset: Dp = 0.dp,
@@ -363,7 +361,6 @@ fun ChatMessages(
                         draft = streamDraft,
                         thinking = streamThinking,
                         thinkingStartedAt = streamThinkingStartedAt,
-                        thinkingLevel = streamThinkingLevel,
                     )
                 }
             }
@@ -1176,7 +1173,6 @@ private fun AssistantCard(
         if (thinking != null) {
             ThinkingDisclosure(
                 text = thinking.text,
-                level = thinking.level,
                 durationMs = thinking.durationMs,
                 expandedDefault = thinkingExpandedDefault,
             )
@@ -1198,6 +1194,8 @@ private fun AssistantCard(
 
 /**
  * 思考折叠块（2026-09-12 按 **Hermes 桌面端** ThinkingDisclosure 重做）。
+ * ★ 标题行不再带「思考程度档位」徽标（Pient 曾自加 `medium` 胶囊，2026-09-12 用户判为多余：
+ *   档位是会话级设置，每条回答重复一遍没有信息量；档位仍可在模型选择器里看/改）。
  * 参考源：`hermes-agent/apps/desktop/src/components/assistant-ui/thread/message-parts.tsx`
  * （ThinkingDisclosure / ReasoningAccordionGroup）+ `components/chat/scaffold-row.tsx`。
  *
@@ -1219,7 +1217,6 @@ private fun AssistantCard(
 @Composable
 private fun ThinkingDisclosure(
     text: String,
-    level: String? = null,
     live: Boolean = false,
     elapsedSeconds: Int = 0,
     durationMs: Long? = null,
@@ -1240,18 +1237,6 @@ private fun ThinkingDisclosure(
                 .padding(vertical = 4.dp),
         ) {
             ThinkingLabel(thoughtLabel(live, durationMs), live)
-            if (!level.isNullOrBlank()) {
-                Text(
-                    level,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = MonoFont,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .padding(start = 6.dp)
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), CircleShape)
-                        .padding(horizontal = 8.dp, vertical = 1.dp),
-                )
-            }
             Icon(
                 if (open) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
                 null,
@@ -1359,7 +1344,6 @@ private fun ThinkingCard(msg: Msg.Thinking, expandedDefault: Boolean = false) {
     ) {
         ThinkingDisclosure(
             text = msg.text,
-            level = msg.level,
             durationMs = msg.durationMs,
             expandedDefault = expandedDefault,
         )
@@ -1680,7 +1664,6 @@ private fun StreamingCard(
     draft: String,
     thinking: String = "",
     thinkingStartedAt: Long = 0L,
-    thinkingLevel: String = "",
 ) {
     val transition = rememberInfiniteTransition(label = "cursor")
     val cursorAlpha by transition.animateFloat(
@@ -1703,7 +1686,6 @@ private fun StreamingCard(
         if (thinking.isNotBlank()) {
             ThinkingDisclosure(
                 text = thinking,
-                level = thinkingLevel.takeIf { it.isNotBlank() },
                 live = true,
                 elapsedSeconds = elapsed,
             )
