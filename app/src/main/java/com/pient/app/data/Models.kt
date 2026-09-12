@@ -776,6 +776,12 @@ class FileNode(
     val size: Long = 0L,                  // 文件大小（字节；排序用 mock）
     val modifiedAt: Long = 0L,            // 最后修改时间（epoch ms；排序用 mock）
     val source: String? = null,           // 真实位置（本地绝对路径 / SAF 文档 URI）；null = mock 节点
+    /**
+     * 该节点的内容不完整（2026-09-12 大目录防护）：目录子项数超过单目录上限、
+     * 树节点总量/扫描时间超出预算，或已到递归深度上限而不再下探。
+     * 面板只在根节点上展示页脚提示（「仅显示部分文件」）。
+     */
+    val truncated: Boolean = false,
 ) {
     val ext: String
         // 统一小写：扩展名判定一律忽略大小写（Operit `endsWith(..., ignoreCase = true)` 口径）

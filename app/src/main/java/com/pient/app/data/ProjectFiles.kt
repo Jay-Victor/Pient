@@ -26,61 +26,193 @@ object ProjectFiles {
 
     private const val MAX_DEPTH = 12        // 递归深度上限（防超深目录拖死 UI）
     private const val MAX_CHILDREN = 1000   // 单目录子项上限
+    private const val MAX_NODES = 20_000    // 整棵树节点预算（大目录防护，2026-09-12）
 
-    /** 读取项目根树；目录不可读返回 null */
-    fun loadTree(context: Context, project: Project): FileNode? {
-        return if (project.uri != null) {
-            val doc = DocumentFile.fromTreeUri(context, Uri.parse(project.uri)) ?: return null
-            if (!doc.isDirectory) return null
-            loadSaf(doc, 0)
-        } else {
-            val dir = File(project.path)
-            if (!dir.isDirectory) null else loadLocal(dir, 0)
+    /**
+     * 扫描预算：节点总量上限（单次扫描新建，无跨次状态）。
+     * 超限后 `take()` 返回 false，调用方停止下探。
+     *
+     * 注：**不用时间预算**——2026-09-12 实测模拟器 FUSE 下 360 个目录就要 4s，
+     * 按墙钟截断会让「正常的大项目文件夹」随机丢文件；扫描已全在 IO 线程，
+     * 慢只会让树晚出现，不会卡界面，故只按节点总量兜底。
+     */
+    private class ScanBudget {
+        var nodes = 0
+        var hit = false          // 节点预算耗尽（子树被截断）
+        var dirCapped = false    // 某个目录命中单目录上限（子项不全）
+        fun take(): Boolean {
+            if (nodes >= MAX_NODES) {
+                hit = true
+                return false
+            }
+            nodes++
+            return true
         }
     }
 
-    private fun loadLocal(dir: File, depth: Int): FileNode {
-        val children = dir.listFiles()?.take(MAX_CHILDREN)?.mapNotNull { f ->
-            if (f.isDirectory) {
-                if (depth >= MAX_DEPTH) FileNode(f.name, isDir = true, source = f.absolutePath)
-                else loadLocal(f, depth + 1)
+    /**
+     * 读取项目根树；目录不可读返回 null。
+     *
+     * **大目录防护（2026-09-12）**：树要么小要么大，但**扫描本身必须廉价**——
+     * ① SAF 分支不再用 `DocumentFile` 的逐项元数据 API（`listFiles()` 只返回 document id，
+     * 之后的 `isDirectory`/`name`/`length`/`lastModified` 每个属性都是一次 ContentProvider
+     * 查询：一个文件 4 次 IPC。用户在系统文件管理器里往项目文件夹丢了几千个文件后，
+     * 打开应用要在主线程跑上万次 IPC → 卡死数分钟/ANR）。改为**每个目录一次 query**，
+     * 一次取回全部子项元数据（见 [listSafChildren]）。
+     * ② 总量预算（[MAX_NODES] / [SCAN_BUDGET_MS]）+ 单目录上限 → 命中即停止下探并在
+     * 根节点标 `truncated`（UI 页脚提示），不再无限撑大树对象。
+     * ③ 调用方（ChatState.refreshFileTree）在 IO 线程执行，主线程不再参与扫描。
+     */
+    fun loadTree(context: Context, project: Project): FileNode? {
+        val budget = ScanBudget()
+        return try {
+            if (project.uri != null) {
+                loadSafRoot(context, Uri.parse(project.uri), budget)
             } else {
-                FileNode(
-                    name = f.name,
-                    isDir = false,
-                    size = f.length(),
-                    modifiedAt = f.lastModified(),
-                    source = f.absolutePath,
-                )
+                val dir = File(project.path)
+                if (!dir.isDirectory) null else loadLocal(dir, 0, budget)
             }
-        } ?: emptyList()
-        return FileNode(dir.name, isDir = true, children = children, source = dir.absolutePath)
+        } catch (e: Exception) {
+            // 授权被撤销 / provider 异常 → 与「目录不存在」同语义（UI 按无树处理），不再崩主线程
+            null
+        }
     }
 
-    private fun loadSaf(doc: DocumentFile, depth: Int): FileNode {
-        val children = doc.listFiles().take(MAX_CHILDREN).mapNotNull { child ->
-            if (child.isDirectory) {
-                if (depth >= MAX_DEPTH) FileNode(child.name ?: "", isDir = true, source = child.uri.toString())
-                else loadSaf(child, depth + 1)
-            } else {
-                FileNode(
-                    name = child.name ?: "",
-                    isDir = false,
-                    size = child.length(),
-                    modifiedAt = child.lastModified(),
-                    source = child.uri.toString(),
-                )
+    private fun loadLocal(dir: File, depth: Int, budget: ScanBudget): FileNode {
+        val all = dir.listFiles()               // File API：一次系统调用拿到全部子项元数据
+        var capped = all != null && all.size > MAX_CHILDREN
+        if (capped) budget.dirCapped = true
+        val children = ArrayList<FileNode>()
+        if (all != null) {
+            for (f in all.take(MAX_CHILDREN)) {
+                if (!budget.take()) {
+                    capped = true
+                    break
+                }
+                children += if (f.isDirectory) {
+                    if (depth >= MAX_DEPTH) {
+                        FileNode(f.name, isDir = true, source = f.absolutePath, truncated = true)
+                    } else {
+                        loadLocal(f, depth + 1, budget)
+                    }
+                } else {
+                    FileNode(
+                        name = f.name,
+                        isDir = false,
+                        size = f.length(),
+                        modifiedAt = f.lastModified(),
+                        source = f.absolutePath,
+                    )
+                }
             }
         }
         return FileNode(
-            doc.name ?: "",
+            dir.name,
             isDir = true,
             children = children,
-            size = doc.length(),
-            modifiedAt = doc.lastModified(),
-            source = doc.uri.toString(),
+            source = dir.absolutePath,
+            truncated = capped || budget.hit || budget.dirCapped,
         )
     }
+
+    // ── SAF：每个目录一次 cursor 查询（大目录防护的核心，2026-09-12）──
+
+    /** SAF 子项条目（一次 query 取回的全部元数据） */
+    private class SafEntry(
+        val docId: String,
+        val name: String,
+        val isDir: Boolean,
+        val size: Long,
+        val modified: Long,
+    )
+
+    private val SAF_PROJECTION = arrayOf(
+        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+        DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+        DocumentsContract.Document.COLUMN_MIME_TYPE,
+        DocumentsContract.Document.COLUMN_SIZE,
+        DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+    )
+
+    /**
+     * 列出一个 SAF 目录的子项（**单次 query**）。
+     *
+     * `DocumentFile.listFiles()` 只 select 了 document id，其后每个 `child.isDirectory` /
+     * `child.name` / `child.length()` / `child.lastModified()` 都会各自发起一次
+     * ContentResolver 查询（androidx.documentfile 1.0.1 字节码实测）——即每个文件 4 次 IPC。
+     * 这里直接把需要的列一次查出（MIME 判目录、size/时间直接读游标）。
+     */
+    private fun listSafChildren(context: Context, treeUri: Uri, parentDocId: String): List<SafEntry> {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
+        val out = ArrayList<SafEntry>()
+        context.contentResolver.query(childrenUri, SAF_PROJECTION, null, null, null)?.use { c ->
+            while (c.moveToNext()) {
+                val id = c.getString(0) ?: continue
+                out += SafEntry(
+                    docId = id,
+                    name = c.getString(1) ?: "",
+                    isDir = c.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR,
+                    size = if (c.isNull(3)) 0L else c.getLong(3),
+                    modified = if (c.isNull(4)) 0L else c.getLong(4),
+                )
+            }
+        }
+        return out
+    }
+
+    private fun loadSafRoot(context: Context, treeUri: Uri, budget: ScanBudget): FileNode? {
+        val rootDocId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull() ?: return null
+        // 根显示名（一次查询）：DocumentFile 只用来读名字，列目录一律走 listSafChildren
+        val name = runCatching { DocumentFile.fromTreeUri(context, treeUri)?.name }.getOrNull().orEmpty()
+        val children = loadSafChildren(context, treeUri, rootDocId, 0, budget)
+        return FileNode(
+            name = name,
+            isDir = true,
+            children = children,
+            source = treeUri.toString(),
+            truncated = budget.hit || budget.dirCapped,
+        )
+    }
+
+    private fun loadSafChildren(
+        context: Context,
+        treeUri: Uri,
+        parentDocId: String,
+        depth: Int,
+        budget: ScanBudget,
+    ): List<FileNode> {
+        val entries = listSafChildren(context, treeUri, parentDocId)
+        if (entries.size > MAX_CHILDREN) budget.dirCapped = true
+        val children = ArrayList<FileNode>(minOf(entries.size, MAX_CHILDREN))
+        for (e in entries.take(MAX_CHILDREN)) {
+            if (!budget.take()) break
+            val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, e.docId).toString()
+            children += if (e.isDir) {
+                if (depth >= MAX_DEPTH) {
+                    FileNode(e.name, isDir = true, size = e.size, modifiedAt = e.modified, source = childUri, truncated = true)
+                } else {
+                    val kids = loadSafChildren(context, treeUri, e.docId, depth + 1, budget)
+                    FileNode(
+                        name = e.name,
+                        isDir = true,
+                        children = kids,
+                        size = e.size,
+                        modifiedAt = e.modified,
+                        source = childUri,
+                        truncated = kids.size >= MAX_CHILDREN,
+                    )
+                }
+            } else {
+                FileNode(name = e.name, isDir = false, size = e.size, modifiedAt = e.modified, source = childUri)
+            }
+        }
+        return children
+    }
+
+    /** 文档/树 URI → 文档 id（树 URI 走 getTreeDocumentId） */
+    private fun safDocId(uri: Uri): String? =
+        runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull()
+            ?: runCatching { DocumentsContract.getTreeDocumentId(uri) }.getOrNull()
 
     /**
      * 读取文本内容；>2MB、读取失败或非 UTF-8 文本（二进制）返回 null。
@@ -290,25 +422,46 @@ object ProjectFiles {
         }
     }
 
-    /** 节点统计（详细信息，2026-09-02）：返回 大小 to 最近修改时间；目录递归汇总 */
-    fun nodeStat(context: Context, node: FileNode): Pair<Long, Long> {
+    /**
+     * 节点统计（详细信息，2026-09-02）：返回 大小 to 最近修改时间；目录递归汇总。
+     *
+     * SAF 目录走 [listSafChildren]（每目录一次 query + 直接读游标里的 size/时间）；
+     * 旧实现用 `DocumentFile.listFiles()` + 逐项 `length()`/`lastModified()`，一个文件
+     * 2~3 次 IPC，大目录（几千文件）会让弹窗卡死（2026-09-12）。调用方须在 IO 线程执行。
+     */
+    fun nodeStat(context: Context, project: Project?, node: FileNode): Pair<Long, Long> {
         val src = node.source ?: return 0L to 0L
         if (!node.isDir) return node.size to node.modifiedAt
         var bytes = 0L
         var modified = 0L
         return try {
             if (src.startsWith("content://")) {
-                val doc = DocumentFile.fromSingleUri(context, Uri.parse(src)) ?: return bytes to modified
-                fun walk(d: DocumentFile) {
-                    for (c in d.listFiles()) {
-                        if (c.isDirectory) walk(c) else {
-                            bytes += c.length()
-                            modified = maxOf(modified, c.lastModified())
+                val treeUri = project?.uri?.let { Uri.parse(it) }
+                val docId = safDocId(Uri.parse(src))
+                if (treeUri != null && docId != null) {
+                    val stack = ArrayDeque<String>()
+                    stack.addLast(docId)
+                    var visited = 0
+                    while (stack.isNotEmpty() && visited < MAX_NODES) {
+                        for (e in listSafChildren(context, treeUri, stack.removeLast())) {
+                            visited++
+                            if (e.isDir) stack.addLast(e.docId)
+                            else {
+                                bytes += e.size
+                                modified = maxOf(modified, e.modified)
+                            }
                         }
                     }
+                } else {
+                    // 无 tree URI 可依（异常情况）：退回 DocumentFile 单节点视图
+                    val doc = DocumentFile.fromSingleUri(context, Uri.parse(src)) ?: return bytes to modified
+                    for (c in doc.listFiles()) {
+                        if (c.isDirectory) continue
+                        bytes += c.length()
+                        modified = maxOf(modified, c.lastModified())
+                    }
                 }
-                walk(doc)
-                modified = maxOf(modified, doc.lastModified())
+                modified = maxOf(modified, node.modifiedAt)
             } else {
                 val dir = File(src)
                 if (dir.isDirectory) {

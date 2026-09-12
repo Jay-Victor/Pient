@@ -12,6 +12,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -60,6 +62,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
@@ -89,6 +92,9 @@ import com.pient.app.ui.components.PientDialog
 import com.pient.app.ui.components.PientSegmented
 import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -127,6 +133,8 @@ fun FileTreePanel(
     var searchOpen by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     val context = LocalContext.current
+    // 文件树加载/导入导出等重活一律出主线程（2026-09-12 大目录防护）
+    val scope = rememberCoroutineScope()
     // 真实文件树（2026-09-02）：当前项目目录；null = 未绑定项目或目录不存在（2026-09-08 起无 mock 回退）
     val root = chatState.fileTreeRoot
 
@@ -142,9 +150,12 @@ fun FileTreePanel(
         ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris: List<Uri> ->
         if (uris.isEmpty() || project == null) return@rememberLauncherForActivityResult
-        val ok = ProjectFiles.importFiles(context, project, uris)
-        Toast.makeText(context, "已导入 $ok/${uris.size} 个文件", Toast.LENGTH_SHORT).show()
-        if (ok > 0) chatState.refreshFileTree(context)
+        // 拷贝可能很大：IO 线程执行，避免卡住界面
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) { ProjectFiles.importFiles(context, project, uris) }
+            Toast.makeText(context, "已导入 $ok/${uris.size} 个文件", Toast.LENGTH_SHORT).show()
+            if (ok > 0) chatState.refreshFileTree(context)
+        }
     }
 
     // 导入文件夹：SAF 选目录 → 整目录递归拷入项目根
@@ -152,13 +163,15 @@ fun FileTreePanel(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri: Uri? ->
         if (uri == null || project == null) return@rememberLauncherForActivityResult
-        val ok = ProjectFiles.importFolder(context, project, uri)
-        Toast.makeText(
-            context,
-            if (ok) "已导入文件夹" else "导入失败",
-            Toast.LENGTH_SHORT,
-        ).show()
-        if (ok) chatState.refreshFileTree(context)
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) { ProjectFiles.importFolder(context, project, uri) }
+            Toast.makeText(
+                context,
+                if (ok) "已导入文件夹" else "导入失败",
+                Toast.LENGTH_SHORT,
+            ).show()
+            if (ok) chatState.refreshFileTreeAsync(context)
+        }
     }
 
     // 导出目标选择（SAF 目录）：批量导出按选择集合、项目导出按 zip 打包
@@ -166,25 +179,30 @@ fun FileTreePanel(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri: Uri? ->
         if (uri == null || project == null) return@rememberLauncherForActivityResult
-        val ok = if (exportSelectMode) {
-            val currentRoot = chatState.fileTreeRoot
-            if (currentRoot == null) {
-                false // 无文件树无法按选择导出
-            } else {
-                val nodes = collectNodes(currentRoot).filter { it.source in exportSelectedSources }
-                ProjectFiles.exportSelected(context, project, nodes, uri)
+        val currentRoot = chatState.fileTreeRoot
+        // 打包/拷贝整个项目或所选文件可能很慢：IO 线程执行
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                if (exportSelectMode) {
+                    if (currentRoot == null) {
+                        false // 无文件树无法按选择导出
+                    } else {
+                        val nodes = collectNodes(currentRoot).filter { it.source in exportSelectedSources }
+                        ProjectFiles.exportSelected(context, project, nodes, uri)
+                    }
+                } else {
+                    ProjectFiles.exportProject(context, project, uri)
+                }
             }
-        } else {
-            ProjectFiles.exportProject(context, project, uri)
-        }
-        Toast.makeText(
-            context,
-            if (ok) "已导出到所选目录" else "导出失败",
-            Toast.LENGTH_SHORT,
-        ).show()
-        if (ok) {
-            exportSelectMode = false
-            exportSelectedSources.clear()
+            Toast.makeText(
+                context,
+                if (ok) "已导出到所选目录" else "导出失败",
+                Toast.LENGTH_SHORT,
+            ).show()
+            if (ok) {
+                exportSelectMode = false
+                exportSelectedSources.clear()
+            }
         }
     }
 
@@ -373,7 +391,7 @@ fun FileTreePanel(
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .clickable(onClick = { chatState.refreshFileTree(context) })
+                    .clickable(onClick = { chatState.refreshFileTreeAsync(context) })
                     .padding(5.dp),
             ) {
                 Icon(
@@ -444,29 +462,32 @@ fun FileTreePanel(
             }
         }
 
-        // 树（普通递归 Composable：避免 LazyListScope 递归接收者陷阱）；
-        // 搜索中则显示扁平匹配结果列表
+        // 树（2026-09-12 大目录防护：展开分支提前扁平化成行列表，交给 LazyColumn ——
+        // 原「Column + verticalScroll + 递归 TreeRow」会把展开目录里的每一行全部组合/测量，
+        // 项目里放了几千个文件时打开面板即卡顿；LazyColumn 只组合视口内的行）
+        // contentPadding bottom 60dp：右下 FAB 不被末行压住（原 padding(bottom = 60.dp) 同口径）
         // weight(1f) 默认 fill=true：占满剩余空间，批量导出操作条恒贴面板最底部（2026-09-02）
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-                .padding(bottom = 60.dp),
+                .weight(1f),
+            contentPadding = PaddingValues(bottom = 60.dp),
         ) {
             if (searching) {
                 if (matchedFiles.isEmpty()) {
-                    Text(
-                        "未找到匹配文件",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 12.dp),
-                        textAlign = TextAlign.Center,
-                    )
+                    item(key = "search-empty") {
+                        Text(
+                            "未找到匹配文件",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 12.dp),
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 } else {
-                    matchedFiles.forEach { node ->
+                    items(matchedFiles, key = { it.source ?: it.name }) { node ->
                         SearchResultRow(
                             node = node,
                             onClick = { chatState.openFile(node) },
@@ -475,27 +496,45 @@ fun FileTreePanel(
                 }
             } else if (root == null) {
                 // 未绑定项目/目录不存在（2026-09-08 起无 mock 回退）：提示而非空白
-                Text(
-                    "绑定项目后显示文件树",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp),
-                    textAlign = TextAlign.Center,
-                )
+                // 首次扫描在后台进行时不显示「绑定项目后显示文件树」（避免误报无项目）
+                item(key = "no-root") {
+                    Text(
+                        if (chatState.fileTreeLoading) "正在读取文件树…" else "绑定项目后显示文件树",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        textAlign = TextAlign.Center,
+                    )
+                }
             } else {
-                sortedChildren(root.children, sortMode).forEach { child ->
+                val rows = buildVisibleRows(root, chatState.expandedDirs, sortMode)
+                items(rows, key = { it.fullPath }) { row ->
                     TreeRow(
-                        node = child,
-                        depth = 0,
-                        path = "/" + root.name,
+                        node = row.node,
+                        depth = row.depth,
+                        path = row.path,
                         chatState = chatState,
                         sortMode = sortMode,
                         selectMode = exportSelectMode,
                         selectedSources = exportSelectedSources,
                         onMenu = { menuFor = it },
                     )
+                }
+                // 大目录被截断时的页脚提示（节点预算/单目录上限命中，2026-09-12）
+                if (chatState.fileTreeTruncated) {
+                    item(key = "truncated-hint") {
+                        Text(
+                            "文件过多，仅显示部分内容",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 }
             }
         }
@@ -595,7 +634,7 @@ fun FileTreePanel(
                             else "创建失败（名称无效或目录不可写）",
                             Toast.LENGTH_SHORT,
                         ).show()
-                        if (ok) chatState.refreshFileTree(context)
+                        if (ok) chatState.refreshFileTreeAsync(context)
                     },
                 )
             }
@@ -665,8 +704,11 @@ fun FileTreePanel(
 
     // 详细信息弹窗（2026-09-02 新增：位置 / 大小 / 修改时间；单「确定」按钮）
     detailTarget?.let { node ->
-        val (size, modified) = remember(node.source, node.size, node.modifiedAt) {
-            ProjectFiles.nodeStat(context, node)
+        // 目录统计要递归遍历（大目录/SAF provider 可能较慢）：IO 线程取值，读取期间显示占位
+        // （旧实现用 remember 在主线程同步算，几千文件的目录会让弹窗卡住 —— 2026-09-12）
+        var stat by remember(node) { mutableStateOf<Pair<Long, Long>?>(null) }
+        LaunchedEffect(node) {
+            stat = withContext(Dispatchers.IO) { ProjectFiles.nodeStat(context, project, node) }
         }
         Box(Modifier.fillMaxSize()) {
             PientDialog(
@@ -681,11 +723,15 @@ fun FileTreePanel(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     DetailRow("位置", ProjectFiles.displayLocation(node))
-                    DetailRow("大小", formatSize(size))
+                    DetailRow("大小", stat?.let { formatSize(it.first) } ?: "读取中…")
                     DetailRow(
                         "修改时间",
-                        if (modified > 0) SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(modified))
-                        else "—",
+                        when {
+                            stat == null -> "读取中…"
+                            stat!!.second > 0 -> SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+                                .format(Date(stat!!.second))
+                            else -> "—"
+                        },
                     )
                 }
             }
@@ -711,7 +757,7 @@ fun FileTreePanel(
                         Toast.LENGTH_SHORT,
                     ).show()
                     renameTarget = null
-                    if (ok) chatState.refreshFileTree(context)
+                    if (ok) chatState.refreshFileTreeAsync(context)
                 },
             ) {
                 BasicTextField(
@@ -740,18 +786,21 @@ fun FileTreePanel(
                 confirmText = "删除",
                 showClose = false,
                 onConfirm = {
-                    val ok = ProjectFiles.deleteEntry(context, node)
-                    Toast.makeText(
-                        context,
-                        if (ok) "已删除 ${node.name}" else "删除失败",
-                        Toast.LENGTH_SHORT,
-                    ).show()
                     deleteTarget = null
-                    if (ok) {
-                        // 已打开的标签页若指向该文件则关闭
-                        val i = chatState.openTabs.indexOfFirst { it.source == node.source && it.source != null }
-                        if (i >= 0) chatState.closeTab(i)
-                        chatState.refreshFileTree(context)
+                    // 目录递归删除可能很慢（SAF provider / 深目录）：IO 线程执行
+                    scope.launch {
+                        val ok = withContext(Dispatchers.IO) { ProjectFiles.deleteEntry(context, node) }
+                        Toast.makeText(
+                            context,
+                            if (ok) "已删除 ${node.name}" else "删除失败",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                        if (ok) {
+                            // 已打开的标签页若指向该文件则关闭
+                            val i = chatState.openTabs.indexOfFirst { it.source == node.source && it.source != null }
+                            if (i >= 0) chatState.closeTab(i)
+                            chatState.refreshFileTree(context)
+                        }
                     }
                 },
             ) {
@@ -1090,11 +1139,40 @@ private fun TreeRow(
         }
     }
 
-    if (node.isDir && expanded) {
-        sortedChildren(node.children, sortMode).forEach { child ->
-            TreeRow(child, depth + 1, thisPath, chatState, sortMode, selectMode, selectedSources, onMenu)
+    // 展开的子树不在此处递归渲染——行列表由 buildVisibleRows 提前扁平化后交给
+    // LazyColumn（2026-09-12），本组件只负责画一行
+}
+
+/** 文件树可见行（父路径 + 深度；仅含已展开分支，供 LazyColumn 逐行渲染） */
+private class TreeRowItem(val node: FileNode, val depth: Int, val path: String) {
+    /**
+     * 行唯一键 = 本行完整路径。
+     * **不能拿 `path`（父路径）当 key**：同一目录下的兄弟行共享父路径，LazyColumn 会
+     * 直接抛 `IllegalArgumentException: Key ... was already used` 崩掉（2026-09-12 实测）。
+     */
+    val fullPath: String get() = "$path/${node.name}"
+}
+
+/**
+ * 把树按当前展开状态扁平化成行列表（只有展开目录的子项才入列）。
+ * 每个目录的子项按当前排序模式排好序；路径串与 TreeRow 的 thisPath 口径一致
+ * （`/<根名>/<子目录>/...`），保证展开状态（chatState.expandedDirs）跨渲染稳定。
+ */
+private fun buildVisibleRows(
+    root: FileNode,
+    expandedDirs: Set<String>,
+    sortMode: FileSort,
+): List<TreeRowItem> {
+    val out = ArrayList<TreeRowItem>()
+    fun walk(node: FileNode, depth: Int, parentPath: String) {
+        val path = "$parentPath/${node.name}"
+        out += TreeRowItem(node, depth, parentPath)
+        if (node.isDir && path in expandedDirs) {
+            sortedChildren(node.children, sortMode).forEach { walk(it, depth + 1, path) }
         }
     }
+    sortedChildren(root.children, sortMode).forEach { walk(it, 0, "/" + root.name) }
+    return out
 }
 
 /** 切换批量导出勾选（按 source 唯一标识） */

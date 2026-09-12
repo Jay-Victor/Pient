@@ -10,8 +10,13 @@ import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** 顶栏右下方区域内容（消息区 / 文件内容预览区 / 终端页 / 分支画布 四态切换） */
 enum class Panel { MESSAGES, FILES, TERMINAL, TREE }
@@ -309,6 +314,7 @@ class ChatState {
             currentSessionId = sessionsFor(currentProject ?: "").firstOrNull()?.id
             // 被删项目的文件树不再有效；FileTreePanel 会按新 currentProject 重载
             fileTreeRoot = null
+            fileTreeTruncated = false
         }
     }
 
@@ -740,10 +746,51 @@ class ChatState {
     // 文件树（2026-09-02 真实化：当前项目真实目录；null = 尚未加载或目录不存在时由 UI 回退演示树）
     var fileTreeRoot by mutableStateOf<FileNode?>(null)
 
-    /** 重载当前项目文件树（真实文件系统；目录不存在时 fileTreeRoot 置 null） */
-    fun refreshFileTree(context: Context) {
+    /** 文件树正在后台扫描（面板显示加载态；扫描全程不占主线程） */
+    var fileTreeLoading by mutableStateOf(false)
+
+    /** 树因「节点数/时间预算」或单目录上限被截断（面板页脚提示「仅显示部分文件」） */
+    var fileTreeTruncated by mutableStateOf(false)
+
+    /** 请求序号：项目快速切换/连点刷新时丢弃过期结果 */
+    private var treeRequestSeq = 0
+
+    /**
+     * 应用级协程作用域：只承载「后台刷新」类调用方不等待的任务（文件树重载）。
+     * ChatState 与进程同生命周期（PientApp 根部 remember），无需取消。
+     */
+    private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /** 非挂起入口：后台重载文件树（点击刷新 / 保存后 / 增删改后等场景，调用方不等待） */
+    fun refreshFileTreeAsync(context: Context) {
+        bgScope.launch { refreshFileTree(context) }
+    }
+
+    /**
+     * 重载当前项目文件树（真实文件系统；目录不存在时 fileTreeRoot 置 null）。
+     *
+     * **扫描一定在 IO 线程**（2026-09-12 修复「项目文件夹里文件一多，打开应用就卡死」）：
+     * 旧实现在主线程同步递归整棵树，SAF 项目每个文件还要 4 次 ContentProvider 查询 ——
+     * 4000 个文件 ≈ 1.6 万次 IPC，主线程被占住数分钟 → ANR（实测复现）。
+     * 现改为：IO 线程扫描 + 请求序号防竞态；调用方可直接 await（LaunchedEffect），
+     * 不必关心线程（suspend 返回时状态已就绪）。
+     */
+    suspend fun refreshFileTree(context: Context) {
         val project = projects.firstOrNull { it.name == currentProject }
-        fileTreeRoot = if (project != null) ProjectFiles.loadTree(context, project) else null
+        val seq = ++treeRequestSeq
+        if (project == null) {
+            fileTreeRoot = null
+            fileTreeTruncated = false
+            fileTreeLoading = false
+            return
+        }
+        fileTreeLoading = true
+        val appContext = context.applicationContext
+        val tree = withContext(Dispatchers.IO) { ProjectFiles.loadTree(appContext, project) }
+        if (seq != treeRequestSeq) return      // 已有更新的请求在途，丢弃本次结果
+        fileTreeRoot = tree
+        fileTreeTruncated = tree?.truncated == true
+        fileTreeLoading = false
     }
 
     val openTabs = mutableStateListOf<FileNode>()
@@ -801,7 +848,7 @@ class ChatState {
         val ok = ProjectFiles.writeText(context, node, text)
         if (ok) {
             unsavedFiles.remove(k)
-            refreshFileTree(context)
+            refreshFileTreeAsync(context)
         }
         return ok
     }
