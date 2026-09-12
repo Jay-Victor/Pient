@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import com.pient.app.R
 import kotlin.math.hypot
 import kotlin.math.pow
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlin.random.Random
 
@@ -83,16 +84,19 @@ import kotlin.random.Random
  *   品牌字标用法同 `components/pane-shell/tree/renderer/tree-group.tsx`
  *   （`<DecodeText text="HERMES" cursor prefix={1} />`），此处同款写作 "PIENT"。
  *
- * ★ 动画曲线＝**从产品 logo 里量出来的 π 轮廓**（2026-09-12 三改，替换 Hermes 的通用玫瑰曲线）：
+ * ★ 动画曲线＝**从产品 logo 里量出来的 π 边框**（2026-09-12 重做，替换 Hermes 的通用玫瑰曲线）：
  *   玫瑰曲线是 Hermes 自己的图形语汇；本产品的 π 就在 `pient_logo.png` 里（logo = 蓝圆盘 +
- *   负形挖出的「海豚 + π」复合标志）。提取流程（可复现）：
- *   ① 取盘内 alpha<40 的负形，连通域分析 → π 由三块独立笔画组成（横杠 / 左腿 / 右腿，
- *      面积 2649 / 2913 / 3394，bbox 合计 160×169@512 画布）；
- *   ② 三块互不相连，先按 8 邻接膨胀 4px 合并成一块；
- *   ③ Moore 邻域追踪外轮廓（917 点，自检相邻点 8 邻接）；
- *   ④ Ramer–Douglas–Peucker(ε=1.6) → 48 点，Chaikin 角割 3 轮平滑，按弧长重采样到 100 点；
- *   ⑤ 等比居中归一化到 0..100 视口（占 8..92，即 84 单位）。
- *   粒子彗尾沿这条闭合轮廓跑，视觉上就是「logo 里那个 π 被光描了一遍」。
+ *   负形挖出的「海豚 + π」复合标志）。π 的**三条笔画互不相连**（横杠 / 左腿 / 右腿，两处窄缝），
+ *   所以「边框」= 三条各自闭合的曲线；用「膨胀合并成一块再描外轮廓」得到的单条曲线必然要
+ *   用直线跨过窄缝、并把笔锋磨圆（旧版 100 点轮廓即如此），无法贴合，故改为逐块精确提取：
+ *   ① 取 alpha=127.5 等值线（双线性插值场 8× 上采样后 Moore 追踪，亚像素精度）；
+ *   ② 按 8 邻接连通域分出三块笔画，各自 Ramer–Douglas–Peucker(ε=0.20px) 简化——
+ *      不做膨胀、不做平滑，最大偏差 0.19px@512（= 显示尺寸 0.04dp）；
+ *   ③ 三环统一朝向，各自把「接缝点」旋为首点：接缝＝粒子入笔处，取三环两两最近点附近，
+ *      使跨环跳变最小（6.0 / 11.9 / 9.8 视口单位）；
+ *   ④ 等比居中归一化到 0..100 视口（占 8..92，与原单轮廓同尺寸、同位置）。
+ *   三条曲线**各跑各的彗尾**（互不影响）：每条彗尾的拖尾只落在自己的曲线上，不跨曲线、
+ *   不画跨接直线；粒子数按周长占比分摊源码的 78 粒（≈26 / 27 / 25），点距与原单彗尾版一致。
  *
  * 与桌面端的有意差异（数值已在注释里标注）：
  * - **不旋转**：Hermes 的曲线整组 28s 转一圈，但 π 是有方向的字形，旋转会破坏可读性。
@@ -105,13 +109,14 @@ import kotlin.random.Random
 
 /** 品牌 π 加载动画参数（机制数值沿用 Hermes `Loader`） */
 private object BrandPi {
+    /** 每条曲线彗尾的粒子数（源码值 78；三条曲线各自一条彗尾，按周长占比分摊到各环） */
     const val PARTICLES = 78
     /** 底纹描边宽度（0..100 视口单位；Hermes 为 4.5） */
     const val STROKE_WIDTH = 4.5f
     /** PageLoader 口径描边缩放 */
     const val STROKE_SCALE = 0.72f
     const val PATH_OPACITY = 0.1f
-    /** 拖尾长度（占整条轮廓的比例；Hermes rose-curve 为 0.32） */
+    /** 拖尾长度（占三环总长的比例；Hermes rose-curve 为 0.32） */
     const val TRAIL_SPAN = 0.32f
     /** 粒子半径区间（0..100 视口单位；Hermes 为 0.9→3.6） */
     const val RADIUS_MIN = 0.9f
@@ -120,176 +125,296 @@ private object BrandPi {
     const val DURATION_MS = 5400f
 }
 
-/**
- * 从 `pient_logo.png` 负形追踪出的 π 轮廓（100 点，闭合，0..100 视口单位）。
- * 提取参数见文件头注释；改 logo 后需重新生成。
- */
-private val BRAND_PI_CONTOUR = floatArrayOf(
-    87.6f, 8.0f,
-    89.7f, 11.0f,
-    88.4f, 15.3f,
-    86.4f, 19.3f,
-    83.6f, 22.7f,
-    79.8f, 25.0f,
-    75.6f, 26.1f,
-    72.8f, 29.4f,
-    71.5f, 33.6f,
-    70.6f, 38.0f,
-    69.9f, 42.3f,
-    69.4f, 46.8f,
-    68.9f, 51.2f,
-    68.5f, 55.6f,
-    68.2f, 60.0f,
-    68.2f, 64.5f,
-    70.7f, 67.1f,
-    74.4f, 64.7f,
-    78.5f, 63.5f,
-    79.4f, 67.5f,
-    78.1f, 71.8f,
-    76.1f, 75.8f,
-    73.2f, 79.2f,
-    69.4f, 81.4f,
-    65.1f, 82.2f,
-    60.6f, 82.0f,
-    56.5f, 80.5f,
-    53.5f, 77.3f,
-    52.2f, 73.1f,
-    52.0f, 68.7f,
-    52.1f, 64.2f,
-    52.5f, 59.8f,
-    52.9f, 55.4f,
-    53.5f, 51.0f,
-    54.1f, 46.6f,
-    54.7f, 42.2f,
-    55.4f, 37.8f,
-    56.2f, 33.4f,
-    57.5f, 29.2f,
-    58.5f, 26.6f,
-    54.1f, 26.5f,
-    50.9f, 29.4f,
-    49.0f, 33.4f,
-    47.7f, 37.7f,
-    46.7f, 42.0f,
-    45.9f, 46.4f,
-    45.2f, 50.8f,
-    44.4f, 55.1f,
-    43.7f, 59.5f,
-    42.9f, 63.9f,
-    42.0f, 68.2f,
-    41.0f, 72.6f,
-    39.8f, 76.9f,
-    38.3f, 81.0f,
-    36.3f, 85.0f,
-    33.2f, 88.2f,
-    29.5f, 90.6f,
-    25.2f, 91.8f,
-    20.8f, 92.0f,
-    16.4f, 91.5f,
-    12.2f, 90.1f,
-    10.3f, 86.4f,
-    13.6f, 83.9f,
-    17.1f, 81.2f,
-    20.1f, 77.8f,
-    22.5f, 74.1f,
-    24.4f, 70.1f,
-    26.0f, 66.0f,
-    27.2f, 61.7f,
-    28.2f, 57.3f,
-    29.1f, 53.0f,
-    30.0f, 48.6f,
-    30.8f, 44.3f,
-    31.6f, 39.9f,
-    32.5f, 35.5f,
-    33.4f, 31.2f,
-    35.8f, 27.7f,
-    35.9f, 26.3f,
-    31.6f, 27.4f,
-    27.6f, 29.3f,
-    24.0f, 31.9f,
-    20.4f, 34.2f,
-    18.4f, 31.0f,
-    19.2f, 26.7f,
-    21.0f, 22.6f,
-    23.6f, 19.0f,
-    27.0f, 16.2f,
-    31.0f, 14.3f,
-    35.4f, 13.7f,
-    39.8f, 13.4f,
-    44.3f, 13.2f,
-    48.7f, 13.1f,
-    53.2f, 13.0f,
-    57.6f, 13.0f,
-    62.1f, 12.9f,
-    66.5f, 12.8f,
-    70.9f, 12.6f,
-    75.4f, 12.3f,
-    79.8f, 11.7f,
-    83.8f, 9.7f,
+/** π 横杠笔画边框（pient_logo.png 的 alpha=127.5 等值线提取；闭合环，起点=接缝） */
+private val BRAND_PI_RING_BAR = floatArrayOf(
+    51.81f, 23.93f,
+    75.04f, 23.92f,
+    77.18f, 23.80f,
+    79.08f, 23.31f,
+    81.22f, 22.27f,
+    82.57f, 21.35f,
+    83.73f, 20.31f,
+    85.63f, 17.92f,
+    87.10f, 15.29f,
+    88.14f, 12.84f,
+    89.12f, 10.02f,
+    89.31f, 9.04f,
+    89.61f, 8.55f,
+    89.43f, 8.00f,
+    86.98f, 10.14f,
+    84.59f, 11.61f,
+    82.33f, 12.59f,
+    80.92f, 13.02f,
+    78.29f, 13.51f,
+    74.61f, 13.63f,
+    39.22f, 13.63f,
+    36.71f, 13.82f,
+    32.80f, 14.73f,
+    30.41f, 15.65f,
+    27.65f, 17.18f,
+    25.20f, 19.14f,
+    23.12f, 21.47f,
+    21.71f, 23.61f,
+    20.12f, 27.04f,
+    19.14f, 30.35f,
+    18.78f, 32.55f,
+    19.45f, 32.12f,
+    19.63f, 31.69f,
+    21.22f, 29.98f,
+    23.18f, 28.39f,
+    24.59f, 27.47f,
+    26.61f, 26.37f,
+    28.76f, 25.45f,
+    32.37f, 24.41f,
+    35.24f, 24.04f,
+    37.63f, 23.92f,
 )
 
-/** 等弧长采样表数（按周长均匀取样，粒子 O(1) 取点） */
-private const val CONTOUR_LUT_SAMPLES = 512
+/** π 左腿笔画边框（pient_logo.png 的 alpha=127.5 等值线提取；闭合环，起点=接缝） */
+private val BRAND_PI_RING_LEFT = floatArrayOf(
+    47.31f, 27.95f,
+    47.43f, 27.65f,
+    47.24f, 27.10f,
+    46.57f, 27.04f,
+    42.29f, 27.41f,
+    39.71f, 27.96f,
+    38.31f, 28.45f,
+    36.35f, 29.43f,
+    35.31f, 30.35f,
+    34.94f, 30.96f,
+    34.39f, 33.16f,
+    34.20f, 34.69f,
+    33.90f, 35.61f,
+    32.73f, 42.41f,
+    32.43f, 43.33f,
+    32.24f, 44.98f,
+    31.94f, 45.90f,
+    31.27f, 50.06f,
+    30.96f, 50.98f,
+    30.78f, 52.51f,
+    30.47f, 53.43f,
+    30.29f, 54.96f,
+    29.98f, 55.88f,
+    29.80f, 57.41f,
+    29.49f, 58.27f,
+    28.82f, 62.00f,
+    27.35f, 67.69f,
+    25.88f, 72.04f,
+    24.41f, 75.47f,
+    22.94f, 78.22f,
+    20.92f, 81.16f,
+    19.63f, 82.63f,
+    17.49f, 84.71f,
+    14.92f, 86.61f,
+    12.84f, 87.65f,
+    10.82f, 88.20f,
+    10.39f, 88.45f,
+    11.92f, 89.55f,
+    15.41f, 91.02f,
+    17.18f, 91.51f,
+    19.69f, 91.94f,
+    23.49f, 92.00f,
+    26.00f, 91.51f,
+    28.45f, 90.47f,
+    31.02f, 88.63f,
+    33.22f, 86.24f,
+    35.12f, 83.31f,
+    36.65f, 80.06f,
+    37.63f, 77.49f,
+    37.76f, 76.76f,
+    38.06f, 76.20f,
+    38.73f, 73.51f,
+    39.04f, 72.84f,
+    39.71f, 69.59f,
+    40.02f, 68.80f,
+    40.27f, 67.08f,
+    40.51f, 66.47f,
+    41.18f, 62.12f,
+    41.55f, 60.71f,
+    41.67f, 59.24f,
+    41.98f, 58.20f,
+    42.16f, 56.31f,
+    42.47f, 55.27f,
+    42.65f, 53.37f,
+    42.96f, 52.33f,
+    43.14f, 50.43f,
+    43.45f, 49.39f,
+    44.12f, 44.55f,
+    44.49f, 43.14f,
+    44.61f, 41.67f,
+    44.98f, 40.33f,
+    45.10f, 38.92f,
+    45.96f, 34.76f,
+    46.14f, 32.98f,
+    46.45f, 32.00f,
+    46.63f, 30.53f,
+    46.94f, 29.73f,
+    47.06f, 28.63f,
+)
 
-/** 预计算的 π 轮廓几何（顶层 object 持有，进程内只算一次） */
+/** π 右腿笔画边框（pient_logo.png 的 alpha=127.5 等值线提取；闭合环，起点=接缝） */
+private val BRAND_PI_RING_RIGHT = floatArrayOf(
+    58.87f, 30.69f,
+    57.96f, 34.94f,
+    57.29f, 40.27f,
+    56.92f, 41.92f,
+    56.80f, 43.63f,
+    56.43f, 45.35f,
+    55.33f, 54.22f,
+    55.02f, 55.51f,
+    54.84f, 57.65f,
+    54.53f, 58.88f,
+    54.35f, 61.02f,
+    53.98f, 62.86f,
+    53.61f, 67.39f,
+    53.67f, 71.55f,
+    53.98f, 73.27f,
+    54.47f, 74.80f,
+    55.45f, 76.82f,
+    56.43f, 78.22f,
+    57.41f, 79.27f,
+    59.49f, 80.73f,
+    60.59f, 81.22f,
+    62.49f, 81.71f,
+    65.98f, 81.71f,
+    68.37f, 81.16f,
+    70.51f, 80.18f,
+    72.47f, 78.78f,
+    74.37f, 76.76f,
+    76.27f, 73.69f,
+    77.80f, 70.14f,
+    79.02f, 65.92f,
+    78.96f, 65.67f,
+    78.65f, 65.61f,
+    76.33f, 68.06f,
+    74.43f, 69.47f,
+    72.47f, 70.39f,
+    71.31f, 70.63f,
+    69.29f, 70.57f,
+    67.94f, 69.90f,
+    66.78f, 68.55f,
+    66.16f, 67.02f,
+    66.04f, 65.73f,
+    66.10f, 63.04f,
+    66.71f, 56.73f,
+    67.51f, 51.41f,
+    67.69f, 48.96f,
+    68.00f, 47.61f,
+    68.18f, 45.22f,
+    68.49f, 43.94f,
+    68.67f, 41.55f,
+    68.98f, 40.27f,
+    69.16f, 37.94f,
+    69.47f, 36.65f,
+    69.65f, 34.45f,
+    69.96f, 33.29f,
+    70.14f, 31.14f,
+    70.45f, 30.04f,
+    70.63f, 28.02f,
+    70.82f, 27.47f,
+    70.82f, 27.04f,
+    70.33f, 26.86f,
+    67.63f, 27.04f,
+    64.94f, 27.47f,
+    64.39f, 27.71f,
+    63.29f, 27.90f,
+    60.71f, 28.94f,
+    59.43f, 29.86f,
+    58.88f, 30.53f,
+)
+
+/** 每环的等弧长采样表（按周长占比分配样本数；粒子 O(1) 取点） */
+private const val CONTOUR_LUT_SAMPLES = 2048
+
+/** 三环的遍历顺序＝书写序：横杠 → 左腿 → 右腿 */
+private val BRAND_PI_RINGS = arrayOf(BRAND_PI_RING_BAR, BRAND_PI_RING_LEFT, BRAND_PI_RING_RIGHT)
+
+/** 预计算的 π 边框几何（顶层 object 持有，进程内只算一次） */
 private object BrandPiGeometry {
-    /** 等弧长采样点，[x0,y0,x1,y1,…] */
-    val lut: FloatArray
+    /** 每环的等弧长采样点，[x0,y0,x1,y1,…]（环闭合：末点的下一段即回首点） */
+    val luts: Array<FloatArray>
 
-    /** 底纹路径（闭合轮廓） */
+    /** 每环分到的粒子数（按周长占比分摊源码的 78 粒，使点距与单彗尾版一致） */
+    val particles: IntArray
+
+    /** 底纹路径：三条笔画边框，各自闭合 */
     val path: Path
 
     init {
-        val n = BRAND_PI_CONTOUR.size / 2
-        val cum = FloatArray(n + 1)
-        for (i in 0 until n) {
-            val j = (i + 1) % n
-            cum[i + 1] = cum[i] + hypot(
-                BRAND_PI_CONTOUR[2 * j] - BRAND_PI_CONTOUR[2 * i],
-                BRAND_PI_CONTOUR[2 * j + 1] - BRAND_PI_CONTOUR[2 * i + 1],
-            )
+        val lens = FloatArray(BRAND_PI_RINGS.size)
+        BRAND_PI_RINGS.forEachIndexed { k, ring ->
+            val n = ring.size / 2
+            var sum = 0f
+            for (i in 0 until n) {
+                val j = (i + 1) % n
+                sum += hypot(ring[2 * j] - ring[2 * i], ring[2 * j + 1] - ring[2 * i + 1])
+            }
+            lens[k] = sum
         }
-        val total = cum[n]
-        val samples = FloatArray(CONTOUR_LUT_SAMPLES * 2)
-        var seg = 0
-        for (s in 0 until CONTOUR_LUT_SAMPLES) {
-            val target = total * s / (CONTOUR_LUT_SAMPLES - 1)
-            while (seg < n - 1 && cum[seg + 1] < target) seg++
-            val segLen = cum[seg + 1] - cum[seg]
-            val f = if (segLen > 0f) (target - cum[seg]) / segLen else 0f
-            val i0 = seg
-            val i1 = (seg + 1) % n
-            samples[2 * s] =
-                BRAND_PI_CONTOUR[2 * i0] + (BRAND_PI_CONTOUR[2 * i1] - BRAND_PI_CONTOUR[2 * i0]) * f
-            samples[2 * s + 1] = BRAND_PI_CONTOUR[2 * i0 + 1] +
-                (BRAND_PI_CONTOUR[2 * i1 + 1] - BRAND_PI_CONTOUR[2 * i0 + 1]) * f
+        val total = lens.sum()
+        particles = IntArray(BRAND_PI_RINGS.size) { k ->
+            maxOf(6, (BrandPi.PARTICLES * lens[k] / total).roundToInt())
         }
-        lut = samples
+
+        luts = Array(BRAND_PI_RINGS.size) { k ->
+            val ring = BRAND_PI_RINGS[k]
+            val n = ring.size / 2
+            val count = maxOf(16, (CONTOUR_LUT_SAMPLES * lens[k] / total).toInt())
+            val out = FloatArray(count * 2)
+            var seg = 0
+            var acc = 0f
+            for (s in 0 until count) {
+                val target = lens[k] * s / count
+                while (seg < n - 1) {
+                    val j = seg + 1
+                    val len = hypot(ring[2 * j] - ring[2 * seg], ring[2 * j + 1] - ring[2 * seg + 1])
+                    if (acc + len >= target) break
+                    acc += len
+                    seg++
+                }
+                val i0 = seg
+                val i1 = (seg + 1) % n
+                val len = hypot(ring[2 * i1] - ring[2 * i0], ring[2 * i1 + 1] - ring[2 * i0 + 1])
+                val f = if (len > 0f) ((target - acc) / len).coerceIn(0f, 1f) else 0f
+                out[2 * s] = ring[2 * i0] + (ring[2 * i1] - ring[2 * i0]) * f
+                out[2 * s + 1] = ring[2 * i0 + 1] + (ring[2 * i1 + 1] - ring[2 * i0 + 1]) * f
+            }
+            out
+        }
+
         path = Path().apply {
-            moveTo(BRAND_PI_CONTOUR[0], BRAND_PI_CONTOUR[1])
-            for (i in 1 until n) lineTo(BRAND_PI_CONTOUR[2 * i], BRAND_PI_CONTOUR[2 * i + 1])
-            close()
+            BRAND_PI_RINGS.forEach { ring ->
+                val n = ring.size / 2
+                moveTo(ring[0], ring[1])
+                for (i in 1 until n) lineTo(ring[2 * i], ring[2 * i + 1])
+                close()
+            }
         }
     }
-}
 
-/** 按弧长进度（0..1）取 π 轮廓上的点 */
-private fun contourPointAt(t: Float): Offset {
-    val x = t.coerceIn(0f, 1f) * (CONTOUR_LUT_SAMPLES - 1)
-    val i0 = x.toInt().coerceAtMost(CONTOUR_LUT_SAMPLES - 2)
-    val f = x - i0
-    return Offset(
-        BrandPiGeometry.lut[2 * i0] + (BrandPiGeometry.lut[2 * (i0 + 1)] - BrandPiGeometry.lut[2 * i0]) * f,
-        BrandPiGeometry.lut[2 * i0 + 1] +
-            (BrandPiGeometry.lut[2 * (i0 + 1) + 1] - BrandPiGeometry.lut[2 * i0 + 1]) * f,
-    )
+    /** 第 ring 条曲线上按**自身**弧长进度 t∈[0,1) 取点（环闭合；三条曲线互不影响） */
+    fun pointAt(ring: Int, t: Float): Offset {
+        val lut = luts[ring]
+        val m = lut.size / 2
+        val u = ((t % 1f) + 1f) % 1f
+        var i0 = (u * m).toInt()
+        if (i0 >= m) i0 = m - 1
+        val i1 = (i0 + 1) % m
+        val f = u * m - i0
+        return Offset(
+            lut[2 * i0] + (lut[2 * i1] - lut[2 * i0]) * f,
+            lut[2 * i0 + 1] + (lut[2 * i1 + 1] - lut[2 * i0 + 1]) * f,
+        )
+    }
 }
 
 /** 源码 normalizeProgress：把进度收进 [0,1) */
 private fun normalize(progress: Float): Float = ((progress % 1f) + 1f) % 1f
 
 /**
- * 品牌 π 加载动画：常显的 π 轮廓底纹 + 沿轮廓跑的粒子彗尾
- * （机制与数值取自 Hermes `Loader`，曲线换成从 logo 追踪出的 π）。
+ * 品牌 π 加载动画：常显的 π 边框底纹（横杠 / 左腿 / 右腿各一条闭合环）
+ * + **三条曲线各自一条独立彗尾**（拖尾只落在自己的曲线上，不跨曲线）——
+ *   机制与数值取自 Hermes `Loader`，曲线换成从 logo 精确提取的 π 边框。
  */
 @Composable
 fun BrandPiLoader(modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.primary) {
@@ -313,7 +438,7 @@ fun BrandPiLoader(modifier: Modifier = Modifier, color: Color = MaterialTheme.co
             BrandPi.DURATION_MS
 
         withTransform({ scale(unit, unit, pivot = Offset.Zero) }) {
-            // 底纹：完整 π 轮廓（品牌符号任何时候都在）
+            // 底纹：完整 π 边框（三条笔画各一条闭合环）
             drawPath(
                 path = BrandPiGeometry.path,
                 color = color.copy(alpha = BrandPi.PATH_OPACITY),
@@ -323,17 +448,23 @@ fun BrandPiLoader(modifier: Modifier = Modifier, color: Color = MaterialTheme.co
                     join = StrokeJoin.Round,
                 ),
             )
-            // 拖尾粒子：越靠尾越淡越小
-            for (index in 0 until BrandPi.PARTICLES) {
-                val tailOffset = index / (BrandPi.PARTICLES - 1).toFloat()
-                val p = contourPointAt(normalize(progress - tailOffset * BrandPi.TRAIL_SPAN))
-                val fade = (1f - tailOffset).pow(0.56f)
-                drawCircle(
-                    color = color,
-                    radius = (BrandPi.RADIUS_MIN + fade * BrandPi.RADIUS_SPAN) * BrandPi.STROKE_SCALE,
-                    center = p,
-                    alpha = 0.04f + fade * 0.96f,
-                )
+            // 拖尾粒子：三条曲线**各自一条彗尾**，互不影响（拖尾只落在自己的曲线上）
+            for (ring in BRAND_PI_RINGS.indices) {
+                val count = BrandPiGeometry.particles[ring]
+                for (index in 0 until count) {
+                    val tailOffset = index / (count - 1).toFloat()
+                    val p = BrandPiGeometry.pointAt(
+                        ring,
+                        normalize(progress - tailOffset * BrandPi.TRAIL_SPAN),
+                    )
+                    val fade = (1f - tailOffset).pow(0.56f)
+                    drawCircle(
+                        color = color,
+                        radius = (BrandPi.RADIUS_MIN + fade * BrandPi.RADIUS_SPAN) * BrandPi.STROKE_SCALE,
+                        center = p,
+                        alpha = 0.04f + fade * 0.96f,
+                    )
+                }
             }
         }
     }
