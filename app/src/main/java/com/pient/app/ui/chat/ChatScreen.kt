@@ -919,6 +919,11 @@ private fun MessagesPanel(
         isStreaming = chatState.isStreaming,
         streamDraft = chatState.streamDraft,
         listState = listState,
+        // 思考模式：流式思考实时预览（Hermes 口径的「思考中」+ 正文贴底）+ 刚流式完的块保持展开
+        streamThinking = chatState.streamThinking,
+        streamThinkingStartedAt = chatState.streamThinkingStartedAt,
+        streamThinkingLevel = if (chatState.thinkingEnabled) chatState.thinkingLevel.piValue else "",
+        liveThinkingIndex = chatState.liveThinkingIndex,
         bottomInset = bottomInset,
         // 长会话上屏窗口：按**内容高度**计价（≈2 屏内容，早于它的靠「显示更早的消息」翻页）
         startIndex = chatState.messageWindowStart(

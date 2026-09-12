@@ -163,15 +163,17 @@ private class MdStyles(
 }
 
 @Composable
-private fun rememberMdStyles(filePreview: Boolean): MdStyles {
+private fun rememberMdStyles(filePreview: Boolean, reasoning: Boolean = false): MdStyles {
     val scheme = MaterialTheme.colorScheme
     val isDark = LocalPientIsDark.current
     val base = MaterialTheme.typography.bodyMedium
-    val prose = if (filePreview) {
+    val prose = when {
+        // 思考/推理正文（Hermes `text-xs leading-snug text-muted-foreground/85`）：
+        // 12px + 1.375 行高——比回答正文（13px/1.5）更小更紧凑，读起来是「过程」不是「回答」
+        reasoning -> base.copy(fontSize = base.fontSize * (12f / 14f), lineHeight = 1.375.em)
         // `.markdown-body`：14px / line-height 1.7（字号随全局字体设置缩放）
-        base.copy(lineHeight = 1.7.em)
-    } else {
-        base.copy(fontSize = base.fontSize * (13f / 14f), lineHeight = 1.5.em)
+        filePreview -> base.copy(lineHeight = 1.7.em)
+        else -> base.copy(fontSize = base.fontSize * (13f / 14f), lineHeight = 1.5.em)
     }
     return MdStyles(
         base = prose,
@@ -184,7 +186,7 @@ private fun rememberMdStyles(filePreview: Boolean): MdStyles {
             MaterialTheme.typography.labelLarge,
             MaterialTheme.typography.labelLarge,
         ),
-        text = scheme.onBackground,
+        text = if (reasoning) scheme.onSurfaceVariant.copy(alpha = 0.85f) else scheme.onBackground,
         muted = scheme.onSurfaceVariant,
         dim = scheme.onSurfaceVariant.copy(alpha = 0.7f),
         accent = scheme.primary,
@@ -206,8 +208,10 @@ fun MarkdownText(
     filePreview: Boolean = false,
     /** 本地图片解析（相对路径 → 文件树节点）；null 时图片只显示 alt 文本 */
     imageResolver: ((String) -> FileNode?)? = null,
+    /** 思考/推理正文口径（Hermes：12px、行高 1.375、muted 85%）；思考折叠块专用 */
+    reasoning: Boolean = false,
 ) {
-    val s = rememberMdStyles(filePreview)
+    val s = rememberMdStyles(filePreview, reasoning)
     val doc = remember(markdown) { parseMarkdown(markdown) }
 
     Column(modifier) {

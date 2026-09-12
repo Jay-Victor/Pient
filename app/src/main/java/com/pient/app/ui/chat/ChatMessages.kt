@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -84,8 +85,10 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -93,6 +96,7 @@ import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationExceptio
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -141,6 +145,14 @@ fun ChatMessages(
     isStreaming: Boolean,
     streamDraft: String,
     listState: LazyListState,
+    /** 流式思考文本（思考模式开启时；Hermes 口径的实时预览数据源） */
+    streamThinking: String = "",
+    /** 本轮思考起点（毫秒；0 = 无）——实时计时用 */
+    streamThinkingStartedAt: Long = 0L,
+    /** 本轮思考级别（pi 字面量，如 medium）——流式思考行的级别徽标 */
+    streamThinkingLevel: String = "",
+    /** 本次运行内流式思考块所在下标（-1 = 无）：回答落地后该块保持展开（Hermes live preview） */
+    liveThinkingIndex: Int = -1,
     bottomInset: Dp = 0.dp,
     /**
      * 上屏窗口起点（长会话防护，2026-09-12）：< startIndex 的更早消息不进列表，
@@ -332,17 +344,28 @@ fun ChatMessages(
                             } else Modifier,
                         ),
                 ) {
+                    val thinkingIdx = if (msg is Msg.Assistant) precedingThinkingIndex(messages, idx) else -1
                     MessageCard(
                         msg,
                         toolResult = if (msg is Msg.ToolCall && idx + 1 < messages.size)
                             messages[idx + 1] as? Msg.ToolResult else null,
-                        thinking = if (msg is Msg.Assistant) precedingThinking(messages, idx) else null,
+                        thinking = thinkingIdx.takeIf { it >= 0 }?.let { messages[it] as? Msg.Thinking },
+                        // 展开初值：刚流式完的思考块（本运行内的 live preview）保持展开，历史载入的收起
+                        thinkingExpandedDefault = (thinkingIdx >= 0 && thinkingIdx == liveThinkingIndex) ||
+                            (msg is Msg.Thinking && idx == liveThinkingIndex),
                         onRequestPermission = { showPermDemo = true },
                     )
                 }
             }
             if (isStreaming) {
-                item { StreamingCard(streamDraft) }
+                item {
+                    StreamingCard(
+                        draft = streamDraft,
+                        thinking = streamThinking,
+                        thinkingStartedAt = streamThinkingStartedAt,
+                        thinkingLevel = streamThinkingLevel,
+                    )
+                }
             }
             item { Spacer(Modifier.height(4.dp)) }
         }
@@ -729,12 +752,13 @@ private fun MessageCard(
     msg: Msg,
     toolResult: Msg.ToolResult? = null,
     thinking: Msg.Thinking? = null,
+    thinkingExpandedDefault: Boolean = false,
     onRequestPermission: () -> Unit,
 ) {
     when (msg) {
         is Msg.User -> UserBubble(msg)
-        is Msg.Assistant -> AssistantCard(msg, thinking)
-        is Msg.Thinking -> ThinkingCard(msg)
+        is Msg.Assistant -> AssistantCard(msg, thinking, thinkingExpandedDefault)
+        is Msg.Thinking -> ThinkingCard(msg, thinkingExpandedDefault)
         is Msg.ToolCall -> ToolCallCard(msg, toolResult, onRequestPermission)
         is Msg.ToolResult -> ToolResultCard(msg)   // 仅未成对的结果走独立卡
         is Msg.Compaction -> CompactionCard(msg)
@@ -756,17 +780,17 @@ private fun followedByAssistant(messages: List<Msg>, idx: Int): Boolean {
     return false
 }
 
-/** idx 之前最近的思考块（跨工具卡/结果/压缩条目扫描；遇用户/助手消息即止，无则 null） */
-private fun precedingThinking(messages: List<Msg>, idx: Int): Msg.Thinking? {
+/** idx 之前最近的思考块**下标**（跨工具卡/结果/压缩条目扫描；遇用户/助手消息即止，无则 -1） */
+private fun precedingThinkingIndex(messages: List<Msg>, idx: Int): Int {
     var i = idx - 1
     while (i >= 0) {
-        when (val m = messages[i]) {
-            is Msg.Thinking -> return m
-            is Msg.User, is Msg.Assistant -> return null
+        when (messages[i]) {
+            is Msg.Thinking -> return i
+            is Msg.User, is Msg.Assistant -> return -1
             else -> i--
         }
     }
-    return null
+    return -1
 }
 
 // ───────────────────────────── 长按消息菜单（分支 + 复制 + 重新生成） ─────────────────────────────
@@ -1135,7 +1159,11 @@ private fun UserBubble(msg: Msg.User) {
  * 其下直接接 markdown 正文（思考不再单独成卡）。
  */
 @Composable
-private fun AssistantCard(msg: Msg.Assistant, thinking: Msg.Thinking? = null) {
+private fun AssistantCard(
+    msg: Msg.Assistant,
+    thinking: Msg.Thinking? = null,
+    thinkingExpandedDefault: Boolean = false,
+) {
     Column(Modifier.fillMaxWidth()) {
         if (!msg.model.isNullOrBlank()) {
             Text(
@@ -1146,7 +1174,12 @@ private fun AssistantCard(msg: Msg.Assistant, thinking: Msg.Thinking? = null) {
             )
         }
         if (thinking != null) {
-            ThinkingFold(thinking)
+            ThinkingDisclosure(
+                text = thinking.text,
+                level = thinking.level,
+                durationMs = thinking.durationMs,
+                expandedDefault = thinkingExpandedDefault,
+            )
         }
         MarkdownText(msg.markdown, modifier = Modifier.padding(top = 2.dp))
         if (msg.usage != null) {
@@ -1161,48 +1194,174 @@ private fun AssistantCard(msg: Msg.Assistant, thinking: Msg.Thinking? = null) {
     }
 }
 
+// ───────────────────────────── 思考折叠块 ─────────────────────────────
+
 /**
- * 回答内思考折叠行（2026-09-08 用户定）：一行「思考」+ 级别徽标 + v/^ 箭头，
- * 整行点击折叠/展开；展开后思考文本以弱化色显示，下方直接接回答正文。
+ * 思考折叠块（2026-09-12 按 **Hermes 桌面端** ThinkingDisclosure 重做）。
+ * 参考源：`hermes-agent/apps/desktop/src/components/assistant-ui/thread/message-parts.tsx`
+ * （ThinkingDisclosure / ReasoningAccordionGroup）+ `components/chat/scaffold-row.tsx`。
+ *
+ * - 标题行文案（Hermes i18n `zh.ts` assistant.thread.* 逐字）：流式中「思考中」、
+ *   完成后「思考了 3s」/ 不足 1s「思考了片刻」/ 无计时「已思考」（`formatElapsed`：<60s 为
+ *   `3s`，≥60s 为 `1:20`）；
+ * - 箭头在文字**右侧**（Hermes DisclosureRow：静息 alpha 0.4、展开 0.8），整行可点；
+ * - 正文 = 思考 markdown（Hermes `text-xs leading-snug text-muted-foreground/85`
+ *   → 12sp / 1.375 行高 / muted 85%，见 `MarkdownText(reasoning = true)`），无左边距（Hermes
+ *   正文与标题行齐平）；
+ * - 流式期间默认展开、正文限高 160dp（Hermes `max-h-40`）并**贴底跟随**增量；
+ *   结束保持展开（Hermes live preview latch，判据见 ChatState.liveThinkingIndex）；
+ * - 空思考不渲染（Hermes：无正文的思考组是纯噪音）。
+ *
+ * @param live 流式中：标题「思考中」+ 微光 + 右侧计时秒表、正文贴底
+ * @param elapsedSeconds 流式已用秒数（计时只在上屏层跑，落库用 durationMs）
+ * @param expandedDefault 展开初值（刚流式完 = true；历史载入 = false）
  */
 @Composable
-private fun ThinkingFold(thinking: Msg.Thinking) {
-    var expanded by remember { mutableStateOf(false) }
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .clickable(onClick = { expanded = !expanded })
-            .padding(vertical = 4.dp),
-    ) {
-        Text(
-            "思考",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            thinking.level,
-            style = MaterialTheme.typography.labelSmall,
-            fontFamily = MonoFont,
-            color = MaterialTheme.colorScheme.primary,
+private fun ThinkingDisclosure(
+    text: String,
+    level: String? = null,
+    live: Boolean = false,
+    elapsedSeconds: Int = 0,
+    durationMs: Long? = null,
+    expandedDefault: Boolean = false,
+) {
+    if (text.isBlank()) return
+    // null = 用户没动过；此时按默认展开态（流式中/刚流式完 = 展开，历史 = 收起）
+    var userOpen by remember { mutableStateOf<Boolean?>(null) }
+    val open = userOpen ?: (live || expandedDefault)
+
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .padding(start = 6.dp)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), CircleShape)
-                .padding(horizontal = 8.dp, vertical = 1.dp),
-        )
-        Icon(
-            if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-            null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 4.dp).size(16.dp),
-        )
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .clickable { userOpen = !open }
+                .padding(vertical = 4.dp),
+        ) {
+            ThinkingLabel(thoughtLabel(live, durationMs), live)
+            if (!level.isNullOrBlank()) {
+                Text(
+                    level,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = MonoFont,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .padding(start = 6.dp)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), CircleShape)
+                        .padding(horizontal = 8.dp, vertical = 1.dp),
+                )
+            }
+            Icon(
+                if (open) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (open) 0.8f else 0.4f),
+                modifier = Modifier.padding(start = 4.dp).size(14.dp),
+            )
+            // 流式计时（Hermes：trailing 只在 pending 时出现；结束后时长已并入标题文案）
+            if (live) {
+                Text(
+                    formatElapsedSeconds(elapsedSeconds.toLong()),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = MonoFont,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+            }
+        }
+        if (open) {
+            // 正文渲染：流式预览限高 160dp（Hermes `max-h-40`）并显示内容**尾部**
+            //（Hermes 预览是「滚到底跟随」，移动端等价形态 = 只露尾部）。
+            // ★ 绝不能用 verticalScroll：消息区在 LazyColumn 里、item 高度无界，
+            //   嵌套垂直滚动会直接抛 IllegalStateException（infinity maximum height
+            //   constraints；2026-09-12 实测崩溃一次）——限高 + 裁切即可，不引入滚动容器。
+            if (live) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 160.dp)
+                        .clipToBounds()
+                        .padding(bottom = 4.dp),
+                ) {
+                    MarkdownText(
+                        text,
+                        reasoning = true,
+                        modifier = Modifier.wrapContentHeight(unbounded = true, align = Alignment.Bottom),
+                    )
+                }
+            } else {
+                MarkdownText(text, reasoning = true, modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp))
+            }
+        }
     }
-    if (expanded) {
-        Text(
-            thinking.text,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 8.dp),
+}
+
+/** 思考标题文案（Hermes i18n 逐字：思考中 / 思考了 3s / 思考了片刻 / 已思考） */
+private fun thoughtLabel(live: Boolean, durationMs: Long?): String = when {
+    live -> "思考中"
+    durationMs == null -> "已思考"
+    durationMs < 1000L -> "思考了片刻"
+    else -> "思考了 ${formatElapsedSeconds(durationMs / 1000)}"
+}
+
+/** Hermes `formatElapsed`：<60s → `3s`；≥60s → `1:20` */
+private fun formatElapsedSeconds(seconds: Long): String =
+    if (seconds < 60) "${seconds}s"
+    else "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
+
+/**
+ * 思考标题文字（流式中带 Hermes `shimmer` 效果：一道高光从左向右扫过；静止态恒亮）。
+ */
+@Composable
+private fun ThinkingLabel(label: String, live: Boolean) {
+    val base = MaterialTheme.colorScheme.onSurfaceVariant
+    val style = MaterialTheme.typography.labelSmall
+    if (!live) {
+        Text(label, style = style, color = base)
+        return
+    }
+    var width by remember { mutableStateOf(120f) }
+    val transition = rememberInfiniteTransition(label = "thinkingShimmer")
+    val sweep by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1400, easing = LinearEasing)),
+        label = "thinkingSweep",
+    )
+    Text(
+        label,
+        style = style.copy(
+            // 高光带宽度 = 文字宽（扫过即整行亮一次）
+            brush = Brush.linearGradient(
+                colors = listOf(base.copy(alpha = 0.55f), base, base.copy(alpha = 0.55f)),
+                start = Offset(sweep * 2f * width - width, 0f),
+                end = Offset(sweep * 2f * width, 0f),
+            ),
+            alpha = 1f,
+        ),
+        modifier = Modifier.onSizeChanged { width = it.width.toFloat().coerceAtLeast(1f) },
+    )
+}
+
+/**
+ * 独立思考卡（其后没有助手回答时的兜底：进行中/被中止的交换）：
+ * 保留 Pient 的卡片外框（surfaceContainerLow 0.6 + 1dp 描边、6dp 圆角），
+ * 内部仍是同一份 [ThinkingDisclosure]，不再各写一套标题/箭头。
+ */
+@Composable
+private fun ThinkingCard(msg: Msg.Thinking, expandedDefault: Boolean = false) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
+            .padding(horizontal = 10.dp),
+    ) {
+        ThinkingDisclosure(
+            text = msg.text,
+            level = msg.level,
+            durationMs = msg.durationMs,
+            expandedDefault = expandedDefault,
         )
     }
 }
@@ -1223,68 +1382,6 @@ private fun userTextStyle(): TextStyle {
         fontSize = base.fontSize * (13f / 14f),
         lineHeight = 1.3.em,
     )
-}
-
-// ───────────────────────────── 思考块 ─────────────────────────────
-
-/**
- * 思考块（2026-09-08 对齐 pi-web ThinkingBlock）：1dp outlineVariant 边框、6dp 圆角、
- * 头部内边距 6×10（pi-web 6px 10px）、展开正文 10/10/8（pi-web 8px 10px）。
- * 保留 Pient 特有：级别徽标（pi thinking 五档）。
- */
-@Composable
-private fun ThinkingCard(msg: Msg.Thinking) {
-    var expanded by remember { mutableStateOf(false) }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp)),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = { expanded = !expanded })
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-        ) {
-            Icon(
-                Icons.Outlined.Psychology, null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(16.dp),
-            )
-            Text(
-                "思考",
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(start = 6.dp),
-            )
-            Text(
-                msg.level,
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = MonoFont,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .padding(start = 6.dp)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), CircleShape)
-                    .padding(horizontal = 8.dp, vertical = 1.dp),
-            )
-            Spacer(Modifier.weight(1f))
-            Icon(
-                if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
-            )
-        }
-        if (expanded) {
-            Text(
-                msg.text,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
-            )
-        }
-    }
 }
 
 // ───────────────────────────── 工具调用 ─────────────────────────────
@@ -1574,8 +1671,17 @@ private fun locatorPreview(msg: Msg): String = when (msg) {
     is Msg.Compaction -> "上下文已压缩 · 节省 ${msg.saved} tokens"
 }
 
+/**
+ * 流式回复卡（2026-09-09 实现；2026-09-12 加思考预览）：
+ * 思考先行（思考模式开启）——「思考中」+ 计时 + 实时正文贴底，随后才是逐片到达的回答正文与光标。
+ */
 @Composable
-private fun StreamingCard(draft: String) {
+private fun StreamingCard(
+    draft: String,
+    thinking: String = "",
+    thinkingStartedAt: Long = 0L,
+    thinkingLevel: String = "",
+) {
     val transition = rememberInfiniteTransition(label = "cursor")
     val cursorAlpha by transition.animateFloat(
         initialValue = 0f,
@@ -1583,8 +1689,26 @@ private fun StreamingCard(draft: String) {
         animationSpec = infiniteRepeatable(tween(450, easing = LinearEasing), RepeatMode.Reverse),
         label = "cursorAlpha",
     )
+    // 流式秒表：思考起点已知就按它计时（Hermes ActivityTimerText 口径，1s 一跳）
+    var elapsed by remember { mutableStateOf(0) }
+    LaunchedEffect(thinkingStartedAt) {
+        while (true) {
+            elapsed = if (thinkingStartedAt > 0L) {
+                ((System.currentTimeMillis() - thinkingStartedAt) / 1000).toInt()
+            } else 0
+            delay(500)
+        }
+    }
     Column(Modifier.fillMaxWidth().padding(top = 2.dp)) {
-        MarkdownText(draft)
+        if (thinking.isNotBlank()) {
+            ThinkingDisclosure(
+                text = thinking,
+                level = thinkingLevel.takeIf { it.isNotBlank() },
+                live = true,
+                elapsedSeconds = elapsed,
+            )
+        }
+        if (draft.isNotEmpty()) MarkdownText(draft)
         Text(
             "▍",
             color = MaterialTheme.colorScheme.primary.copy(alpha = cursorAlpha),
