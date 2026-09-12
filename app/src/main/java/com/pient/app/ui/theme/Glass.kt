@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -14,9 +15,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.Backdrop
@@ -51,6 +57,27 @@ import io.github.fletchmckee.liquid.rememberLiquidState
  */
 fun isPientGlassSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
+/**
+ * 玻璃采样血边（2026-09-12 修「纹理强度在边缘弱于中间」）。
+ *
+ * 根因：kyant backdrop 的模糊是在**面板节点自己的离屏缓冲**里做的——缓冲 = 面板尺寸 +
+ * 2×模糊半径（库内部按模糊半径自动膨胀，`BlurKt` 里 `padding = radius`），模糊核在缓冲里
+ * 采样，而采样源（`layerBackdrop` 捕获层）**只有窗口那么大**。于是贴窗口边缘的面板
+ * （贴底输入栏、贴边侧栏）膨胀环有一半落在捕获层之外 = 透明，模糊核把真实内容与「空」
+ * 平均 → 玻璃外缘 ≈模糊半径 宽的一圈**变淡**（透明度上升、模糊被稀释），底下未模糊的
+ * 真实界面直接透出：观感即「边缘的纹理强度弱于中间」。测量实证（磨砂 300 = 模糊 30dp，
+ * 板宽 1080px）：左/右贴边处采样缺失 ≈ 50%（泄漏带约 48px）、下缘距窗口底 67px 缺失 ≈9%
+ * （泄漏很轻）、上缘在窗口中部缺失 0%（无泄漏）——缺失比例 = 模糊核落在捕获层外的比例。
+ * Mdcito 的玻璃卡片四周都留白（不贴窗口边），永远踩不到这条边界，所以观感是均匀的。
+ *
+ * 修法：把捕获层做大一圈（吃满模糊半径），外圈用「背景内容的放大版」补满——等价于系统
+ * 模糊（SurfaceFlinger/RenderEffect）在图层边界做的 edge-clamp：向外延展边缘像素，只是
+ * 这里用等比放大器近似（放大 (w+2b)/w，外圈 ≈ 窗口边缘外 0~b 像素的内容）。玻璃面板的
+ * 模糊核从此在窗口外也有真实内容可采，不再与「空」平均 → 面板边缘与中部纹理强度一致。
+ * 取值 ≥ 最大模糊半径（磨砂 0..300 → 10..30dp），留余量给液态玻璃的折射位移。
+ */
+internal val GlassSamplingBleed = 36.dp
+
 /** 背景捕获层（kyant backdrop）：由 [PientGlassProvisioning] 装配 */
 val LocalGlassBackdrop = compositionLocalOf<Backdrop?> { null }
 
@@ -63,10 +90,15 @@ val LocalWaterGlassState = compositionLocalOf<LiquidState?> { null }
  * 层级：
  * ```
  * Box(fillMaxSize)
- *  ├─ Box.layerBackdrop(backdrop)   ← 背景捕获层（仅含背景，禁放玻璃组件）
- *  │    └─ Box.liquefiable { backgroundContent() }
- *  └─ content()                     ← 应用内容（玻璃组件在这里采样背景）
+ *  ├─ Box.glassCaptureBleed(GlassSamplingBleed)   ← 背景捕获层（尺寸 = 窗口 + 2×血边，禁放玻璃组件）
+ *  │    ├─ 放大版背景（只补外圈，见 GlassSamplingBleed）
+ *  │    └─ Box.padding(血边) ← 窗口矩形，原样背景（构图不变）+ liquefiable
+ *  └─ content()                                   ← 应用内容（玻璃组件在这里采样背景）
  * ```
+ *
+ * ★ 捕获层比窗口大一圈是必须的：贴窗口边缘的玻璃面板（贴底输入栏/贴边侧栏）模糊核会采到
+ *   面板外 ≤模糊半径 的像素，捕获层若只有窗口大小那里就是「空」→ 玻璃外缘变淡
+ *   （根因与实证见 [GlassSamplingBleed]）。
  *
  * @param backgroundContent 背景层内容（页面底色 + 自定义背景图/视频）
  * @param content 应用内容
@@ -78,6 +110,9 @@ fun PientGlassProvisioning(
 ) {
     val backdrop = if (isPientGlassSupported()) rememberLayerBackdrop() else null
     val waterGlassState = if (isPientGlassSupported()) rememberLiquidState() else null
+    // 背景内容也录一层（kyant 的 layerBackdrop 自带录制/尺寸处理），血边直接放大这一层绘制：
+    // 一次组合、两次绘制——视频背景也只有一路播放器，不会多出一个解码器。
+    val backgroundBackdrop = if (isPientGlassSupported()) rememberLayerBackdrop() else null
 
     CompositionLocalProvider(
         LocalGlassBackdrop provides backdrop,
@@ -89,17 +124,73 @@ fun PientGlassProvisioning(
             Box(
                 Modifier
                     .fillMaxSize()
-                    .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
+                    .glassCaptureBleed(GlassSamplingBleed)
+                    .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
+                    .then(
+                        if (waterGlassState != null) {
+                            Modifier.liquefiable(waterGlassState)
+                        } else {
+                            Modifier
+                        },
+                    ),
             ) {
-                if (waterGlassState != null) {
-                    Box(Modifier.fillMaxSize().liquefiable(waterGlassState)) { backgroundContent() }
-                } else {
+                // ① 血边：背景的放大版铺满整个「大盒」——窗口矩形内会被 ② 原样覆盖，
+                //    实际只在外圈可见（外圈在屏幕外，只有玻璃的模糊会采到它）。
+                val bleedLayer = backgroundBackdrop?.graphicsLayer
+                if (bleedLayer != null && backdrop != null) {
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .drawWithContent {
+                                val bleed = GlassSamplingBleed.toPx()
+                                val scaleX = size.width / (size.width - 2f * bleed)
+                                val scaleY = size.height / (size.height - 2f * bleed)
+                                // 以 (0,0) 为基点放大：窗口矩形 → 正好铺满大盒
+                                withTransform({
+                                    scale(scaleX = scaleX, scaleY = scaleY, pivot = Offset.Zero)
+                                }) {
+                                    drawLayer(bleedLayer)
+                                }
+                            },
+                    )
+                }
+                // ② 窗口矩形：背景原样绘制（构图与改造前逐像素一致）
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(GlassSamplingBleed)
+                        .then(
+                            if (backgroundBackdrop != null) {
+                                Modifier.layerBackdrop(backgroundBackdrop)
+                            } else {
+                                Modifier
+                            },
+                        ),
+                ) {
                     backgroundContent()
                 }
             }
             content()
         }
     }
+}
+
+/**
+ * 把内容放到一个「比窗口大 2×[bleed]」的盒子里绘制，但对外仍上报窗口尺寸
+ * （布局不受影响）：用于给背景捕获层留出模糊核需要的采样余量。
+ */
+private fun Modifier.glassCaptureBleed(bleed: Dp): Modifier = this.layout { measurable, constraints ->
+    if (!constraints.hasBoundedWidth || !constraints.hasBoundedHeight) {
+        val placeable = measurable.measure(constraints)
+        return@layout layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    }
+    val bleedPx = bleed.roundToPx()
+    val width = constraints.maxWidth
+    val height = constraints.maxHeight
+    val placeable = measurable.measure(
+        Constraints.fixed(width + bleedPx * 2, height + bleedPx * 2),
+    )
+    layout(width, height) { placeable.place(-bleedPx, -bleedPx) }
 }
 
 /**
