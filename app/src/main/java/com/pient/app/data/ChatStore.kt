@@ -56,6 +56,10 @@ object ChatStore {
 
             val messages = JSONObject()
             state.messagesBySession.forEach { (id, list) ->
+                // 有条目树的会话不再重复写扁平消息流：条目树是权威表示（加载时按 leaf 重建），
+                // 扁平流只服务于「2026-09-11 之前的老记录」的迁移路径。
+                // 大会话（几千条）能省掉近一半的序列化与文件体积（2026-09-12）。
+                if (state.entriesBySession[id]?.isNotEmpty() == true) return@forEach
                 val arr = JSONArray()
                 list.forEach { m -> arr.put(serializeMsg(m)) }
                 messages.put(id, arr)
@@ -172,8 +176,15 @@ object ChatStore {
             // 条目树优先：有树 → 按 leaf 重建上屏消息流（记录里的 messages 只是派生缓存）；
             // 无树（2026-09-11 之前的老记录）→ 按扁平消息流迁移成线性链
             for (sid in state.messagesBySession.keys + state.entriesBySession.keys) {
-                if (state.entriesBySession[sid]?.isNotEmpty() == true) state.rebuildMessagesFromLeaf(sid)
-                else state.migrateEntriesIfNeeded(sid)
+                if (state.entriesBySession[sid]?.isNotEmpty() == true) {
+                    // 兜底：树在但 leaf 丢了（异常记录）→ 取末条目，避免会话读成空
+                    if (state.leafBySession[sid] == null) {
+                        state.leafBySession[sid] = state.entriesBySession[sid]?.lastOrNull()?.id
+                    }
+                    state.rebuildMessagesFromLeaf(sid)
+                } else {
+                    state.migrateEntriesIfNeeded(sid)
+                }
             }
 
             state.currentProject = root.optString("currentProject").takeIf { it.isNotEmpty() }
