@@ -33,6 +33,8 @@ import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Shield
@@ -61,6 +63,7 @@ import com.pient.app.data.RootGateway
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ShizukuGateway
 import com.pient.app.data.SystemPermissions
+import com.pient.app.data.ToolPolicy
 import com.pient.app.ui.components.ArcSpinner
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.components.PientSegmented
@@ -352,6 +355,65 @@ fun SystemPermissionScreen(nav: NavController) {
                             onOverlay = { grantOverlay() },
                             onShizuku = { grantShizuku() },
                             onRoot = { requestRoot() },
+                        )
+                    }
+                }
+            }
+
+            // ═══════════ 工具级授权（开发计划 §6.3：全局默认 + 单工具例外） ═══════════
+            SectionHeader("工具级授权", icon = Icons.Outlined.Shield)
+            PermissionCardBox {
+                Column(Modifier.padding(14.dp)) {
+                    var toolDefault by remember { mutableStateOf(ToolPolicy.ASK) }
+                    var toolPolicies by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+                    var expandedPolicyKey by remember { mutableStateOf<String?>(null) }
+                    fun reloadPolicies() {
+                        val (d, m) = ToolPolicy.snapshot(context)
+                        toolDefault = d
+                        toolPolicies = m
+                    }
+                    fun applyToolPolicy(tool: String?, policy: String) {
+                        if (tool == null) {
+                            ToolPolicy.setDefault(context, policy)
+                        } else {
+                            ToolPolicy.setToolPolicy(context, tool, policy)
+                        }
+                        reloadPolicies()
+                        expandedPolicyKey = null
+                        toast("已设为「${policyLabel(policy)}」")
+                    }
+                    LaunchedEffect(Unit) { reloadPolicies() }
+
+                    GroupLabel("调用策略", "权限守门扩展执行")
+                    Text(
+                        "AI 调用工具前按这里的策略执行：允许 = 直接执行；每次询问 = 弹三选授权；" +
+                            "禁止 = 直接拦下并把原因回给模型。授权弹窗里的「始终允许」也写到这里。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                    ToolPolicyRow(
+                        title = "默认策略",
+                        desc = "未单独设置的工具都按它执行",
+                        policy = toolDefault,
+                        expanded = expandedPolicyKey == KEY_DEFAULT_POLICY,
+                        onClick = {
+                            expandedPolicyKey =
+                                if (expandedPolicyKey == KEY_DEFAULT_POLICY) null else KEY_DEFAULT_POLICY
+                        },
+                        onPick = { p -> applyToolPolicy(null, p) },
+                    )
+                    ToolPolicy.TOOLS.forEach { tool ->
+                        CardDivider()
+                        ToolPolicyRow(
+                            title = tool,
+                            desc = TOOL_DESCS[tool].orEmpty(),
+                            policy = toolPolicies[tool] ?: toolDefault,
+                            expanded = expandedPolicyKey == tool,
+                            onClick = {
+                                expandedPolicyKey = if (expandedPolicyKey == tool) null else tool
+                            },
+                            onPick = { p -> applyToolPolicy(tool, p) },
                         )
                     }
                 }
@@ -689,6 +751,123 @@ private fun WizardStepRow(
 }
 
 // ─────────────────────────── 卡片容器 ───────────────────────────
+
+// ─────────────────────────── 工具级授权行（开发计划 §6.3） ───────────────────────────
+
+private const val KEY_DEFAULT_POLICY = "__default__"
+
+/** 七工具一句话说明（顺序同 ToolPolicy.TOOLS） */
+private val TOOL_DESCS = mapOf(
+    "read" to "读取文件",
+    "write" to "写文件",
+    "edit" to "改文件",
+    "bash" to "执行命令",
+    "grep" to "内容搜索",
+    "find" to "按名查找",
+    "ls" to "列目录",
+)
+
+private fun policyLabel(policy: String): String = when (policy) {
+    ToolPolicy.ALLOW -> "允许"
+    ToolPolicy.FORBID -> "禁止"
+    else -> "每次询问"
+}
+
+/** 策略行：标题 + 说明 + 当前策略 + 展开箭头；展开后三选（允许 / 每次询问 / 禁止，选中打勾） */
+@Composable
+private fun ToolPolicyRow(
+    title: String,
+    desc: String,
+    policy: String,
+    expanded: Boolean,
+    onClick: () -> Unit,
+    onPick: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(vertical = 10.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                if (desc.isNotBlank()) {
+                    Text(
+                        desc,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+            }
+            Text(
+                policyLabel(policy),
+                style = MaterialTheme.typography.labelMedium,
+                color = when (policy) {
+                    ToolPolicy.ALLOW -> MaterialTheme.colorScheme.primary
+                    ToolPolicy.FORBID -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            Icon(
+                if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 6.dp).size(18.dp),
+            )
+        }
+        if (expanded) {
+            PolicyOptionRow("允许", "直接执行，不再询问", ToolPolicy.ALLOW, policy, onPick)
+            PolicyOptionRow("每次询问", "每次调用都弹授权（默认）", ToolPolicy.ASK, policy, onPick)
+            PolicyOptionRow("禁止", "直接拦下，并把原因回给模型", ToolPolicy.FORBID, policy, onPick)
+        }
+    }
+}
+
+/** 策略选项行（缩进一格；选中 = 主色 + 对勾，整行可点） */
+@Composable
+private fun PolicyOptionRow(
+    label: String,
+    desc: String,
+    value: String,
+    current: String,
+    onPick: (String) -> Unit,
+) {
+    val selected = value == current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onPick(value) }
+            .padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                desc,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (selected) {
+            Icon(
+                Icons.Outlined.CheckCircle, null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
 
 /** 分组卡片容器（与设置页 SettingsGroup 同款：surfaceContainerLow + 16dp 圆角 + 描边） */
 @Composable
