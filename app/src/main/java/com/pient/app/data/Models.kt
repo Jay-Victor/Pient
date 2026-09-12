@@ -753,6 +753,10 @@ enum class ReasoningFormat(val label: String, val wire: String) {
     QWEN("通义千问", "开：enable_thinking=true；关：enable_thinking=false"),
     /** 硅基流动等：enable_thinking + thinking_budget */
     SILICONFLOW("硅基流动", "开：enable_thinking=true + thinking_budget；关：enable_thinking=false"),
+    /** Anthropic Messages 协议（官方 / MiniMax 等以 /anthropic 结尾的端点） */
+    ANTHROPIC("Anthropic", "开：thinking.enabled + budget_tokens；关：thinking.disabled"),
+    /** OpenRouter：reasoning 对象（开：reasoning.effort；关：reasoning.enabled=false） */
+    OPENROUTER("OpenRouter", "开：reasoning.effort=档位；关：reasoning.enabled=false"),
 }
 
 // ─────────────────────────────────────────────────────────────

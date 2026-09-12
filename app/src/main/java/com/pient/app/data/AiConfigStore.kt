@@ -124,8 +124,12 @@ object AiConfigStore {
                     topPEnabled = o.optBoolean("topPEnabled", false),
                     topPValue = o.optString("topPValue", "1.0"),
                     reasoningFormat = runCatching {
-                        ReasoningFormat.valueOf(o.optString("reasoningFormat", "AUTO"))
-                    }.getOrDefault(ReasoningFormat.AUTO),
+                        ReasoningFormat.valueOf(o.optString("reasoningFormat", ""))
+                    }.getOrNull()?.takeUnless { it == ReasoningFormat.AUTO }
+                        // 老配置缺该字段、或存的还是 AUTO（默认态而非用户主动选择）：
+                        // 已知服务商一律采用服务商目录里的预设写法，自定义服务商才留在 AUTO
+                        ?: ProviderCatalog.byId[id]?.reasoningFormat
+                        ?: ReasoningFormat.AUTO,
                 )
             }
         } catch (e: Exception) {

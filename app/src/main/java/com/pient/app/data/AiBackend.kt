@@ -270,6 +270,18 @@ object AiBackend {
                 body.put("enable_thinking", thinkingLevel != null)
                 if (thinkingLevel != null) body.put("thinking_budget", thinkingBudget(thinkingLevel))
             }
+            // Anthropic 写法在 OpenAI 兼容端点上的等价形态（中转/代理端常见）
+            ReasoningFormat.ANTHROPIC ->
+                body.put("thinking", JSONObject().put("type", if (thinkingLevel != null) "enabled" else "disabled"))
+            ReasoningFormat.OPENROUTER ->
+                body.put(
+                    "reasoning",
+                    if (thinkingLevel != null) {
+                        JSONObject().put("effort", reasoningEffort(thinkingLevel))
+                    } else {
+                        JSONObject().put("enabled", false)
+                    },
+                )
         }
     }
 

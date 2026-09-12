@@ -21,6 +21,11 @@ data class ProviderInfo(
     val endpoints: List<String>,
     /** 暗色主题专用 logo（0 = 复用 logoRes）。用于固有色在暗色卡片上不可见的图标 */
     @DrawableRes val logoResDark: Int = 0,
+    /**
+     * 该服务商确定的思考参数写法（2026-09-12）：新增服务商时预置为 `ProviderConfig.reasoningFormat`；
+     * AUTO 只留给「自定义」服务商（按模型名推断）。
+     */
+    val reasoningFormat: ReasoningFormat = ReasoningFormat.NONE,
 )
 
 object ProviderCatalog {
@@ -35,19 +40,21 @@ object ProviderCatalog {
         monoLogo = true,
         defaultEndpoint = "",
         endpoints = emptyList(),
+        // 自定义服务商没有预设：按模型名推断（识别不出则不发送）
+        reasoningFormat = ReasoningFormat.AUTO,
     )
 
     val all: List<ProviderInfo> = listOf(
         // ── OpenAI 系 ──
         p("openai", "OpenAI", R.drawable.provider_openai, mono = true,
-            "https://api.openai.com/v1"),
+            "https://api.openai.com/v1", reasoningFormat = ReasoningFormat.OPENAI),
         p("openai-codex", "OpenAI Codex", R.drawable.provider_openai, mono = true,
-            "https://chatgpt.com/backend-api"),
+            "https://chatgpt.com/backend-api", reasoningFormat = ReasoningFormat.OPENAI),
         p("azure-openai-responses", "Azure OpenAI", R.drawable.provider_azure, mono = false,
-            "https://<resource>.openai.azure.com/openai"),
+            "https://<resource>.openai.azure.com/openai", reasoningFormat = ReasoningFormat.OPENAI),
         // ── Anthropic 系 ──
         p("anthropic", "Anthropic", R.drawable.provider_anthropic, mono = true,
-            "https://api.anthropic.com"),
+            "https://api.anthropic.com", reasoningFormat = ReasoningFormat.ANTHROPIC),
         p("amazon-bedrock", "Amazon Bedrock", R.drawable.provider_amazon_bedrock, mono = false,
             "https://bedrock-runtime.<region>.amazonaws.com"),
         // ── Google 系 ──
@@ -57,30 +64,33 @@ object ProviderCatalog {
             "https://<location>-aiplatform.googleapis.com/v1"),
         // ── 国内大模型 ──
         p("deepseek", "DeepSeek", R.drawable.provider_deepseek, mono = false,
-            "https://api.deepseek.com"),
+            "https://api.deepseek.com", reasoningFormat = ReasoningFormat.DEEPSEEK),
         p("kimi-coding", "Kimi For Coding", R.drawable.provider_kimi_coding, mono = false,
-            "https://api.kimi.com/coding",
+            "https://api.kimi.com/coding", reasoningFormat = ReasoningFormat.DEEPSEEK,
             logoResDark = R.drawable.provider_kimi_coding_dark),
         p("moonshotai", "Moonshot AI", R.drawable.provider_moonshot, mono = true,
-            "https://api.moonshot.ai/v1"),
+            "https://api.moonshot.ai/v1", reasoningFormat = ReasoningFormat.DEEPSEEK),
         p("moonshotai-cn", "Moonshot AI CN", R.drawable.provider_moonshot, mono = true,
-            "https://api.moonshot.cn/v1"),
+            "https://api.moonshot.cn/v1", reasoningFormat = ReasoningFormat.DEEPSEEK),
         p("minimax", "MiniMax", R.drawable.provider_minimax, mono = false,
-            "https://api.minimax.io/anthropic"),
+            "https://api.minimax.io/anthropic", reasoningFormat = ReasoningFormat.ANTHROPIC),
         p("minimax-cn", "MiniMax CN", R.drawable.provider_minimax, mono = false,
-            "https://api.minimaxi.com/anthropic"),
+            "https://api.minimaxi.com/anthropic", reasoningFormat = ReasoningFormat.ANTHROPIC),
         p("ant-ling", "Ant Ling", R.drawable.provider_ant_ling, mono = false,
             "https://api.ant-ling.com/v1"),
         p("zai", "Z.AI", R.drawable.provider_zai, mono = true,
-            "https://api.z.ai/api/coding/paas/v4"),
+            "https://api.z.ai/api/coding/paas/v4", reasoningFormat = ReasoningFormat.ZAI),
         p("zai-coding-cn", "Z.AI Coding CN", R.drawable.provider_zai, mono = true,
-            "https://open.bigmodel.cn/api/coding/paas/v4"),
+            "https://open.bigmodel.cn/api/coding/paas/v4", reasoningFormat = ReasoningFormat.ZAI),
         p("qwen-token-plan", "Qwen Token Plan", R.drawable.provider_qwen, mono = false,
-            "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"),
+            "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+            reasoningFormat = ReasoningFormat.QWEN),
         p("qwen-token-plan-cn", "Qwen Token Plan CN", R.drawable.provider_qwen, mono = false,
-            "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"),
+            "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            reasoningFormat = ReasoningFormat.QWEN),
         p("qwen-token-plan-individual", "Qwen Token Plan Individual", R.drawable.provider_qwen, mono = false,
-            "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"),
+            "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+            reasoningFormat = ReasoningFormat.QWEN),
         p("xiaomi", "Xiaomi", R.drawable.provider_xiaomi, mono = true,
             "https://api.xiaomimimo.com/v1"),
         p("xiaomi-token-plan-ams", "Xiaomi Token Plan AMS", R.drawable.provider_xiaomi, mono = true,
@@ -97,8 +107,11 @@ object ProviderCatalog {
         p("groq", "Groq", R.drawable.provider_groq, mono = true,
             "https://api.groq.com/openai/v1"),
         // ── 聚合 / 网关 / 推理平台 ──
+        // 说明（2026-09-12）：以上/以下未显式标注的服务商一律 **NONE = 不发送思考参数**——
+        // 它们的思考参数写法未核实（或模型架构性不可关，如 Gemini 3 系），宁可开关只作用于展示，
+        // 也不猜字段导致 400；用户可在配置页「思考设置」里按需覆盖为具体写法。
         p("openrouter", "OpenRouter", R.drawable.provider_openrouter, mono = true,
-            "https://openrouter.ai/api/v1"),
+            "https://openrouter.ai/api/v1", reasoningFormat = ReasoningFormat.OPENROUTER),
         p("github-copilot", "GitHub Copilot", R.drawable.provider_github_copilot, mono = true,
             "https://api.individual.githubcopilot.com"),
         p("cloudflare-ai-gateway", "Cloudflare AI Gateway", R.drawable.provider_cloudflare, mono = false,
@@ -107,7 +120,8 @@ object ProviderCatalog {
                 "https://gateway.ai.cloudflare.com/v1/{ACCOUNT_ID}/{GATEWAY_ID}/anthropic",
                 "https://gateway.ai.cloudflare.com/v1/{ACCOUNT_ID}/{GATEWAY_ID}/openai",
                 "https://gateway.ai.cloudflare.com/v1/{ACCOUNT_ID}/{GATEWAY_ID}/compat",
-            )),
+            ),
+            reasoningFormat = ReasoningFormat.ANTHROPIC),
         p("cloudflare-workers-ai", "Cloudflare Workers AI", R.drawable.provider_cloudflare, mono = false,
             "https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1"),
         p("vercel-ai-gateway", "Vercel AI Gateway", R.drawable.provider_vercel, mono = true,
@@ -142,9 +156,16 @@ object ProviderCatalog {
         mono: Boolean,
         defaultEndpoint: String,
         endpoints: List<String> = emptyList(),
-        @DrawableRes logoResDark: Int = 0) = ProviderInfo(
+        @DrawableRes logoResDark: Int = 0,
+        /**
+         * 该服务商**确定的**思考参数写法（2026-09-12）：新增该服务商时直接按它预置
+         * `ProviderConfig.reasoningFormat`，用户不必自己选。写法来源 = pi `thinkingFormat`
+         * 枚举 + Operit 各 Provider 类；拿不准的一律 NONE（不发参数，绝不猜）。
+         */
+        reasoningFormat: ReasoningFormat = ReasoningFormat.NONE) = ProviderInfo(
         id, name, logoRes, mono, defaultEndpoint,
         if (endpoints.isEmpty()) listOf(defaultEndpoint) else endpoints,
         logoResDark,
+        reasoningFormat,
     )
 }
