@@ -34,7 +34,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.pient.app.ui.components.DividerLine
@@ -47,11 +46,10 @@ import com.pient.app.ui.components.SettingsRow
  * 样式与旧版设置页卡片一致：surfaceContainerLow + 16dp 圆角 + 描边）；
  * 条目 = 左侧图标+主标题+副标题小字，右侧 ">" 箭头。
  * 分组：个性化（主题与外观/语言设置/行为设置）、AI模型配置（服务商与模型配置）、
- * 数据与权限（系统权限设置/项目记录管理/模型用量信息，原型占位）、关于Pient（关于）。
+ * 数据与权限（系统权限设置/项目记录管理/模型用量信息）、关于Pient（关于）。
  */
 @Composable
 fun SettingsScreen(nav: NavController) {
-    val context = LocalContext.current
     Column(Modifier.fillMaxSize()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -120,7 +118,7 @@ fun SettingsScreen(nav: NavController) {
                     icon = Icons.Outlined.AdminPanelSettings,
                     title = "系统权限设置",
                     subtitle = "标准 · 调试 · Root",
-                    onClick = { toast(context, "系统权限设置") },
+                    onClick = { nav.navigate("system_permissions") },
                 )
                 DividerLine()
                 SettingsRow(
@@ -149,11 +147,6 @@ fun SettingsScreen(nav: NavController) {
             }
         }
     }
-}
-
-/** 原型占位页提示（数据与权限三行点击后的占位反馈，后续接入真实页面后移除） */
-private fun toast(context: android.content.Context, title: String) {
-    android.widget.Toast.makeText(context, "「$title」开发中，敬请期待", android.widget.Toast.LENGTH_SHORT).show()
 }
 
 /** 设置分组：分组标题（图标+文字，靠左）+ 功能卡片容器（收纳该组全部条目） */

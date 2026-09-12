@@ -44,6 +44,7 @@ import com.pient.app.ui.settings.LanguageSettingsScreen
 import com.pient.app.ui.settings.ModelConfigScreen
 import com.pient.app.ui.settings.ProjectManagementScreen
 import com.pient.app.ui.settings.SettingsScreen
+import com.pient.app.ui.settings.SystemPermissionScreen
 import com.pient.app.ui.settings.ThemeSettingsScreen
 import com.pient.app.ui.settings.UsageScreen
 import com.pient.app.ui.skills.SkillSearchScreen
@@ -139,6 +140,12 @@ fun PientApp() {
     LaunchedEffect(Unit) {
         snapshotFlow { SettingsStore.drawerMode }
             .collect { SettingsStore.saveDrawerMode(context) }
+    }
+
+    // 权限档位持久化（系统权限设置页 / 首启引导页选定），重启后保持
+    LaunchedEffect(Unit) {
+        snapshotFlow { SettingsStore.permissionTier }
+            .collect { SettingsStore.savePermissionTier(context) }
     }
 
     // 开屏设置持久化（行为设置：是否播放开屏加载动画），重启后保持
@@ -306,6 +313,9 @@ fun PientApp() {
                     }
                     composable("project_management") {
                         ProjectManagementScreen(nav = nav, chatState = chatState)
+                    }
+                    composable("system_permissions") {
+                        SystemPermissionScreen(nav = nav)
                     }
                     composable("about") {
                         AboutScreen(nav = nav)

@@ -1,14 +1,5 @@
 package com.pient.app.ui.onboarding
 
-import android.Manifest
-import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.net.Uri
-import android.os.Build
-import android.os.Environment
-import android.os.PowerManager
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -53,7 +44,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -73,12 +63,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pient.app.R
+import com.pient.app.data.PermissionTier
+import com.pient.app.data.SettingsStore
+import com.pient.app.data.SystemPermissions
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.theme.DarkBrandPurple
 import com.pient.app.ui.theme.LightBrandPurple
 import com.pient.app.ui.theme.LocalPientIsDark
 import com.pient.app.ui.theme.PientPanel
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.launch
@@ -228,52 +220,30 @@ private data class PermItem(
     val name: String,
     val desc: String,
     val icon: ImageVector,
+    /** 该权限的实时状态取自 SystemPermissions.Status（唯一状态源） */
+    val granted: (SystemPermissions.Status) -> Boolean,
 )
 
 private val permItems = listOf(
-    PermItem("storage", "存储权限", "读取项目文件 / 会话数据", Icons.Outlined.Storage),
-    PermItem("battery", "电池优化豁免", "保活 / 后台任务", Icons.Outlined.BatterySaver),
-    PermItem("location", "位置权限", "位置相关工具调用", Icons.Outlined.LocationOn),
-    PermItem("overlay", "悬浮窗权限", "悬浮终端 / 快捷面板", Icons.Outlined.OpenInFull),
+    PermItem("storage", "存储权限", "读取项目文件 / 会话数据", Icons.Outlined.Storage, granted = { it.storage }),
+    PermItem("battery", "电池优化豁免", "保活 / 后台任务", Icons.Outlined.BatterySaver, granted = { it.battery }),
+    PermItem("location", "位置权限", "位置相关工具调用", Icons.Outlined.LocationOn, granted = { it.location }),
+    PermItem("overlay", "悬浮窗权限", "悬浮终端 / 快捷面板", Icons.Outlined.OpenInFull, granted = { it.overlay }),
 )
 
 @Composable
 private fun PermissionPage(onNext: () -> Unit, onBackToWelcome: () -> Unit) {
     val context = LocalContext.current
-    val granted = remember { mutableStateMapOf<String, Boolean>() }
+    // 四项基础权限的检查与授权入口统一走 SystemPermissions
+    //（与设置页「系统权限设置」共用一份实现 —— 同一语义一份实现原则）
+    var status by remember { mutableStateOf(SystemPermissions.status(context)) }
     var checking by remember { mutableStateOf(false) }
     var lastCheck by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     // ── 真实权限状态检查（Operit PermissionGuideViewModel.checkPermissions 同款口径）──
     fun checkPermissions() {
-        // 存储：Android 11+ 走「所有文件访问」；10 及以下走运行时权限
-        val hasStorage = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Environment.isExternalStorageManager()
-        } else {
-            ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
-                PackageManager.PERMISSION_GRANTED
-        }
-        val hasBattery = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            (context.getSystemService(Context.POWER_SERVICE) as PowerManager)
-                .isIgnoringBatteryOptimizations(context.packageName)
-        } else {
-            true
-        }
-        val hasLocation =
-            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
-                PackageManager.PERMISSION_GRANTED ||
-                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
-                PackageManager.PERMISSION_GRANTED
-        val hasOverlay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Settings.canDrawOverlays(context)
-        } else {
-            true
-        }
-        granted["storage"] = hasStorage
-        granted["battery"] = hasBattery
-        granted["location"] = hasLocation
-        granted["overlay"] = hasOverlay
+        status = SystemPermissions.status(context)
     }
 
     // Android 10 及以下：存储运行时权限请求（Operit storagePermissionLauncher 同款）
@@ -288,58 +258,22 @@ private fun PermissionPage(onNext: () -> Unit, onBackToWelcome: () -> Unit) {
 
     // ── 系统设置页请求（Operit PermissionGuideScreen 同款：intent 直接跳设置）──
     fun requestStorage() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            try {
-                context.startActivity(
-                    Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-                        .setData(Uri.parse("package:${context.packageName}")),
-                )
-            } catch (e: Exception) {
-                // 回退到通用「所有文件访问」设置页
-                try {
-                    context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                } catch (e2: Exception) {
-                    Toast.makeText(context, "无法打开存储权限设置", Toast.LENGTH_SHORT).show()
-                }
-            }
-        } else {
-            storageLauncher.launch(
-                arrayOf(
-                    Manifest.permission.READ_EXTERNAL_STORAGE,
-                    Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                ),
-            )
+        if (SystemPermissions.needsRuntimeStorage) {
+            storageLauncher.launch(SystemPermissions.runtimeStoragePermissions)
+        } else if (!SystemPermissions.openStorageSettings(context)) {
+            Toast.makeText(context, "无法打开存储权限设置", Toast.LENGTH_SHORT).show()
         }
     }
 
     fun requestOverlay() {
-        try {
-            // 直接使用包名跳转到悬浮窗权限页面
-            context.startActivity(
-                Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:${context.packageName}"),
-                ),
-            )
-        } catch (e: Exception) {
+        if (!SystemPermissions.openOverlaySettings(context)) {
             Toast.makeText(context, "无法打开悬浮窗权限设置", Toast.LENGTH_SHORT).show()
         }
     }
 
     fun requestBattery() {
-        try {
-            // 直接请求忽略电池优化，无需用户搜索应用
-            context.startActivity(
-                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                    .setData(Uri.parse("package:${context.packageName}")),
-            )
-        } catch (e: Exception) {
-            // 直接请求失败时回退到电池优化设置列表页
-            try {
-                context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-            } catch (e2: Exception) {
-                Toast.makeText(context, "无法打开电池优化设置", Toast.LENGTH_SHORT).show()
-            }
+        if (!SystemPermissions.openBatterySettings(context)) {
+            Toast.makeText(context, "无法打开电池优化设置", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -369,7 +303,7 @@ private fun PermissionPage(onNext: () -> Unit, onBackToWelcome: () -> Unit) {
                     0 -> onBackToWelcome()
                     2 -> {
                         checkPermissions()
-                        if (granted.values.all { it }) {
+                        if (status.allReady) {
                             onNext()
                         } else {
                             Toast.makeText(context, "请先完成基础权限授权", Toast.LENGTH_SHORT).show()
@@ -387,22 +321,16 @@ private fun PermissionPage(onNext: () -> Unit, onBackToWelcome: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             permItems.forEach { item ->
-                val ok = granted[item.key] == true
                 PermissionCard(
                     icon = item.icon,
                     name = item.name,
                     desc = item.desc,
-                    granted = ok,
+                    granted = item.granted(status),
                     onGrant = {
                         when (item.key) {
                             "storage" -> requestStorage()
                             "battery" -> requestBattery()
-                            "location" -> locationLauncher.launch(
-                                arrayOf(
-                                    Manifest.permission.ACCESS_FINE_LOCATION,
-                                    Manifest.permission.ACCESS_COARSE_LOCATION,
-                                ),
-                            )
+                            "location" -> locationLauncher.launch(SystemPermissions.runtimeLocationPermissions)
                             else -> requestOverlay()
                         }
                     },
@@ -412,7 +340,7 @@ private fun PermissionPage(onNext: () -> Unit, onBackToWelcome: () -> Unit) {
 
         // 检查权限状态（2026-09-01 重做交互：点击 → 重检动画 → 结果摘要；不再只显示时间）
         // 状态行：未检查 / 检查中 / 上次检查结果
-        val ready = permItems.count { granted[it.key] == true }
+        val ready = status.readyCount
         Text(
             when {
                 checking -> "正在检查权限状态…"
@@ -518,11 +446,8 @@ private fun SystemPermissionPage(
 ) {
     var selected by rememberSaveable { mutableIntStateOf(0) }
 
-    val options = listOf(
-        Triple("标准权限", "使用系统标准权限模型：网络、存储、通知等常规授权，无需安装任何额外工具，覆盖日常 Agent 任务所需能力", "推荐"),
-        Triple("调试权限", "借助 Shizuku 获得 ADB 级调试能力：UI 自动化、应用管理、系统设置读写；无需解锁 Bootloader，设备重启后需重新激活", "需安装 Shizuku"),
-        Triple("Root 权限", "以 Root 身份运行：chroot 容器、系统级文件操作与完整工具链；权限等级最高、能力全部解锁，安全风险需自行评估", "⚠ 需设备已 Root"),
-    )
+    // 三档文案唯一出处 = PermissionTier（设置页「系统权限设置」共用同一份，避免两处漂移）
+    val tiers = PermissionTier.values()
 
     Column(
         modifier = Modifier
@@ -549,7 +474,7 @@ private fun SystemPermissionPage(
                 .padding(top = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            options.forEachIndexed { i, opt ->
+            tiers.forEachIndexed { i, tier ->
                 val sel = i == selected
                 val borderColor = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
                 Column(
@@ -566,13 +491,13 @@ private fun SystemPermissionPage(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            opt.first,
+                            tier.title,
                             style = MaterialTheme.typography.labelLarge,
                             color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
                             modifier = Modifier.weight(1f),
                         )
                         // 推荐徽标
-                        if (opt.third == "推荐") {
+                        if (tier.recommended) {
                             Text(
                                 "〔推荐〕",
                                 style = MaterialTheme.typography.labelSmall,
@@ -594,24 +519,17 @@ private fun SystemPermissionPage(
                         )
                     }
                     Text(
-                        opt.second,
+                        tier.desc,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp),
                     )
-                    if (opt.third == "需安装 Shizuku") {
+                    if (!tier.recommended) {
                         Text(
-                            opt.third,
+                            tier.badge,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
-                    if (opt.third.startsWith("⚠")) {
-                        Text(
-                            opt.third,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.error,
+                            color = if (tier.warn) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 4.dp),
                         )
                     }
@@ -621,7 +539,11 @@ private fun SystemPermissionPage(
 
         PientButton(
             "确定，进入 Pient",
-            onClick = onDone,
+            onClick = {
+                // 选定档位写入设置（首启后可在「设置 → 数据与权限 → 系统权限设置」更改）
+                SettingsStore.permissionTier = tiers[selected]
+                onDone()
+            },
             modifier = Modifier.fillMaxWidth(),
             height = 48,
         )

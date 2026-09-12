@@ -106,6 +106,10 @@ object SettingsStore {
     var language by mutableStateOf("zh-CN")
     var drawerMode by mutableStateOf(DrawerMode.SLIDE)
 
+    // ── 权限档位（2026-09-12）：L0 标准 / L1 调试(Shizuku) / L2 Root ──
+    //   首启引导页「系统权限选项页」选定、设置页「系统权限设置」页可改；语义见 data/SystemPermissions.kt
+    var permissionTier by mutableStateOf(PermissionTier.STANDARD)
+
     // ── 开屏设置（2026-09-12）：启动时是否播放开屏加载动画 ──
     //   关 = 不显示开屏页（跳过动画与最短展示），数据仍在后台加载，直接进入主界面
     var startupAnimation by mutableStateOf(true)
@@ -179,6 +183,9 @@ object SettingsStore {
         drawerMode = runCatching {
             DrawerMode.valueOf(p.getString("drawer_mode", "SLIDE") ?: "SLIDE")
         }.getOrDefault(DrawerMode.SLIDE)
+        permissionTier = runCatching {
+            PermissionTier.valueOf(p.getString("permission_tier", "STANDARD") ?: "STANDARD")
+        }.getOrDefault(PermissionTier.STANDARD)
         startupAnimation = p.getBoolean("startup_animation", true)
         filePreviewNoWrap = p.getBoolean("file_preview_no_wrap", false)
         customAccentEnabled = p.getBoolean("custom_accent_enabled", false)
@@ -256,6 +263,14 @@ object SettingsStore {
         androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
             .edit()
             .putString("drawer_mode", drawerMode.name)
+            .apply()
+    }
+
+    /** 保存权限档位（系统权限设置页 / 首启引导页选定），重启后保持 */
+    fun savePermissionTier(androidCtx: android.content.Context) {
+        androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString("permission_tier", permissionTier.name)
             .apply()
     }
 

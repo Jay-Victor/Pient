@@ -60,6 +60,11 @@ dependencies {
     implementation("androidx.media3:media3-effect:1.7.1")
     implementation("com.vanniktech:android-image-cropper:4.5.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // 权限体系（2026-09-12，开发计划 6.1 三级权限）：Shizuku 官方 SDK（ADB 级调试通道，与 Operit 同版本）
+    //   api      — 状态/授权 API（Shizuku.pingBinder / checkSelfPermission / requestPermission）
+    //   provider — binder 接收入口（AndroidManifest 里需声明 rikka.shizuku.ShizukuProvider，见 manifest）
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
     // 数学公式渲染（LaTeX → 位图，Operit 同款依赖：jlatexmath 的 Android 移植，字体资源随 AAR 打包）
     implementation("ru.noties:jlatexmath-android:0.2.0")
     // 输入框材质（磨砂玻璃 / 液态玻璃，2026-09-12，与 Mdcito 同款依赖）：
