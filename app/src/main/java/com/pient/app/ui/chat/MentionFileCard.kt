@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -17,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -94,6 +97,60 @@ fun buildMentionFiles(node: FileNode, prefix: String = ""): List<MentionFile> {
 
 /** 图标一律走文件树共享函数：见 ui/files/FilesPanel.kt 的 fileIcon(ext)（原 IMAGE_EXTS 清单已废弃） */
 
+/** 光标处正在输入的 @ 引用查询：[@ 下标, 光标) 区间 + 查询串（可能为空 = 刚敲下 @） */
+data class MentionQuery(
+    val start: Int,          // '@' 下标
+    val endExclusive: Int,   // 光标下标（= 查询串终点，不含）
+    val text: String,        // '@' 与光标之间的筛选文本
+)
+
+/**
+ * 光标处是否有正在输入的 @ 引用查询。
+ * 从光标向前找最近的「词首 @」（行首或空白之后），且它与光标之间不含空白/换行 —— 这段文本即查询串；
+ * 途中先遇到空白 = 引用已提交（"@路径 " 之后）或不是引用 → 返回 null；
+ * '@' 出现在词中（邮箱等）也返回 null。
+ * 返回值带区间，供选文件时把「@ + 已输入筛选字符」整段替换为 "@路径 "。
+ */
+fun findMentionQueryAt(value: TextFieldValue): MentionQuery? {
+    if (!value.selection.collapsed) return null
+    val text = value.text
+    val cursor = value.selection.start.coerceIn(0, text.length)
+    var i = cursor - 1
+    while (i >= 0) {
+        val c = text[i]
+        when {
+            c == '@' -> {
+                val prev = if (i == 0) ' ' else text[i - 1]
+                if (!prev.isWhitespace()) return null
+                return MentionQuery(i, cursor, text.substring(i + 1, cursor))
+            }
+            c.isWhitespace() -> return null
+            else -> i--
+        }
+    }
+    return null
+}
+
+/**
+ * 按查询串筛选 @ 候选：大小写不敏感；文件名前缀命中 > 文件名包含 > 路径包含，
+ * 同级保持文件树原顺序（sortedBy 稳定）。查询串为空 = 原样列出全部。
+ */
+fun filterMentionFiles(files: List<MentionFile>, query: String): List<MentionFile> {
+    val q = query.trim().lowercase()
+    if (q.isEmpty()) return files
+    return files.mapNotNull { f ->
+        val name = f.name.lowercase()
+        val path = f.path.lowercase()
+        val rank = when {
+            name.startsWith(q) -> 0
+            name.contains(q) -> 1
+            path.contains(q) -> 2
+            else -> return@mapNotNull null
+        }
+        rank to f
+    }.sortedBy { it.first }.map { it.second }
+}
+
 /**
  * 光标处是否有完整的 @ 引用 token 收尾（含或不含尾随空格）。
  * 返回整个 token 的删除范围（起点含 '@'，终点含尾随空格）——与 Operit
@@ -142,22 +199,29 @@ fun normalizeMentionDeletion(
 }
 
 /**
- * @ 引用文件卡片（2026-08-28 新增）：输入框以 "@" 结尾时以悬浮浮层出现在
- * 输入框左上方（覆盖聊天内容，不挤压布局）；卡片列项目文件夹内的文件
- * （图标 + 文件名 + 相对路径），点选后 "@" 替换为 "@路径" 内联引用
- * （pi @ 提及语义）。点外关闭由父级透明遮罩处理。
+ * @ 引用文件卡片（2026-08-28 新增，2026-09-12 加高度上限与实时筛选）：输入框里输入 "@" 后以悬浮浮层
+ * 出现在输入框左上方（覆盖聊天内容，不挤压布局）；卡片列项目文件夹内的文件（图标 + 文件名 + 相对路径），
+ * 点选后把「@ + 已输入筛选字符」整段替换为 "@路径 " 内联引用（pi @ 提及语义）。
+ * 点外关闭由父级透明遮罩处理。
+ *
+ * - 高度上限 = 屏幕高 40%（与模型选择器同口径）：候选多时表头固定、候选列表内部滚动，卡片不会顶到屏外；
+ * - [query] = 光标处已输入的筛选文本（"@" 之后的部分），仅用于空结果文案（筛选本身在调用处做，见
+ *   filterMentionFiles —— 候选列表随输入实时收窄）。
  */
 @Composable
 fun MentionFileCard(
     files: List<MentionFile>,
     onPick: (String) -> Unit,
     bottomOffset: Dp = 8.dp, // 弹窗底部到屏幕底的距离（与模型选择器同口径）
+    query: String = "",
     modifier: Modifier = Modifier,
 ) {
+    val maxCardHeight = (LocalConfiguration.current.screenHeightDp * 0.40f).dp
     PientPanel(
         modifier = modifier
             .padding(start = 6.dp, bottom = bottomOffset)
-            .width(268.8.dp), // 与右下浮层同宽；左对齐、左距屏 6dp 对称
+            .width(268.8.dp) // 与右下浮层同宽；左对齐、左距屏 6dp 对称
+            .heightIn(max = maxCardHeight),
         shape = RoundedCornerShape(12.dp),
     ) {
     Column(
@@ -171,17 +235,17 @@ fun MentionFileCard(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
         )
-        Column(Modifier.padding(top = 2.dp)) {
-            if (files.isEmpty()) {
-                Text(
-                    "项目文件夹内暂无文件",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                )
-            }
-            files.forEach { f ->
-                MentionFileRow(f) { onPick(f.path) }
+        if (files.isEmpty()) {
+            Text(
+                if (query.isBlank()) "项目文件夹内暂无文件" else "无匹配文件",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            )
+        } else {
+            // fill = false：候选少时卡片随内容收缩，多时占满上限后内部滚动
+            LazyColumn(Modifier.padding(top = 2.dp).weight(1f, fill = false)) {
+                items(files) { f -> MentionFileRow(f) { onPick(f.path) } }
             }
         }
     }

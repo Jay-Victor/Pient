@@ -127,16 +127,30 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     var inputText by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(""))
     }
-    var mentionOpen by remember { mutableStateOf(false) }
+    // @ 引用查询（派生态，2026-09-12）：光标前最近一个「词首 @」到光标之间的文本即筛选串；
+    // null = 不在引用输入中（引用已提交 "@路径 " 之后、词中 @、或压根没 @）。
+    // 查询串随每次输入变化 → 引用卡候选列表实时筛选，不需要额外的开关状态。
+    val mentionQuery = remember(inputText.text, inputText.selection) { findMentionQueryAt(inputText) }
+    // 点外/返回键关闭后，同一查询串不再自动弹出（继续输入改变查询串 = 重新出现）
+    var mentionDismissedQuery by remember { mutableStateOf<String?>(null) }
+    val mentionOpen = mentionQuery != null && mentionQuery.text != mentionDismissedQuery
+    // 查询结束（引用提交 / 文本改动让 @ 不再紧跟光标）→ 清掉关闭标记：
+    // 否则「关闭一次后清空重输 @」会因为查询串又是同一串（常见为空串）而不再弹出
+    LaunchedEffect(mentionQuery) {
+        if (mentionQuery == null) mentionDismissedQuery = null
+    }
     // @ 引用文件来源 = 当前项目真实文件树（未绑定项目/未加载时为空列表）
     val mentionFiles = remember(chatState.fileTreeRoot) {
         chatState.fileTreeRoot?.let { buildMentionFiles(it) } ?: emptyList()
     }
-    // 文件树长按菜单「@ 提及插入输入框」：插入文本并展开引用卡
+    // 候选 = 按光标处查询串筛选（名称前缀 > 名称包含 > 路径包含，同级保持文件树顺序）
+    val mentionCandidates = remember(mentionFiles, mentionQuery?.text) {
+        filterMentionFiles(mentionFiles, mentionQuery?.text.orEmpty())
+    }
+    // 文件树长按菜单「@ 提及插入输入框」：插入已是完整引用（尾随空格），引用卡不再弹出
     LaunchedEffect(chatState.mentionInsertRequest) {
         chatState.mentionInsertRequest?.let { name ->
             inputText = TextFieldValue(inputText.text + "@$name ")
-            mentionOpen = true
             chatState.mentionInsertRequest = null
         }
     }
@@ -184,7 +198,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
             locatorOpen -> locatorOpen = false
             copyCardText != null -> copyCardText = null
             forkMenuTarget != null -> forkMenuTarget = null
-            mentionOpen -> mentionOpen = false
+            // 引用卡关闭 = 记住当前查询串（同一串不再弹；继续输入即重新筛选显示）
+            mentionOpen -> mentionDismissedQuery = mentionQuery.text
             urlDialogOpen -> urlDialogOpen = false
             attachSheetOpen -> attachSheetOpen = false
             systemPromptOpen -> systemPromptOpen = false
@@ -412,7 +427,6 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                             // 一键删除整段 @ 引用：单字符退格 + 光标停在 token 末尾
                             // → 整个 "@路径 " 一起删掉（Operit normalizeMentionDeletion 同款）
                             inputText = normalizeMentionDeletion(inputText, it, mentionFiles)
-                            mentionOpen = inputText.text.endsWith("@")
                         },
                         mentionFiles = mentionFiles,
                         onOpenModelSelector = { modelSheetOpen = true },
@@ -625,22 +639,24 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
             }
         }
 
-        // ── @ 引用文件卡片（悬浮浮层：点外关闭、无 scrim、贴输入栏左上方） ──
+        // ── @ 引用文件卡片（悬浮浮层：点外关闭、无 scrim、贴输入栏左上方；候选随输入实时筛选） ──
         if (mentionOpen) {
             Box(Modifier.fillMaxSize().zIndex(3f)) {
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .clickable(onClick = { mentionOpen = false }),
+                        .clickable(onClick = { mentionDismissedQuery = mentionQuery.text }),
                 )
                 MentionFileCard(
-                    files = mentionFiles,
+                    files = mentionCandidates,
+                    query = mentionQuery.text,
                     onPick = { rel ->
-                        // 去掉触发字符 '@'（引用卡仅在文本以 "@" 结尾时打开），
-                        // 插入 "@路径 "（尾随空格提交 token），光标置末尾
-                        val newText = inputText.text.dropLast(1) + "@$rel "
-                        inputText = TextFieldValue(newText, selection = TextRange(newText.length))
-                        mentionOpen = false
+                        // 把「@ + 已输入筛选字符」整段替换为 "@路径 "（尾随空格提交 token），光标置末尾
+                        val start = mentionQuery.start
+                        val end = mentionQuery.endExclusive
+                        val mention = "@$rel "
+                        val newText = inputText.text.replaceRange(start, end, mention)
+                        inputText = TextFieldValue(newText, selection = TextRange(start + mention.length))
                     },
                     bottomOffset = mentionBottomOffset,
                     modifier = Modifier.align(Alignment.BottomStart),
