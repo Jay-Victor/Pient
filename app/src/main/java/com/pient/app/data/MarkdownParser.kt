@@ -4,11 +4,11 @@ package com.pient.app.data
  * Markdown（GFM 子集）解析 —— 口径对齐 pi-web 文件预览（react-markdown + remark-gfm + remark-frontmatter）：
  *
  * 块级：ATX/Setext 标题（1~6 级）、段落（软换行折叠为空格、硬换行保留）、围栏代码块（含 ``` / ~~~ 与 info 串）、
- * 引用（可嵌套）、列表（有序/无序/嵌套/任务项/loose 空行）、GFM 表格（含对齐行）、分隔线、YAML frontmatter；
- * 行内：粗体、斜体、粗斜体、删除线、行内代码、链接、图片、自动链接、硬换行、反斜杠转义、常见 HTML 实体。
+ * 引用（可嵌套）、列表（有序/无序/嵌套/任务项/loose 空行）、GFM 表格（含对齐行）、分隔线、块级公式（`$$…$$` / `\[…\]`）、YAML frontmatter；
+ * 行内：粗体、斜体、粗斜体、删除线、行内代码、链接、图片、自动链接、行内公式（`$…$` / `\(…\)`）、硬换行、反斜杠转义、常见 HTML 实体。
  *
- * 本层是纯 Kotlin（零 Compose 依赖），解析结果由 `ui/components/MarkdownText.kt` 渲染；
- * 未覆盖：内联 HTML 块、引用式链接（`[x][ref]`）、数学公式（KaTeX）与 Mermaid —— 与 pi-web 的差距记在该组件的注释里。
+ * 本层是纯 Kotlin（零 Compose 依赖），解析结果由 `ui/components/MarkdownText.kt` 渲染（公式渲染在 `ui/components/Latex.kt`）；
+ * 未覆盖：内联 HTML 块、引用式链接（`[x][ref]`）、Mermaid —— 与 pi-web 的差距记在该组件的注释里。
  */
 
 // ───────────────────────────── 数据模型 ─────────────────────────────
@@ -33,6 +33,8 @@ data class MdSpan(
     val image: String? = null,
     /** 硬换行（行尾两空格或反斜杠）——此片段无文本，仅表示一次换行 */
     val lineBreak: Boolean = false,
+    /** 行内数学公式（`$x$` / `\(x\)`；此时 [text] = LaTeX 源码，不含分隔符） */
+    val math: Boolean = false,
 )
 
 /** 列表项：首段文本 + 该条目下的其它块（嵌套列表 / 代码块 / 引用等） */
@@ -51,6 +53,9 @@ sealed class MdBlock {
     data class Quote(val blocks: List<MdBlock>) : MdBlock()
     data class ListBlock(val ordered: Boolean, val start: Int, val items: List<MdListItem>) : MdBlock()
     data class Table(val head: List<String>, val align: List<MdAlign>, val rows: List<List<String>>) : MdBlock()
+
+    /** 块级数学公式（`$$…$$` / `\[…\]`；[latex] 不含分隔符），渲染为居中公式 */
+    data class MathBlock(val latex: String) : MdBlock()
     data object Hr : MdBlock()
 }
 
@@ -102,6 +107,11 @@ private class BlockParser(private val lines: List<String>) {
                 heading != null -> { out += MdBlock.Heading(heading.first, heading.second); i++ }
                 quoteContent(line) != null -> out += MdBlock.Quote(parseMdBlocks(readQuote()))
                 listMarker(line) != null && !hrLine(line) -> out += readList()
+                mathFence(line) != null -> {
+                    val math = readMathBlock()
+                    // 未闭合（如流式输出中途）→ 退回普通段落，公式源码按字面显示
+                    if (math != null) out += math else readParagraphAndSetext()?.let { out += it }
+                }
                 tableStart() -> {
                     val table = readTable()
                     if (table != null) out += table else readParagraphAndSetext()?.let { out += it }
@@ -228,6 +238,57 @@ private class BlockParser(private val lines: List<String>) {
         return MdBlock.ListBlock(ordered = first.ordered, start = first.number, items = items)
     }
 
+    // ── 块级公式（`$$…$$` / `\[…\]`）──
+    /**
+     * 读入一个块级公式（口径对齐 pi-web `normalizeDisplayMath`：模型常把开/闭标记贴在公式行上，
+     * 也常写成 `\[…\]`）。四种写法都收：
+     * ① `$$x$$` / `\[x\]` 单行闭合；② 独占一行的开标记 + 后续内容行 + 独占一行的闭标记；
+     * ③ 开标记紧贴首个公式行（`$$x = 1` … `y = 2$$`）；④ 闭标记紧贴最后一个公式行。
+     * 碰到其它 Markdown 块起始行（围栏/列表/标题/引用/另一个公式开标记 = pi-web 的块边界判定）
+     * 即认为没有配对，返回 null 让调用方按普通段落处理（避免把后续正文吞进公式）。
+     */
+    private fun readMathBlock(): MdBlock? {
+        val opener = lines[i]
+        val fence = mathFence(opener) ?: return null
+        val rest = opener.trimStart(' ').removePrefix(fence.marker)
+
+        // ① 单行闭合
+        oneLineMath(rest, fence.close)?.let { latex ->
+            i++
+            return MdBlock.MathBlock(latex)
+        }
+
+        // ②③④ 多行：开标记行剩余部分算首行内容，向后找闭标记
+        val body = ArrayList<String>()
+        rest.trim().takeIf { it.isNotEmpty() }?.let { body += it }
+        var j = i + 1
+        var closed = false
+        while (j < lines.size) {
+            val line = lines[j]
+            val trimmed = line.trimStart(' ')
+            val content = if (line.length - trimmed.length > 3) line else trimmed
+            if (content.trimEnd() == fence.close) {
+                closed = true
+                j++
+                break
+            }
+            gluedMathContent(content, fence.close)?.let {
+                body += it
+                closed = true
+                j++
+            }
+            if (closed) break
+            if (isMathBoundary(line)) break
+            body += content.trim()
+            j++
+        }
+        if (!closed) return null
+        val latex = body.joinToString("\n").trim()
+        if (latex.isEmpty()) return null
+        i = j
+        return MdBlock.MathBlock(latex)
+    }
+
     // ── GFM 表格 ──
     private fun tableStart(): Boolean {
         val head = lines.getOrNull(i) ?: return false
@@ -299,6 +360,49 @@ private fun hrLine(line: String): Boolean {
     val c = t[0]
     if (c != '-' && c != '*' && c != '_') return false
     return t.all { it == c || it == ' ' } && t.count { it == c } >= 3
+}
+
+// ── 块级公式判定（口径见 BlockParser.readMathBlock）──
+
+/** 块级公式的开/闭标记对：`$$…$$` 或 `\[…\]` */
+private data class MathFence(val marker: String, val close: String)
+
+private fun mathFence(line: String): MathFence? {
+    val t = line.trimStart(' ')
+    if (line.length - t.length > 3) return null
+    return when {
+        t.startsWith("$$") -> MathFence("$$", "$$")
+        t.startsWith("\\[") -> MathFence("\\[", "\\]")
+        else -> null
+    }
+}
+
+/** 单行闭合 `$$x$$` / `\[x\]` → 公式源码；内容为空或内部还含分隔符则不算 */
+private fun oneLineMath(rest: String, close: String): String? {
+    val t = rest.trimEnd()
+    if (!t.endsWith(close)) return null
+    val inner = t.removeSuffix(close).trim()
+    if (inner.isEmpty() || inner.contains(close)) return null
+    return inner
+}
+
+/** 闭标记紧贴公式行尾（`y = 2$$`）→ 标记前的内容；裸闭标记行与含内层分隔符的不算 */
+private fun gluedMathContent(line: String, close: String): String? {
+    val t = line.trimEnd()
+    if (!t.endsWith(close)) return null
+    val inner = t.removeSuffix(close).trim()
+    if (inner.isEmpty() || inner.contains(close)) return null
+    return inner
+}
+
+/** 公式块边界行：围栏 / 列表项 / 标题 / 引用 / 另一个公式开标记（pi-web isDisplayMathBlockBoundary 同款） */
+private fun isMathBoundary(line: String): Boolean {
+    if (fenceInfo(line) != null || listMarker(line) != null) return true
+    if (atxHeading(line) != null || quoteContent(line) != null) return true
+    val t = line.trimStart(' ')
+    if (line.length - t.length > 3) return false
+    if (t.startsWith("$$")) return t.removePrefix("$$").isNotBlank()
+    return t.startsWith("\\[")
 }
 
 private fun quoteContent(line: String): String? {
@@ -416,7 +520,8 @@ private fun splitRow(line: String): List<String> {
 
 private fun isBlockStartLine(line: String): Boolean =
     line.isBlank() || fenceInfo(line) != null || atxHeading(line) != null ||
-        hrLine(line) || quoteContent(line) != null || listMarker(line) != null
+        hrLine(line) || quoteContent(line) != null || listMarker(line) != null ||
+        mathFence(line) != null
 
 private fun indentOf(line: String): Int {
     var indent = 0
@@ -487,7 +592,7 @@ private fun unquote(value: String): String {
 
 // ───────────────────────────── 行内解析 ─────────────────────────────
 
-private const val ESCAPABLE = "\\`*_{}[]()#+-.!|~<>\"'"
+private const val ESCAPABLE = "\\`*_{}[]()#+-.!|~<>\"'\$"
 
 /** 行内标记解析（`**粗**` / `*斜*` / `` `码` `` / `~~删~~` / `[链接](url)` / `![图](src)` / 自动链接 / 硬换行） */
 fun parseMdInline(text: String): List<MdSpan> {
@@ -524,6 +629,13 @@ private fun appendInline(src: String, flags: MdSpanFlags, out: MutableList<MdSpa
     while (i < src.length) {
         val c = src[i]
         when {
+            // 行内公式 `\( … \)`：先于反斜杠转义判定（无配对闭标记时落到转义分支 → 显示字面 `(`）
+            c == '\\' && i + 1 < src.length && src[i + 1] == '(' && inlineParenMathEnd(src, i) > 0 -> {
+                val close = inlineParenMathEnd(src, i)
+                flush()
+                out += MdSpan(text = src.substring(i + 2, close).trim(), math = true)
+                i = close + 2
+            }
             // 反斜杠转义
             c == '\\' && i + 1 < src.length && src[i + 1] in ESCAPABLE -> {
                 appendChar(src[i + 1]); i += 2
@@ -632,6 +744,24 @@ private fun appendInline(src: String, flags: MdSpanFlags, out: MutableList<MdSpa
                     i = close + 2
                 }
             }
+            // 行内公式：本行中段的 `$$ … $$`，或 `$ … $`（开标记后不能是空白/`$`，闭标记前不能是空白 —— KaTeX 口径）
+            c == '$' -> {
+                val pair = if (src.startsWith("$$", i)) inlineDollarPairEnd(src, i) else -1
+                val single = if (pair < 0) inlineDollarMathEnd(src, i) else -1
+                when {
+                    pair > 0 -> {
+                        flush()
+                        out += MdSpan(text = src.substring(i + 2, pair).trim(), math = true)
+                        i = pair + 2
+                    }
+                    single > 0 -> {
+                        flush()
+                        out += MdSpan(text = src.substring(i + 1, single).trim(), math = true)
+                        i = single + 1
+                    }
+                    else -> { appendChar(c); i += 1 }
+                }
+            }
             // 裸 URL 自动链接（GFM autolink literal）
             (c == 'h' || c == 'w') && isWordBoundary(src, i) && bareUrlAt(src, i) != null -> {
                 val url = bareUrlAt(src, i)!!
@@ -667,6 +797,52 @@ private fun findBacktickRun(src: String, from: Int, run: Int): Int {
         } else i++
     }
     return -1
+}
+
+// ── 行内公式的行内定位（同一行内配对，跨行不配对：模型输出的 `$` 大多为行内，跨行易误吞正文）──
+
+private fun lineEndAt(src: String, from: Int): Int {
+    val nl = src.indexOf('\n', from)
+    return if (nl < 0) src.length else nl
+}
+
+/** `$$` 起、同一行内 `$$` 结束 → 闭标记下标（本行中段的 `$$x$$`）；无则 -1 */
+private fun inlineDollarPairEnd(src: String, start: Int): Int {
+    val from = start + 2
+    val close = src.indexOf("$$", from)
+    if (close < 0 || close >= lineEndAt(src, from)) return -1
+    return if (src.substring(from, close).isNotBlank()) close else -1
+}
+
+/** `$` 起、同一行内 `$` 结束 → 闭标记下标；无则 -1 */
+private fun inlineDollarMathEnd(src: String, start: Int): Int {
+    val from = start + 1
+    if (from >= src.length) return -1
+    val first = src[from]
+    if (first == '$' || first.isWhitespace()) return -1
+    var i = from
+    while (i < src.length) {
+        val ch = src[i]
+        when {
+            ch == '\n' -> return -1
+            ch == '\\' -> i += 2
+            ch == '$' -> {
+                val prev = src[i - 1]
+                if (!prev.isWhitespace() && prev != '\\') return i
+                i++
+            }
+            else -> i++
+        }
+    }
+    return -1
+}
+
+/** `\(` 起、同一行内 `\)` 结束 → 闭标记下标；无则 -1 */
+private fun inlineParenMathEnd(src: String, start: Int): Int {
+    val from = start + 2
+    val close = src.indexOf("\\)", from)
+    if (close < 0 || close >= lineEndAt(src, from)) return -1
+    return if (src.substring(from, close).isNotBlank()) close else -1
 }
 
 /** 找配对的强调结束标记（内容不能以空白开头/结尾；k=1 时跳过 `**` 串避免抢占粗体） */
@@ -833,14 +1009,17 @@ private fun plainBlock(b: MdBlock): String = when (b) {
     is MdBlock.Table -> (listOf(b.head) + b.rows).joinToString("\n") { row ->
         row.joinToString("\t") { plainInline(it) }
     }
+    // 公式取 LaTeX 源码（Operit MarkdownPlainTextRenderer 口径：分隔符剥掉，只留公式本身）
+    is MdBlock.MathBlock -> b.latex
     MdBlock.Hr -> ""
 }
 
-/** 行内：取纯文本；链接展开为「文字 (地址)」，图片取 alt，硬换行还原为换行 */
+/** 行内：取纯文本；链接展开为「文字 (地址)」，图片取 alt，公式取源码，硬换行还原为换行 */
 private fun plainInline(text: String): String = parseMdInline(text).joinToString("") { s ->
     when {
         s.lineBreak -> "\n"
         s.image != null -> s.text
+        s.math -> s.text
         s.link != null -> if (s.text.isBlank() || s.text == s.link) s.link else "${s.text} (${s.link})"
         else -> s.text
     }

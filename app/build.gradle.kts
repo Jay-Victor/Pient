@@ -60,6 +60,8 @@ dependencies {
     implementation("androidx.media3:media3-effect:1.7.1")
     implementation("com.vanniktech:android-image-cropper:4.5.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // 数学公式渲染（LaTeX → 位图，Operit 同款依赖：jlatexmath 的 Android 移植，字体资源随 AAR 打包）
+    implementation("ru.noties:jlatexmath-android:0.2.0")
     // 输入框材质（磨砂玻璃 / 液态玻璃，2026-09-12，与 Mdcito 同款依赖）：
     //   com.kyant.backdrop  — 背景采样 + 高斯模糊 + 边缘高光/投影（磨砂玻璃，enableLens 时含透镜折射）
     //   io.github.fletchmckee.liquid — 水玻璃流体折射/色散（液态玻璃）

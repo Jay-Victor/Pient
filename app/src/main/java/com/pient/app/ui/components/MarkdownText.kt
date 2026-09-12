@@ -9,6 +9,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,9 +24,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.ClickableText
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,11 +48,16 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -60,6 +68,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -94,8 +104,10 @@ import kotlinx.coroutines.withContext
  *   正文 padding 11px 13px + 12.5px/1.62 + 行号 text-dim + 复制键）→ 高亮走 Operit 同款 VS Code 调色板
  * - frontmatter = pi-web FrontmatterCard（标题 / 标签胶囊 / 键值行）
  *
- * 与 pi-web 的已知差距（本层不做）：Mermaid、数学公式（KaTeX）、内联 HTML 块、表格横向滚动（改为列宽自适应换行）、
+ * 与 pi-web 的已知差距（本层不做）：Mermaid、内联 HTML 块、表格横向滚动（改为列宽自适应换行）、
  * 行内代码的背景圆角与内边距（Compose 的 SpanStyle 不支持逐片段 padding/圆角）、远端图片（无图片加载库）。
+ * 数学公式走 jlatexmath 原生渲染（`ui/components/Latex.kt`），不引入 KaTeX/WebView —— 命令覆盖度比 KaTeX
+ * 略窄（缺 `\begin{align}` 之类），渲染不出来的公式退化为等宽源码显示。
  */
 
 // ───────────────────────────── 调色板 / 样式 ─────────────────────────────
@@ -132,6 +144,8 @@ private class MdStyles(
         is MdBlock.Quote -> 6 to 6
         is MdBlock.Code -> 6 to 6
         is MdBlock.Table -> 8 to 8
+        // `.katex-display { margin: 0.6em 0 }`（正文 13~14sp → 约 8dp）
+        is MdBlock.MathBlock -> 8 to 8
         MdBlock.Hr -> 12 to 12
     }
 
@@ -243,6 +257,7 @@ private fun MarkdownBlock(
         is MdBlock.Quote -> QuoteBlock(block.blocks, s, onFileLink, imageResolver, topPad)
         is MdBlock.ListBlock -> ListBlock(block, s, onFileLink, imageResolver, topPad)
         is MdBlock.Table -> TableBlock(block, s, topPad)
+        is MdBlock.MathBlock -> LatexBlock(block.latex, s, topPad)
         MdBlock.Hr -> Box(topPad.fillMaxWidth()) {
             Box(
                 Modifier
@@ -302,51 +317,166 @@ private fun RichText(
     onFileLink: ((String) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
-    val annotated = remember(spans, style, s.text, s.accent, s.muted, s.subtle, s.boldColor) {
-        buildAnnotated(spans, s)
+    val density = LocalDensity.current
+    // MdStyles 每次组合都是新实例（无 equals）→ remember 的键用其中真正影响渲染的字段
+    val md = remember(spans, style, s.text, s.accent, s.muted, s.subtle, s.boldColor, density) {
+        buildMdAnnotated(spans, s, mathTextSizePx(style, s, density), s.text.toArgb(), density)
     }
-    ClickableText(
-        text = annotated,
+    val hasLink = remember(md) { md.text.getStringAnnotations("link", 0, md.text.length).isNotEmpty() }
+    val layout = remember { mutableStateOf<TextLayoutResult?>(null) }
+    Text(
+        text = md.text,
+        inlineContent = md.inlineContent,
         style = style,
-        modifier = modifier,
-        onClick = { offset ->
-            annotated.getStringAnnotations("link", offset, offset).firstOrNull()?.let { onFileLink?.invoke(it.item) }
+        onTextLayout = { layout.value = it },
+        modifier = modifier.pointerInput(md, onFileLink, hasLink) {
+            // 无链接的段落不接管点击（滚动/长按照旧交给父级）；点击命中链接区间时回调（ClickableText 同语义）
+            if (onFileLink == null || !hasLink) return@pointerInput
+            detectTapGestures { position ->
+                val offset = layout.value?.getOffsetForPosition(position) ?: return@detectTapGestures
+                md.text.getStringAnnotations("link", offset, offset).firstOrNull()?.let { onFileLink.invoke(it.item) }
+            }
         },
     )
 }
 
-private fun buildAnnotated(spans: List<MdSpan>, s: MdStyles): AnnotatedString = buildAnnotatedString {
-    for (span in spans) {
-        if (span.lineBreak) {
-            append("\n")
-            continue
+/** 构建后的行内文本：AnnotatedString + 内联公式内容表 + 占位符区间（占位符同时供表格测量使用） */
+private class MdAnnotated(
+    val text: AnnotatedString,
+    val inlineContent: Map<String, InlineTextContent>,
+    val placeholders: List<AnnotatedString.Range<Placeholder>>,
+)
+
+/** 公式字号 = 所在文本字号 ×1.05（pi-web `.markdown-body .katex { font-size: 1.05em }`） */
+private fun mathTextSizePx(style: TextStyle, s: MdStyles, density: Density): Float {
+    val size = if (style.fontSize.isSp) style.fontSize else s.base.fontSize
+    return with(density) { size.toPx() } * 1.05f
+}
+
+/**
+ * 行内片段 → AnnotatedString（数学公式以「内联内容」形式嵌入文本流，随文字一起换行，
+ * 垂直方向按行内文字中心对齐 —— Operit `LatexDrawableSpan` 同口径：公式位图不贴基线，
+ * 否则分式/积分/下标会被整体顶高）。
+ * 渲染不出来的公式退化为等宽源码（Operit 同款兜底），不影响其它行内样式。
+ */
+private fun buildMdAnnotated(
+    spans: List<MdSpan>,
+    s: MdStyles,
+    mathTextSizePx: Float,
+    mathColorArgb: Int,
+    density: Density,
+): MdAnnotated {
+    val inline = LinkedHashMap<String, InlineTextContent>()
+    val placeholders = ArrayList<AnnotatedString.Range<Placeholder>>()
+    val rendered = HashMap<String, LatexImage?>()
+    var mathIndex = 0
+    val text = buildAnnotatedString {
+        for (span in spans) {
+            if (span.math) {
+                val image = rendered.getOrPut(span.text) {
+                    LatexRenderer.image(span.text, mathTextSizePx, mathColorArgb)
+                }
+                if (image == null) {
+                    withStyle(s.codeSpan) { append(span.text) }
+                    continue
+                }
+                mathIndex++
+                val id = "math#$mathIndex"
+                val placeholder = Placeholder(
+                    width = with(density) { image.widthPx.toSp() },
+                    height = with(density) { image.heightPx.toSp() },
+                    placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter,
+                )
+                val start = length
+                appendInlineContent(id, span.text)
+                val end = length
+                inline[id] = InlineTextContent(placeholder) { LatexInline(image) }
+                placeholders += AnnotatedString.Range(placeholder, start, end)
+                continue
+            }
+            if (span.lineBreak) {
+                append("\n")
+                continue
+            }
+            if (span.image != null) continue
+            val style = when {
+                span.code -> s.codeSpan
+                span.link != null -> SpanStyle(
+                    color = s.accent,
+                    textDecoration = TextDecoration.Underline,
+                    fontWeight = if (span.bold) FontWeight.Bold else null,
+                    fontStyle = if (span.italic) FontStyle.Italic else null,
+                )
+                span.bold -> SpanStyle(
+                    color = s.boldColor,
+                    fontWeight = FontWeight.Bold,
+                    fontStyle = if (span.italic) FontStyle.Italic else null,
+                    textDecoration = if (span.strike) TextDecoration.LineThrough else null,
+                )
+                span.italic -> SpanStyle(
+                    color = s.muted,
+                    fontStyle = FontStyle.Italic,
+                    textDecoration = if (span.strike) TextDecoration.LineThrough else null,
+                )
+                span.strike -> SpanStyle(color = s.muted, textDecoration = TextDecoration.LineThrough)
+                else -> SpanStyle(color = s.text)
+            }
+            if (span.link != null) pushStringAnnotation("link", span.link)
+            withStyle(style) { append(span.text) }
+            if (span.link != null) pop()
         }
-        if (span.image != null) continue
-        val style = when {
-            span.code -> s.codeSpan
-            span.link != null -> SpanStyle(
-                color = s.accent,
-                textDecoration = TextDecoration.Underline,
-                fontWeight = if (span.bold) FontWeight.Bold else null,
-                fontStyle = if (span.italic) FontStyle.Italic else null,
-            )
-            span.bold -> SpanStyle(
-                color = s.boldColor,
-                fontWeight = FontWeight.Bold,
-                fontStyle = if (span.italic) FontStyle.Italic else null,
-                textDecoration = if (span.strike) TextDecoration.LineThrough else null,
-            )
-            span.italic -> SpanStyle(
-                color = s.muted,
-                fontStyle = FontStyle.Italic,
-                textDecoration = if (span.strike) TextDecoration.LineThrough else null,
-            )
-            span.strike -> SpanStyle(color = s.muted, textDecoration = TextDecoration.LineThrough)
-            else -> SpanStyle(color = s.text)
+    }
+    return MdAnnotated(text, inline, placeholders)
+}
+
+/** 行内公式：位图按 1:1 落在占位槽内（槽尺寸 = 位图尺寸） */
+@Composable
+private fun LatexInline(image: LatexImage) {
+    val density = LocalDensity.current
+    Image(
+        bitmap = image.bitmap,
+        contentDescription = null,
+        modifier = Modifier.size(
+            with(density) { image.widthPx.toDp() },
+            with(density) { image.heightPx.toDp() },
+        ),
+    )
+}
+
+/**
+ * 块级公式（`$$…$$` / `\[…\]`）：居中显示、超宽横向滚动（Operit BLOCK_LATEX 口径），
+ * 字号 = 正文 ×1.05、上下留白见 [MdStyles.gaps]（pi-web `.katex-display { margin: .6em 0 }`）。
+ */
+@Composable
+private fun LatexBlock(latex: String, s: MdStyles, modifier: Modifier = Modifier) {
+    val density = LocalDensity.current
+    val sizePx = with(density) { s.base.fontSize.toPx() * 1.05f }
+    val colorArgb = s.text.toArgb()
+    val image = remember(latex, sizePx, colorArgb) { LatexRenderer.image(latex, sizePx, colorArgb) }
+    val scrollState = rememberScrollState()
+    BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        // 视口宽兜底：公式窄于视口时居中、宽于视口时横向滚动（内层盒宽 = max(视口, 公式)）
+        val minWidth = if (constraints.hasBoundedWidth) maxWidth else 0.dp
+        Box(Modifier.horizontalScroll(scrollState)) {
+            Box(Modifier.widthIn(min = minWidth), contentAlignment = Alignment.Center) {
+                if (image == null) {
+                    Text(
+                        text = latex,
+                        style = s.base.copy(fontFamily = MonoFont, fontSize = s.base.fontSize * 0.92f),
+                        color = s.muted,
+                    )
+                } else {
+                    Image(
+                        bitmap = image.bitmap,
+                        contentDescription = latex,
+                        modifier = Modifier.size(
+                            with(density) { image.widthPx.toDp() },
+                            with(density) { image.heightPx.toDp() },
+                        ),
+                    )
+                }
+            }
         }
-        if (span.link != null) pushStringAnnotation("link", span.link)
-        withStyle(style) { append(span.text) }
-        if (span.link != null) pop()
     }
 }
 
@@ -606,8 +736,9 @@ private fun TableBlock(block: MdBlock.Table, s: MdStyles, modifier: Modifier = M
     val columns = maxOf(block.head.size, block.rows.maxOfOrNull { it.size } ?: 0)
     if (columns == 0) return
     val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        val cellPadding = with(LocalDensity.current) { (TableCellHorizontalPadding * 2).toPx() }
+        val cellPadding = with(density) { (TableCellHorizontalPadding * 2).toPx() }
         // 列宽（px）：逐格量出内容宽度 → 每列取最小/最大内容宽度 → 按可用宽度分配
         val widths = remember(block, s, constraints.maxWidth, constraints.hasBoundedWidth) {
             if (!constraints.hasBoundedWidth) {
@@ -620,8 +751,14 @@ private fun TableBlock(block: MdBlock.Table, s: MdStyles, modifier: Modifier = M
                     val style = tableCellStyle(s, header)
                     for (col in 0 until columns) {
                         val raw = cells.getOrNull(col) ?: continue
-                        val annotated = buildAnnotated(parseMdInline(raw), s)
-                        val (min, max) = cellContentWidths(measurer, annotated, style)
+                        val cell = buildMdAnnotated(
+                            spans = parseMdInline(raw),
+                            s = s,
+                            mathTextSizePx = mathTextSizePx(style, s, density),
+                            mathColorArgb = s.text.toArgb(),
+                            density = density,
+                        )
+                        val (min, max) = cellContentWidths(measurer, cell.text, style, cell.placeholders)
                         if (min > minW[col]) minW[col] = min
                         if (max > maxW[col]) maxW[col] = max
                     }
@@ -678,6 +815,7 @@ private fun TableRow(
     header: Boolean,
     zebra: Boolean = false,
 ) {
+    val density = LocalDensity.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -694,10 +832,18 @@ private fun TableRow(
         widths.forEachIndexed { index, weight ->
             val cellText = cells.getOrNull(index) ?: ""
             val style = tableCellStyle(s, header)
-            val spans = remember(cellText) { parseMdInline(cellText) }
-            val annotated = remember(spans) { buildAnnotated(spans, s) }
+            val md = remember(cellText, style, s.text, s.accent, s.muted, s.subtle, s.boldColor, density) {
+                buildMdAnnotated(
+                    spans = parseMdInline(cellText),
+                    s = s,
+                    mathTextSizePx = mathTextSizePx(style, s, density),
+                    mathColorArgb = s.text.toArgb(),
+                    density = density,
+                )
+            }
             Text(
-                text = annotated,
+                text = md.text,
+                inlineContent = md.inlineContent,
                 style = style,
                 modifier = Modifier.weight(weight).padding(horizontal = TableCellHorizontalPadding, vertical = 6.dp),
             )
@@ -719,9 +865,14 @@ private fun tableCellStyle(s: MdStyles, header: Boolean): TextStyle = s.base.cop
     textAlign = TextAlign.Center,
 )
 
-/** 一个单元格的 (最小内容宽度, 最大内容宽度)，单位 px */
-private fun cellContentWidths(m: TextMeasurer, text: AnnotatedString, style: TextStyle): Pair<Float, Float> {
-    val max = m.measure(text, style, constraints = Constraints()).size.width.toFloat()
+/** 一个单元格的 (最小内容宽度, 最大内容宽度)，单位 px；[placeholders] = 行内公式占位槽（测量时按位图实际宽度计入） */
+private fun cellContentWidths(
+    m: TextMeasurer,
+    text: AnnotatedString,
+    style: TextStyle,
+    placeholders: List<AnnotatedString.Range<Placeholder>>,
+): Pair<Float, Float> {
+    val max = m.measure(text, style, placeholders = placeholders, constraints = Constraints()).size.width.toFloat()
     var min = 0f
     // MCW = 最宽的「不可断行单元」：CJK 逐字可断（单字即一单元），空白处可断，其余拉丁/数字/标点连成一个单元
     var units = unbreakableUnits(text.text)
@@ -730,10 +881,26 @@ private fun cellContentWidths(m: TextMeasurer, text: AnnotatedString, style: Tex
         units = units.sortedByDescending { it.second - it.first }.take(MaxMeasuredUnits)
     }
     for ((start, end) in units) {
-        val w = m.measure(text.subSequence(start, end), style, constraints = Constraints()).size.width.toFloat()
+        val w = m.measure(
+            text = text.subSequence(start, end),
+            style = style,
+            placeholders = placeholdersIn(placeholders, start, end),
+            constraints = Constraints(),
+        ).size.width.toFloat()
         if (w > min) min = w
     }
     return min to max
+}
+
+/** 子串测量用：取出落在 [start, end) 内的公式占位槽并平移到子串坐标系 */
+private fun placeholdersIn(
+    placeholders: List<AnnotatedString.Range<Placeholder>>,
+    start: Int,
+    end: Int,
+): List<AnnotatedString.Range<Placeholder>> = placeholders.mapNotNull { range ->
+    val s = maxOf(range.start, start)
+    val e = minOf(range.end, end)
+    if (s >= e) null else AnnotatedString.Range(range.item, s - start, e - start)
 }
 
 private const val MaxMeasuredUnits = 12
