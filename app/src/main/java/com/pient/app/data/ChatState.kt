@@ -64,7 +64,9 @@ fun estimatedMessageHeightDp(msg: Msg): Float = when (msg) {
             if (msg.attachments.isEmpty()) 0f else 30f + 26f * msg.attachments.size +
             if (msg.quote != null) 30f else 0f
     is Msg.Assistant -> 30f + 0.9f * msg.markdown.length
-    is Msg.Thinking -> 38f
+    // 思考块：折叠头行 38dp + 展开正文（0.9×字符）。估算按展开态取——Hermes 口径下
+    // 流式思考默认展开、结束也保持展开，展开是它最常见的形态；收起态略高估不影响窗口判定。
+    is Msg.Thinking -> 38f + 0.9f * msg.text.length
     is Msg.ToolCall -> 56f
     is Msg.ToolResult -> 40f
     is Msg.Compaction -> 48f
@@ -131,15 +133,8 @@ class ChatState {
         // 上屏窗口起点按「消息下标」记：切分支/换叶后同一会话的消息流换了内容，
         // 旧下标不再对应同一段消息 → 清掉记录，让窗口回到「最近 N 屏」自动口径。
         messageWindowStartBySession.remove(sid)
-        val byId = entries.associateBy { it.id }
-        val path = mutableListOf<Msg>()
-        var cur = leafBySession[sid]?.let { byId[it] }
-        while (cur != null) {
-            path += cur.msg
-            cur = cur.parentId?.let { byId[it] }
-        }
-        path.reverse()
-        messagesBySession[sid] = path.toMutableStateList()
+        liveThinkingIndex = -1   // 换叶/切分支后下标全部重排，旧标记作废
+        messagesBySession[sid] = leafPath(sid).map { it.msg }.toMutableStateList()
     }
 
     /**
@@ -221,6 +216,7 @@ class ChatState {
     fun selectSession(id: String) {
         currentSessionId = id
         activePanel = Panel.MESSAGES
+        liveThinkingIndex = -1   // 换会话：上一次的流式思考块不再享受展开（Hermes 历史态收起）
     }
 
     fun newSession(): String {
@@ -232,6 +228,7 @@ class ChatState {
         messagesBySession[id] = mutableStateListOf()
         entriesBySession[id] = mutableStateListOf()
         leafBySession[id] = null
+        liveThinkingIndex = -1
         activePanel = Panel.MESSAGES
         return id
     }
@@ -373,6 +370,23 @@ class ChatState {
     // ── 真实对话发送（2026-09-09 实现 AI 接入，替换 mock 流式回复）──
     var isStreaming by mutableStateOf(false)
     var streamDraft by mutableStateOf("")
+    /**
+     * 流式思考文本（思考模式开启、且服务商回推理增量时非空）。
+     * Hermes 口径：流式期间思考块**默认展开**并实时预览（见 ChatMessages 的思考折叠块）。
+     * 与 streamDraft 一样只存内存、不进持久化快照（避免每个增量触发一次写盘）。
+     */
+    var streamThinking by mutableStateOf("")
+
+    /** 本轮思考起点（毫秒；0 = 本轮尚无思考）——实时计时与落库 durationMs 都取它 */
+    var streamThinkingStartedAt by mutableStateOf(0L)
+
+    /**
+     * 本次运行内**流式思考块**所在的消息下标（-1 = 无）。
+     * Hermes 口径的「live preview 保持展开」：流式期间默认展开的思考块在回答落地、换成
+     * 真实条目后不得突然折叠（那正是 Hermes 注释里要避免的 settle 跳动）；判据只存内存，
+     * 换会话/换分支/重启后归 -1 → 历史思考块一律收起，用户可手动展开。
+     */
+    var liveThinkingIndex by mutableStateOf(-1)
     var streamJob: Job? = null
 
     /**
@@ -383,6 +397,8 @@ class ChatState {
     suspend fun streamReply(userText: String, quote: Quote? = null) {
         isStreaming = true
         streamDraft = ""
+        streamThinking = ""
+        streamThinkingStartedAt = 0L
         // ★ 历史快照必须先于消息上屏：buildApiHistory 读 currentMessages，
         //   上屏后再取会把本条用户消息算进历史、又被末尾显式追加一次 = 重复（2026-09-09 修复）
         val historyBefore = buildApiHistory()
@@ -413,13 +429,17 @@ class ChatState {
         val history = historyBefore + ("user" to (quote?.toPrompt(userText) ?: userText))
         val trimmedHistory = trimToContextBudget(history, cfg.ctxLenK)
         try {
-            val (text, usage) = runChat(
+            val outcome = runChat(
                 cfg = cfg.copy(modelList = effectiveModel),
                 history = trimmedHistory,
-            ) { draft -> streamDraft = draft }
-            appendEntry(Msg.Assistant(text, usage, effectiveModel))
+                onDelta = { draft -> streamDraft = draft },
+                onThinking = { noteThinkingDelta(it) },
+            )
+            // 思考先于回答落库：条目顺序 = [思考, 回答]，列表层把思考并入紧随其后的回答卡
+            appendThinkingEntry(outcome)
+            appendEntry(Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
             // 用量台账（用量页数据源）：完成即记一笔（usage 为空 = 服务商未返回用量，不记）
-            UsageStore.record(cfg.providerId, effectiveModel, usage)
+            UsageStore.record(cfg.providerId, effectiveModel, outcome.usage)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e // abort：保留 abort() 对 draft 的处理
         } catch (e: Exception) {
@@ -431,6 +451,8 @@ class ChatState {
             )
         } finally {
             streamDraft = ""
+            streamThinking = ""
+            streamThinkingStartedAt = 0L
             isStreaming = false
             markRunning(false)
         }
@@ -463,15 +485,21 @@ class ChatState {
 
         isStreaming = true
         streamDraft = ""
+        streamThinking = ""
+        streamThinkingStartedAt = 0L
         markRunning(true)
         return try {
-            val (text, usage) = runChat(
+            val outcome = runChat(
                 cfg = cfg.copy(modelList = effectiveModel),
                 history = history,
-            ) { draft -> replaceMessageAt(index, Msg.Assistant(draft, null, effectiveModel)) }
-            replaceMessageAt(index, Msg.Assistant(text, usage, effectiveModel))
+                onDelta = { draft -> replaceMessageAt(index, Msg.Assistant(draft, null, effectiveModel)) },
+                onThinking = { noteThinkingDelta(it) },
+            )
+            // 思考条目与回答同位替换：该条前面已有思考 → 原位替换；没有则插入（下标随之 +1）
+            val target = upsertThinkingBefore(index, outcome)
+            replaceMessageAt(target, Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
             // 重新生成同样计入用量台账（一次真实请求 = 一笔用量）
-            UsageStore.record(cfg.providerId, effectiveModel, usage)
+            UsageStore.record(cfg.providerId, effectiveModel, outcome.usage)
             null
         } catch (e: kotlinx.coroutines.CancellationException) {
             replaceMessageAt(index, original)   // 中止：恢复原内容
@@ -481,6 +509,8 @@ class ChatState {
             e.message ?: "未知错误"
         } finally {
             streamDraft = ""
+            streamThinking = ""
+            streamThinkingStartedAt = 0L
             isStreaming = false
             markRunning(false)
         }
@@ -488,19 +518,24 @@ class ChatState {
 
     /**
      * 单次对话请求（流式 / 非流式共用一条路径，2026-09-11 抽出供发送与重新生成复用）：
-     * 流式逐片回调 onDelta，返回 (完整文本, usage)。
+     * 流式逐片回调 onDelta/onThinking，返回完整文本、usage 与思考文本。
      */
     private suspend fun runChat(
         cfg: ProviderConfig,
         history: List<Pair<String, String>>,
         onDelta: (String) -> Unit,
-    ): Pair<String, Usage?> {
+        onThinking: (String) -> Unit = {},
+    ): ChatOutcome {
         val thinking = if (thinkingEnabled) thinkingLevel else null
         if (!streamingOutputEnabled) {
             val result = AiBackend.chat(cfg, systemPrompt, history, thinking)
-            return result.text to result.usage
+            val th = result.thinking.orEmpty()
+            // 非流式：思考一口气到达；此时思考模式关闭 = 服务商自带的推理内容也不展示
+            if (thinking != null && th.isNotEmpty()) onThinking(th)
+            return ChatOutcome(result.text, result.usage, th.takeIf { thinking != null }.orEmpty())
         }
         val sb = StringBuilder()
+        val th = StringBuilder()
         var usage: Usage? = null
         AiBackend.chatStream(cfg, systemPrompt, history, thinking).collect { ev ->
             when (ev) {
@@ -508,12 +543,87 @@ class ChatState {
                     sb.append(ev.text)
                     onDelta(sb.toString())
                 }
+                is ChatEvent.ThinkingDelta -> {
+                    th.append(ev.text)
+                    onThinking(th.toString())
+                }
                 is ChatEvent.UsageEvent -> usage = ev.usage
                 is ChatEvent.Failed -> throw AiException(ev.message)
                 ChatEvent.Done -> Unit
             }
         }
-        return sb.toString() to usage
+        return ChatOutcome(sb.toString(), usage, if (thinking != null) th.toString() else "")
+    }
+
+    /** 单次请求结果：正文 + usage + 思考文本（思考模式关闭时为空串） */
+    private data class ChatOutcome(val text: String, val usage: Usage?, val thinking: String)
+
+    /** 首个思考增量到达时记起点（思考行右侧计时与落库 durationMs 都用它） */
+    private fun noteThinkingDelta(text: String) {
+        if (streamThinkingStartedAt == 0L) streamThinkingStartedAt = System.currentTimeMillis()
+        streamThinking = text
+    }
+
+    /** 本轮思考落库为 [Msg.Thinking]（无思考内容时不落条目）；返回落下的条目 */
+    private fun appendThinkingEntry(outcome: ChatOutcome): Msg.Thinking? {
+        val msg = thinkingMsgOf(outcome) ?: return null
+        appendEntry(msg)
+        // 记下它的上屏下标：回答落地后该块保持展开（Hermes live preview 的 latch）
+        liveThinkingIndex = messagesBySession[currentSessionId]?.lastIndex ?: -1
+        return msg
+    }
+
+    /**
+     * 思考条目构造（思考模式关闭 / 服务商未回思考内容 → null，不落条目也不渲染折叠行）。
+     * level 取 pi 思考级别字面量（minimal…xhigh，与 pi 会话条目同口径）。
+     */
+    private fun thinkingMsgOf(outcome: ChatOutcome): Msg.Thinking? {
+        val text = outcome.thinking.trim()
+        if (text.isEmpty()) return null
+        val level = if (thinkingEnabled) thinkingLevel.piValue else "off"
+        val started = streamThinkingStartedAt
+        val duration = if (started > 0L) System.currentTimeMillis() - started else null
+        return Msg.Thinking(level, text, duration)
+    }
+
+    /**
+     * 重新生成时同步思考条目：该条助手消息前面已有思考条目 → 原位替换；否则**插入**一条
+     * （消息流插到下一位，条目树里插成 前一条目 → 新思考条目 → 该助手条目 的一段链）。
+     *
+     * @return 助手消息在思考条目落位后的最新下标（插入时 = index + 1）
+     */
+    private fun upsertThinkingBefore(index: Int, outcome: ChatOutcome): Int {
+        val msg = thinkingMsgOf(outcome) ?: return index
+        val sid = currentSessionId ?: return index
+        val list = messagesBySession[sid] ?: return index
+        if (list.getOrNull(index - 1) is Msg.Thinking) {
+            replaceMessageAt(index - 1, msg)
+            return index
+        }
+        val entries = entriesBySession[sid] ?: return index
+        val path = leafPath(sid)
+        val parent = path.getOrNull(index - 1) ?: return index
+        val child = path.getOrNull(index) ?: return index
+        val id = newEntryId(entries)
+        entries += SessionEntry(id, parent.id, msg)
+        val ci = entries.indexOfFirst { it.id == child.id }
+        if (ci >= 0) entries[ci] = entries[ci].copy(parentId = id)
+        list.add(index, msg)
+        return index + 1
+    }
+
+    /** 当前会话 root→leaf 的条目路径（条目树遍历的唯一实现，消息流下标 = 路径下标） */
+    private fun leafPath(sid: String): List<SessionEntry> {
+        val entries = entriesBySession[sid] ?: return emptyList()
+        val byId = entries.associateBy { it.id }
+        val path = mutableListOf<SessionEntry>()
+        var cur = leafBySession[sid]?.let { byId[it] }
+        while (cur != null) {
+            path += cur
+            cur = cur.parentId?.let { byId[it] }
+        }
+        path.reverse()
+        return path
     }
 
     /**
@@ -526,15 +636,7 @@ class ChatState {
         if (index !in list.indices) return
         list[index] = msg
         val entries = entriesBySession[sid] ?: return
-        val byId = entries.associateBy { it.id }
-        val path = mutableListOf<SessionEntry>()
-        var cur = leafBySession[sid]?.let { byId[it] }
-        while (cur != null) {
-            path += cur
-            cur = cur.parentId?.let { byId[it] }
-        }
-        path.reverse()
-        val target = path.getOrNull(index) ?: return
+        val target = leafPath(sid).getOrNull(index) ?: return
         val i = entries.indexOfFirst { it.id == target.id }
         if (i >= 0) entries[i] = entries[i].copy(msg = msg)
     }

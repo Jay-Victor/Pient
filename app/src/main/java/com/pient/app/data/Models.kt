@@ -619,6 +619,8 @@ sealed class Msg {
     data class Thinking(
         val level: String, // off/minimal/low/medium/high/xhigh
         val text: String,
+        /** 思考耗时（毫秒；Hermes 思考行「思考了 3s」口径）。null = 无计时（历史记录/非流式无起点） */
+        val durationMs: Long? = null,
     ) : Msg()
 
     data class ToolCall(

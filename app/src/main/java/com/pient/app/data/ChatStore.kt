@@ -240,6 +240,7 @@ object ChatStore {
             .put("type", "thinking")
             .put("level", m.level)
             .put("text", m.text)
+            .put("durationMs", m.durationMs ?: JSONObject.NULL)
         is Msg.ToolCall -> JSONObject()
             .put("type", "toolcall")
             .put("name", m.name)
@@ -300,7 +301,11 @@ object ChatStore {
                     error = o.optBoolean("error", false),
                 )
             }
-            "thinking" -> Msg.Thinking(o.optString("level"), o.optString("text"))
+            "thinking" -> Msg.Thinking(
+                level = o.optString("level"),
+                text = o.optString("text"),
+                durationMs = if (o.isNull("durationMs")) null else o.optLong("durationMs"),
+            )
             "toolcall" -> Msg.ToolCall(
                 name = o.optString("name"),
                 params = o.optString("params"),

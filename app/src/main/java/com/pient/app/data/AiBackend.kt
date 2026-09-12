@@ -25,6 +25,9 @@ class AiException(message: String) : Exception(message)
 /** 流式事件 */
 sealed class ChatEvent {
     data class TextDelta(val text: String) : ChatEvent()
+
+    /** 思考/推理增量（Anthropic thinking_delta / OpenAI 兼容 reasoning[_content|_text]） */
+    data class ThinkingDelta(val text: String) : ChatEvent()
     data class UsageEvent(val usage: Usage) : ChatEvent()
     data object Done : ChatEvent()
     data class Failed(val message: String) : ChatEvent()
@@ -123,7 +126,7 @@ object AiBackend {
 
     // ───────────────────────── 对话（非流式） ─────────────────────────
 
-    data class ChatResult(val text: String, val usage: Usage?)
+    data class ChatResult(val text: String, val usage: Usage?, val thinking: String? = null)
 
     suspend fun chat(
         cfg: ProviderConfig,
@@ -294,23 +297,41 @@ object AiBackend {
     )
 
     private fun parseOpenAiFull(root: JSONObject): ChatResult {
-        val text = root.optJSONArray("choices")?.optJSONObject(0)
-            ?.optJSONObject("message")?.let { it.strOrEmpty("content") } ?: ""
+        val message = root.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+        val text = message?.let { it.strOrEmpty("content") } ?: ""
         val usage = root.optJSONObject("usage")?.let { openAiUsage(it) }
-        return ChatResult(text, usage)
+        // 非流式：推理内容同样按 pi 的字段优先级取第一个非空（见 reasoningField）
+        val thinking = message?.let { m ->
+            REASONING_FIELDS.firstNotNullOfOrNull { f -> m.strOrEmpty(f).takeIf { it.isNotEmpty() } }
+        }
+        return ChatResult(text, usage, thinking)
     }
+
+    /**
+     * OpenAI 兼容协议的推理字段优先级（逐项对齐 pi `openai-completions.ts` 的
+     * OPENAI_COMPLETIONS_REASONING_FIELDS）：llama.cpp 走 reasoning_content、多数
+     * 国内服务商走 reasoning_content（DeepSeek）/ reasoning（GLM 等）、少数走
+     * reasoning_text。**每个分片只取第一个非空字段**——有的端点同时回两个同值字段
+     * （chutes.ai），不按优先级取会把思考文本拼两遍。
+     */
+    private val REASONING_FIELDS = listOf("reasoning_content", "reasoning", "reasoning_text")
 
     private fun parseAnthropicFull(root: JSONObject): ChatResult {
         val sb = StringBuilder()
+        val thinking = StringBuilder()
         val content = root.optJSONArray("content")
         if (content != null) {
             for (i in 0 until content.length()) {
                 val b = content.optJSONObject(i) ?: continue
-                if (b.optString("type") == "text") sb.append(b.strOrEmpty("text"))
+                when (b.optString("type")) {
+                    "text" -> sb.append(b.strOrEmpty("text"))
+                    // 非流式思考块（Anthropic content 里的 thinking block）
+                    "thinking" -> thinking.append(b.strOrEmpty("thinking"))
+                }
             }
         }
         val usage = root.optJSONObject("usage")?.let { anthropicUsage(it) }
-        return ChatResult(sb.toString(), usage)
+        return ChatResult(sb.toString(), usage, thinking.toString().takeIf { it.isNotEmpty() })
     }
 
     private fun parseOpenAiStream(source: okio.BufferedSource, emit: (ChatEvent) -> Unit) {
@@ -326,7 +347,14 @@ object AiBackend {
                 val delta = choices.optJSONObject(0)?.optJSONObject("delta") ?: continue
                 val content = delta.strOrEmpty("content")
                 if (content.isNotEmpty()) emit(ChatEvent.TextDelta(content))
-                // reasoning_content（DeepSeek 等推理模型）暂不展示，仅取最终回答
+                // 推理增量（思考模式开启时服务商才会回；按字段优先级取第一个非空）
+                for (f in REASONING_FIELDS) {
+                    val t = delta.strOrEmpty(f)
+                    if (t.isNotEmpty()) {
+                        emit(ChatEvent.ThinkingDelta(t))
+                        break
+                    }
+                }
                 o.optJSONObject("usage")?.let { usage = openAiUsage(it) }
             } catch (_: Exception) {
                 // 忽略无法解析的分片
@@ -349,11 +377,17 @@ object AiBackend {
                 when (o.optString("type")) {
                     "content_block_delta" -> {
                         val delta = o.optJSONObject("delta") ?: continue
-                        if (delta.optString("type") == "text_delta") {
-                            val t = delta.strOrEmpty("text")
-                            if (t.isNotEmpty()) emit(ChatEvent.TextDelta(t))
+                        when (delta.optString("type")) {
+                            "text_delta" -> {
+                                val t = delta.strOrEmpty("text")
+                                if (t.isNotEmpty()) emit(ChatEvent.TextDelta(t))
+                            }
+                            // 思考增量（思考模式开启时 Anthropic 回 thinking_delta）
+                            "thinking_delta" -> {
+                                val t = delta.strOrEmpty("thinking")
+                                if (t.isNotEmpty()) emit(ChatEvent.ThinkingDelta(t))
+                            }
                         }
-                        // thinking_delta 暂不展示，仅取最终回答
                     }
                     "message_start" -> o.optJSONObject("message")?.optJSONObject("usage")?.let {
                         inTokens = it.optInt("input_tokens")
