@@ -156,6 +156,8 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             AiConfigStore.configs[id] = ProviderConfig(
                 providerId = id,
                 endpoint = p.defaultEndpoint,
+                // 已知服务商的思考参数写法直接预置（自定义服务商 = AUTO 按模型名推断）
+                reasoningFormat = p.reasoningFormat,
             )
         }
         selectedId = id
@@ -454,11 +456,14 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                             style = MaterialTheme.typography.bodyMedium,
                                         )
                                         Text(
-                                            // 自动识别时把「实际生效的写法」摊开给用户看，避免「选了自动但不知道发了什么」
-                                            if (cfg.reasoningFormat == ReasoningFormat.AUTO) {
-                                                "自动识别 → 当前生效：${effective.label}（${effective.wire}）"
-                                            } else {
-                                                cfg.reasoningFormat.wire
+                                            // 已知服务商：写明「服务商预设」，让用户知道这行不用自己填
+                                            when {
+                                                cfg.reasoningFormat == ReasoningFormat.AUTO ->
+                                                    "自动识别 → 当前生效：${effective.label}（${effective.wire}）"
+                                                provider.id != ProviderCatalog.CUSTOM_ID &&
+                                                    cfg.reasoningFormat == provider.reasoningFormat ->
+                                                    "服务商预设：${cfg.reasoningFormat.wire}"
+                                                else -> cfg.reasoningFormat.wire
                                             },
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
