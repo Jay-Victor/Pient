@@ -155,17 +155,21 @@ fun ChatMessages(
     val scope = rememberCoroutineScope()
     var showPermDemo by remember { mutableStateOf(false) }
 
-    // 进入会话（首次组合 / 切换会话）默认滚到消息最底部（2026-09-09 用户定：
-    // 恢复会话后视口停在最上方不符合使用习惯）。以列表引用判切换——
-    // 同一会话内的消息增删由下方跟随滚动 effect 处理，这里只认列表换新。
+    // 进入会话（首次组合 / 切换会话 / 分支换叶）默认落在消息最底部。
+    //
+    // ★ 必须在**首次测量之前**就定位（2026-09-12 修复「打开 Pient 一瞬显示『显示更早的消息』
+    //   按钮和最旧的那批消息」）：旧实现在 LaunchedEffect 里 `withFrameNanos` 后再 scrollToItem，
+    //   于是**首帧一定画在列表顶部**（长会话就是按钮 + 窗口里最旧的消息），下一帧才跳到底部。
+    //   真机上这一两帧肉眼可见（页面像先错位再归位）；模拟器录屏只有 ~12fps、截图 220ms 一张，
+    //   抓不到帧不代表没有 —— 代码路径本身决定了它必然发生。
+    //   requestScrollToItem 只是登记目标位置、在下次测量生效，所以首帧就已经到底。
+    val showEarlier = startIndex > 0
+    val itemCount = (if (showEarlier) 1 else 0) + (messages.size - startIndex) +
+        (if (isStreaming) 1 else 0) + 1   // + 尾部 spacer
     var lastList by remember { mutableStateOf<List<Msg>?>(null) }
-    LaunchedEffect(messages) {
-        if (messages !== lastList) {
-            lastList = messages
-            withFrameNanos { } // 等一帧布局完成再取 total（否则是旧值）
-            val total = listState.layoutInfo.totalItemsCount
-            if (total > 0) listState.scrollToItem(total - 1)
-        }
+    if (messages !== lastList) {
+        lastList = messages
+        if (itemCount > 0) listState.requestScrollToItem(itemCount - 1)
     }
     // 各消息气泡的根坐标（长按菜单锚点；LazyColumn 回收后需重新上报）。
     // ★ 必须是**普通 HashMap**而不是 mutableStateMapOf：写入发生在 onGloballyPositioned
@@ -173,19 +177,6 @@ fun ChatMessages(
     // 每个可见项在每帧都多走一轮组合（长会话卡顿源之一，2026-09-12 修复）。
     // 该 Map 只在长按那一刻被读，不需要参与重组。
     val bubbleBounds = remember { HashMap<Int, Rect>() }
-    // 「显示更早的消息」翻页后的视口锚点：窗口状态变化生效后再落滚动（否则按旧条目数滚动），
-    // 并且做一次实测误差校正（2026-09-12）
-    var pendingAnchor by remember { mutableStateOf<PendingAnchor?>(null) }
-    LaunchedEffect(startIndex) {
-        val anchor = pendingAnchor ?: return@LaunchedEffect
-        pendingAnchor = null
-        listState.scrollToItem(anchor.row, 0)
-        withFrameNanos { }
-        val now = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == anchor.row }?.offset
-        if (now != null && now != anchor.containerOffset) {
-            listState.scrollToItem(anchor.row, now - anchor.containerOffset)
-        }
-    }
     // 长按超时配置（消息长按 fork 检测用）
     val viewConfig = LocalViewConfiguration.current
 
@@ -277,21 +268,17 @@ fun ChatMessages(
                                     RoundedCornerShape(50),
                                 )
                                 .clickable {
-                                    // 锚点 = 第一条可见的**消息行**（按钮自身不算；
-                                    // Hermes anchorBeforePrepend 同口径）。记下它此刻在容器内的
-                                    // 偏移，翻页后先滚回该行再按实测误差二次校正 ——
-                                    // scrollToItem 的偏移量与布局内边距/夹取的口径不完全一致，
-                                    // 实测校正比推导单位可靠
-                                    val info = listState.layoutInfo
-                                    val firstVisible = listState.firstVisibleItemIndex
-                                    val anchorRow =
-                                        if (firstVisible == 0 && startIndex > 0) 1 else firstVisible
-                                    val anchorOffset = info.visibleItemsInfo
-                                        .firstOrNull { it.index == anchorRow }
-                                        ?.offset
-                                        ?: listState.firstVisibleItemScrollOffset
+                                    // 翻页后**把刚加载的消息推进视野**：直接滚到列表顶端（第 0 行 = 按钮本身，
+                                    // 它在翻页前后都是 0 行，所以不必等布局）。
+                                    //
+                                    // 为什么不再自己算锚点：
+                                    // ① Compose 的 LazyColumn 本来就按 key 保持滚动位置——往前面插入条目时，
+                                    //    原可见项会留在原位；再手动滚一次会与它叠加，视口位置不可控
+                                    //    （2026-09-12 实测：同一个操作一次位移 291px、另一次纹丝不动）。
+                                    // ② 就算把位置钉准，新内容也全在视口**上方**——用户点完看不到任何变化，
+                                    //    真机反馈就是「点了无效、没加载出消息」。滚到顶端则新加载的一页直接可见。
                                     val added = onShowEarlier()
-                                    if (added > 0) pendingAnchor = PendingAnchor(anchorRow + added, anchorOffset)
+                                    if (added > 0) scope.launch { listState.scrollToItem(0) }
                                 }
                                 .padding(horizontal = 12.dp, vertical = 4.dp),
                         )
@@ -1568,12 +1555,6 @@ private fun CompactionCard(msg: Msg.Compaction) {
 // 聊天流内不再出现分支卡片。
 
 // ───────────────────────────── 流式输出卡 ─────────────────────────────
-
-/**
- * 「显示更早的消息」翻页的视口锚点（2026-09-12）：
- * [row] = 翻页后该行在列表中的新行下标，[containerOffset] = 翻页前它在容器内的偏移（px）。
- */
-private class PendingAnchor(val row: Int, val containerOffset: Int)
 
 /** 消息定位预览文案（换行折叠为空格，超长由列表行 Ellipsis 截断） */
 private fun locatorPreview(msg: Msg): String = when (msg) {

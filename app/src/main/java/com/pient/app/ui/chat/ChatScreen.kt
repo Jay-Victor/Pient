@@ -114,6 +114,12 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     // 覆盖顶栏与系统状态栏；listState 提升后 ChatMessages 与定位弹窗共享同一滚动状态）
     var locatorOpen by remember { mutableStateOf(false) }
     val messagesListState = rememberLazyListState()
+    // 消息列表的可视高度（dp）——「一屏」的计量单位：优先用实测视口高度，
+    // 首帧还没测量时用屏幕高 × 0.72 估（扣掉顶栏与输入栏）。长会话窗口按它折算屏数。
+    val listViewportDp = with(density) {
+        val px = messagesListState.layoutInfo.viewportSize.height
+        (if (px > 0) px else (screenHpx * 0.72f).toInt()).toDp().value
+    }
     // 长按消息 → fork 上下文菜单（2026-09-02 分支功能设计 §4）：目标消息下标 + 气泡根坐标
     var forkMenuTarget by remember { mutableStateOf<Pair<Int, Rect>?>(null) }
     // 复制消息卡（2026-09-11）：内容在打开时快照，避免下标失效；null = 未打开
@@ -396,6 +402,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                             chatState = chatState,
                             scope = scope,
                             listState = messagesListState,
+                            viewportDp = listViewportDp,
                             bottomInset = dockInset,
                             onOpenLocator = { locatorOpen = true },
                             onMessageLongPress = { idx, rect -> forkMenuTarget = idx to rect },
@@ -727,7 +734,11 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
         if (locatorOpen) {
             Box(Modifier.fillMaxSize().zIndex(3f)) {
                 val total = chatState.currentMessages.size
-                val windowStart = chatState.messageWindowStart(chatState.currentSessionId, total)
+                val windowStart = chatState.messageWindowStart(
+                    chatState.currentSessionId,
+                    chatState.currentMessages,
+                    listViewportDp,
+                )
                 MessageLocatorDialog(
                     messages = chatState.currentMessages,
                     listState = messagesListState,
@@ -738,8 +749,17 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                         // onDismiss 一起被取消，animateScrollToItem 启动即中止（点条目不跳转的根因）。
                         // 先关弹窗再滚动，跳转动画在聊天列表上完整可见。
                         // 目标可能是被窗口挡住的更早消息：先把它纳入窗口再滚（2026-09-12）
-                        chatState.ensureMessageVisible(chatState.currentSessionId, total, idx)
-                        val start = chatState.messageWindowStart(chatState.currentSessionId, total)
+                        chatState.ensureMessageVisible(
+                            chatState.currentSessionId,
+                            chatState.currentMessages,
+                            listViewportDp,
+                            idx,
+                        )
+                        val start = chatState.messageWindowStart(
+                            chatState.currentSessionId,
+                            chatState.currentMessages,
+                            listViewportDp,
+                        )
                         val row = idx - start + (if (start > 0) 1 else 0)
                         locatorOpen = false
                         scope.launch { messagesListState.animateScrollToItem(row.coerceAtLeast(0)) }
@@ -872,6 +892,8 @@ private fun MessagesPanel(
     chatState: ChatState,
     scope: kotlinx.coroutines.CoroutineScope,
     listState: LazyListState,
+    /** 列表可视高度（dp）——长会话窗口按它折算「几屏内容」 */
+    viewportDp: Float,
     bottomInset: Dp = 0.dp,
     onOpenLocator: () -> Unit,
     onMessageLongPress: (Int, Rect) -> Unit,
@@ -889,15 +911,17 @@ private fun MessagesPanel(
         streamDraft = chatState.streamDraft,
         listState = listState,
         bottomInset = bottomInset,
-        // 长会话只上屏最近一页（更早的靠「显示更早的消息」翻页，2026-09-12）
+        // 长会话上屏窗口：按**内容高度**计价（≈2 屏内容，早于它的靠「显示更早的消息」翻页）
         startIndex = chatState.messageWindowStart(
             chatState.currentSessionId,
-            chatState.currentMessages.size,
+            chatState.currentMessages,
+            viewportDp,
         ),
         onShowEarlier = {
             chatState.showEarlierMessages(
                 chatState.currentSessionId,
-                chatState.currentMessages.size,
+                chatState.currentMessages,
+                viewportDp,
             )
         },
         onOpenLocator = onOpenLocator,

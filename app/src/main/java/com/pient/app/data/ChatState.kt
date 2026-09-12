@@ -21,14 +21,54 @@ import kotlinx.coroutines.withContext
 /** 顶栏右下方区域内容（消息区 / 文件内容预览区 / 终端页 / 分支画布 四态切换） */
 enum class Panel { MESSAGES, FILES, TERMINAL, TREE }
 
-/** 长会话首屏上屏的消息条数（更早的由「显示更早的消息」翻页加载，2026-09-12） */
-private const val MESSAGE_WINDOW_INITIAL = 40
+/**
+ * 长会话上屏窗口（2026-09-12）：**按内容高度计价**，不按条数。
+ *
+ * 条数计价的问题（用户真机实测发现）：同一个「40 条」在模拟器的短消息里约两三屏，
+ * 在真机的长回答里十几屏 —— 两端的「手感」完全不同（真机上要滚十几屏才够到
+ * 「显示更早的消息」，而且首帧错位时的跳动幅度也大一倍）。参照 Hermes 桌面端
+ * 按渲染成本计价（RENDER_BUDGET=600 单位 ≈ 10-20 个 turn）的做法，这里按**估算高度**
+ * 折算屏数：首屏 ≈ [WINDOW_SCREENS] 屏内容，每次翻页再放 ≈ [WINDOW_PAGE_SCREENS] 屏。
+ */
+private const val WINDOW_SCREENS = 2.0f          // 进入会话时上屏的内容 ≈ 2 屏
 
-/** 「显示更早的消息」每次新增的条数（Hermes showEarlier 一页一翻口径） */
-private const val MESSAGE_WINDOW_PAGE = 40
+private const val WINDOW_PAGE_SCREENS = 1.0f     // 每次「显示更早的消息」再上屏 ≈ 1 屏
 
-/** 隐藏的更早消息少于该条数时不分页（直接全显，避免按钮离底部太近显得像坏了） */
-private const val MESSAGE_WINDOW_MARGIN = 8
+/** 条数下限：再长的消息也至少上屏这么多条（避免一屏只有一条时按钮贴脸） */
+private const val WINDOW_MIN_MESSAGES = 6
+
+/** 剩余更早内容估算不足这么多屏时直接全显（按钮不出现，避免「点一下没变化」） */
+private const val WINDOW_TAIL_SCREENS = 0.5f
+
+/**
+ * 单条消息的**渲染高度估算**（dp）——只在选择窗口大小时用，不影响渲染。
+ *
+ * 系数为**实测最小二乘拟合**（2026-09-12，AVD 420dpi / 1080px 宽 / 正文 14sp，
+ * 样本 = 五种形态的助手回答 + 短用户消息，逐条比对 LazyColumn 实测高度）：
+ *
+ * | 形态 | 字符数 | 估算 | 实测 |
+ * |---|---|---|---|
+ * | 纯中文散文 | 194 | 137 | 173 |
+ * | 散文 + 代码块 | 263 | 166 | 270 |
+ * | 散文 + 行内公式 | 154 | 120 | 163 |
+ * | 散文 + 块级公式 | 134 | 112 | 137 |
+ * | 散文 + 表格 | 162 | 124 | 217 |
+ * | 用户短消息 | 15 | 53 | 34 |
+ *
+ * 拟合：助手 ≈ 31 + 0.89×字符（取 30 + 0.9×）；用户 ≈ 28 + 0.5×字符。
+ * 精度约 ±20%（表格/长代码块偏低估），对「折算屏数」而言足够。
+ */
+fun estimatedMessageHeightDp(msg: Msg): Float = when (msg) {
+    is Msg.User ->
+        28f + 0.5f * msg.text.length +
+            if (msg.attachments.isEmpty()) 0f else 30f + 26f * msg.attachments.size +
+            if (msg.quote != null) 30f else 0f
+    is Msg.Assistant -> 30f + 0.9f * msg.markdown.length
+    is Msg.Thinking -> 38f
+    is Msg.ToolCall -> 56f
+    is Msg.ToolResult -> 40f
+    is Msg.Compaction -> 48f
+}
 
 /**
  * 聊天主页应用状态（跨导航保活：提升到 NavHost 外层）。
@@ -753,38 +793,56 @@ class ChatState {
 
     // ── 消息窗口（长会话防护，2026-09-12）──────────────────
     // 参考 Hermes 桌面端长会话（components/assistant-ui/thread/list.tsx 的 showEarlier）：
-    // 只把最近一页消息交给列表渲染，更早的靠「显示更早的消息」一页一页往前翻。
-    // 本实现按消息条数计价（Pient 的列表项就是 Msg），每会话独立记窗口，仅内存态不落盘。
-    private val messageWindowBySession = mutableStateMapOf<String, Int>()
+    // 只把最近一段内容交给列表渲染，更早的靠「显示更早的消息」一页一页往前翻。
+    // 计价用**估算高度**（屏数）而不是条数——条数在长短消息差异大的两端表现完全不同
+    // （用户真机实测发现，2026-09-12）。每会话独立记「已展开屏数」，仅内存态不落盘。
+    private val messageWindowPagesBySession = mutableStateMapOf<String, Float>()
 
     /**
-     * 上屏窗口起点（0 = 全部消息都在窗口内）。
-     * 更早消息不足 [MESSAGE_WINDOW_MARGIN] 条时不再分页（按钮不出现，直接全显）——
-     * 对应 Hermes「Never offer Show earlier over fewer turns than this」的 8 turn 下限。
+     * 上屏窗口起点（0 = 全部消息都在窗口内）：从最新一条往前累计**估算高度**，
+     * 直到达到「该会话已展开的屏数」× [screenDp]，再按条数下限兜底。
+     * 剩余更早内容估算不足 [WINDOW_TAIL_SCREENS] 屏时直接全显（按钮不出现）。
      */
-    fun messageWindowStart(sessionId: String?, total: Int): Int {
-        if (sessionId == null) return 0
-        val shown = messageWindowBySession[sessionId] ?: MESSAGE_WINDOW_INITIAL
-        val hidden = total - shown
-        return if (hidden <= MESSAGE_WINDOW_MARGIN) 0 else hidden
+    fun messageWindowStart(sessionId: String?, messages: List<Msg>, screenDp: Float): Int {
+        if (sessionId == null || messages.isEmpty() || screenDp <= 0f) return 0
+        val targetDp = (messageWindowPagesBySession[sessionId] ?: WINDOW_SCREENS) * screenDp
+        var acc = 0f
+        var count = 0
+        var i = messages.lastIndex
+        while (i >= 0) {
+            acc += estimatedMessageHeightDp(messages[i])
+            count++
+            i--
+            if (acc >= targetDp && count >= WINDOW_MIN_MESSAGES) break
+        }
+        val start = (i + 1).coerceAtLeast(0)
+        if (start == 0) return 0
+        // 更早的剩余内容太少 → 直接全显（避免按钮点一下几乎没变化）
+        var older = 0f
+        for (k in 0 until start) older += estimatedMessageHeightDp(messages[k])
+        return if (older < screenDp * WINDOW_TAIL_SCREENS) 0 else start
     }
 
-    /** 「显示更早的消息」：窗口再放一页；返回**本次新增条数**（列表据此保持视口锚点） */
-    fun showEarlierMessages(sessionId: String?, total: Int): Int {
+    /** 「显示更早的消息」：再展开一屏；返回**本次新增条数**（列表据此保持视口锚点） */
+    fun showEarlierMessages(sessionId: String?, messages: List<Msg>, screenDp: Float): Int {
         if (sessionId == null) return 0
-        val cur = messageWindowStart(sessionId, total)
-        val next = (cur - MESSAGE_WINDOW_PAGE).coerceAtLeast(0)
-        if (next == cur) return 0
-        messageWindowBySession[sessionId] = total - next
-        return cur - next
+        val before = messageWindowStart(sessionId, messages, screenDp)
+        if (before == 0) return 0
+        val cur = messageWindowPagesBySession[sessionId] ?: WINDOW_SCREENS
+        messageWindowPagesBySession[sessionId] = cur + WINDOW_PAGE_SCREENS
+        val after = messageWindowStart(sessionId, messages, screenDp)
+        return before - after
     }
 
-    /** 定位跳转前把目标消息纳入窗口（跳转到更早消息时自动翻页到能看见它） */
-    fun ensureMessageVisible(sessionId: String?, total: Int, index: Int) {
-        if (sessionId == null || index < 0) return
-        val start = messageWindowStart(sessionId, total)
-        if (index >= start) return
-        messageWindowBySession[sessionId] = total - index
+    /** 定位跳转前把目标消息纳入窗口（按目标到末尾的估算高度把屏数放大到够用） */
+    fun ensureMessageVisible(sessionId: String?, messages: List<Msg>, screenDp: Float, index: Int) {
+        if (sessionId == null || messages.isEmpty() || index < 0 || screenDp <= 0f) return
+        if (index >= messageWindowStart(sessionId, messages, screenDp)) return
+        var acc = 0f
+        for (k in index..messages.lastIndex) acc += estimatedMessageHeightDp(messages[k])
+        val needed = acc / screenDp + 0.2f
+        val cur = messageWindowPagesBySession[sessionId] ?: WINDOW_SCREENS
+        if (needed > cur) messageWindowPagesBySession[sessionId] = needed
     }
 
     // ── 文件页状态 ────────────────────────────────────────
