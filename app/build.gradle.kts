@@ -34,7 +34,102 @@ android {
     }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        jniLibs {
+            // pi 宿主运行时（内嵌 Node）以「原生库」形式随包分发：Android 10 起
+            // 应用不得 execve 自己私有目录里的文件（SELinux: untrusted_app × app_data_file
+            // 只给 execute 不给 execute_no_trans，实测 avc 拒绝），但 /data/app 下的
+            // apk_data_file 允许 execve —— 因此二进制必须放进 native lib 目录。
+            // useLegacyPackaging=true 才会在安装时解压到 /data/app/.../lib/<abi>/，
+            // 否则只做 APK 内 mmap、磁盘上没有可执行文件。
+            useLegacyPackaging = true
+            keepDebugSymbols += setOf("**/libpient_*.so") // 这些不是真 .so，禁止 strip
+        }
     }
+}
+
+// ===== pi 宿主运行时二进制（工具层）=====
+// 源：runtime/cache/usr/bin（由 runtime/scripts/fetch_runtime.py 拉取，见 runtime/README.md）
+// 目标：build/pientJniLibs/<abi>/libpient_{node,rg,fd}.so → 作为 jniLibs 源打进 APK
+val pientRuntimeAbi = (findProperty("pientRuntimeAbi") as String?) ?: "x86_64"
+val pientJniAbi = when (pientRuntimeAbi) {
+    "x86_64" -> "x86_64"
+    "aarch64", "arm64-v8a" -> "arm64-v8a"
+    else -> pientRuntimeAbi
+}
+val pientRuntimeCacheDir = rootProject.layout.projectDirectory
+    .dir("runtime/cache/usr/bin")
+    .asFile
+val pientRuntimeLibDir = rootProject.layout.projectDirectory
+    .dir("runtime/cache/usr/lib")
+    .asFile
+
+// ABI 策略（2026-09-12 拍板，与 Operit 同口径）：**单 ABI 出包**——运行时 260MB，
+// fat APK 会翻倍；ABI 切分（AAB）只在走 Play 分发时才有意义。默认 x86_64 供模拟器开发，
+// 真机/release 必须显式 -PpientRuntimeAbi=arm64-v8a（漏了直接构建失败，别出无声的错包）。
+if (findProperty("pientRuntimeAbi") == null &&
+    gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
+) {
+    throw GradleException("release 构建必须显式指定 -PpientRuntimeAbi=arm64-v8a（默认 x86_64 只用于模拟器开发）")
+}
+
+/**
+ * 运行时库的 jniLib 名：jniLibs 只收 lib*.so，而依赖带 SONAME 后缀（libicuuc.so.78 / libz.so.1）。
+ * 原名整段转义（不截断 `.so` 之后的部分）——`libicudata.so.78` 与 `libicudata.so.78.3` 同时存在，
+ * 截断命名会撞车（后者覆盖前者，映射表里两条指向同一个文件）。
+ */
+fun pientJniLibName(original: String): String =
+    "libpient_" + original.replace(Regex("[^A-Za-z0-9_]"), "_") + ".so"
+
+// jniLibs 源目录约定是「根目录 + <abi> 子目录」，所以复制到 pientJniLibs/<abi>/
+val pientJniRoot = layout.buildDirectory.dir("pientJniLibs")
+
+val syncPientRuntime = tasks.register<Copy>("syncPientRuntimeBinaries") {
+    description = "把 pi 宿主运行时二进制以 lib*.so 形式放入 jniLibs 目录"
+    onlyIf { pientRuntimeCacheDir.isDirectory }
+    from(pientRuntimeCacheDir) {
+        include("node", "rg", "fd")
+        rename { name -> "libpient_$name.so" }
+    }
+    into(pientJniRoot.map { it.dir(pientJniAbi) })
+}
+
+// 打包形态 = 混合（2026-09-12 拍板）：**随包带 node + 核心库**（可 execve 的二进制必须在
+// native lib 目录，被加载的依赖也一并随包 → 离线可起宿主），**pi npm 包按需下载**（可独立升级）。
+val syncPientRuntimeLibs = tasks.register<Copy>("syncPientRuntimeLibs") {
+    description = "把 Node 动态依赖以 libpient_*.so 形式放入 jniLibs 目录"
+    onlyIf { pientRuntimeLibDir.isDirectory }
+    from(pientRuntimeLibDir) {
+        include("*.so", "*.so.*")
+        rename { name -> pientJniLibName(name) }
+    }
+    into(pientJniRoot.map { it.dir(pientJniAbi) })
+}
+
+// SONAME → jniLib 名映射表（随 APK assets 分发，运行时按它建软链，见 PiRuntime.ensureLinks）
+val pientRuntimeLibsManifest =
+    layout.buildDirectory.file("generated/pientAssets/pient_runtime_libs.txt")
+
+val writePientRuntimeLibsManifest = tasks.register("writePientRuntimeLibsManifest") {
+    description = "生成 SONAME → jniLib 名映射表"
+    outputs.file(pientRuntimeLibsManifest)
+    doLast {
+        val f = pientRuntimeLibsManifest.get().asFile
+        f.parentFile.mkdirs()
+        val lines = if (pientRuntimeLibDir.isDirectory) {
+            (pientRuntimeLibDir.listFiles() ?: emptyArray())
+                .filter { it.isFile && (it.name.endsWith(".so") || it.name.contains(".so.")) }
+                .sortedBy { it.name }
+                .map { "${it.name} ${pientJniLibName(it.name)}" }
+        } else emptyList()
+        f.writeText(lines.joinToString("\n") + "\n")
+        println("pient 运行时库映射表：${lines.size} 项 → ${f.absolutePath}")
+    }
+}
+
+android.sourceSets.getByName("main").jniLibs.srcDir(pientJniRoot)
+android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/pientAssets"))
+tasks.named("preBuild") {
+    dependsOn(syncPientRuntime, syncPientRuntimeLibs, writePientRuntimeLibsManifest)
 }
 
 kotlin {
