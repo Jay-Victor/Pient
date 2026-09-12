@@ -452,7 +452,7 @@ private fun kindLabel(kind: PluginResourceKind): String = when (kind) {
 }
 
 /**
- * 插件安装路径（pi-0.84.4 package-manager 落盘规则）：
+ * 插件安装路径（pi-0.85.1 package-manager 落盘规则）：
  * - npm: 全局 ~/.pi/agent/npm/node_modules/<name>/；项目 .pi/npm/node_modules/<name>/
  * - git:/https:// 全局 ~/.pi/agent/git/<host>/<path>/；项目 .pi/git/<host>/<path>/
  * - 本地路径：原样保留

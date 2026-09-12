@@ -3,7 +3,9 @@ IDEA.md
 Docx/
 
 # ===== 第三方参考源码快照（不入库） =====
-Refences/pi-0.84.4/
+# pi 核心仓库按版本号滚动（当前 pi-0.85.1，旧版 pi-0.84.4 已于 2026-09-12 删除）：
+# 用通配符覆盖所有 pi-x.y.z 版本，避免每次升级漏加规则把整份快照提交进仓库
+Refences/pi-[0-9]*/
 Refences/pi-web-0.8.9/
 Refences/Operit-1.12.1/
 Refences/Mdcito-1.2.0/
