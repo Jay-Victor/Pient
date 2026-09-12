@@ -45,12 +45,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.pient.app.data.ChatState
-import com.pient.app.data.MockTerminal
+import androidx.compose.ui.platform.LocalContext
 import com.pient.app.data.TerminalLine
 import com.pient.app.data.TerminalLineKind
 import com.pient.app.ui.components.PientDialog
@@ -59,6 +60,7 @@ import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
 import com.pient.app.ui.theme.TerminalDark
 import com.pient.app.ui.theme.TerminalLight
+import com.pient.app.runtime.PiTerminal
 import kotlinx.coroutines.launch
 
 /**
@@ -84,7 +86,11 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
     val history = remember { mutableStateListOf<String>() }
     var historyIndex by remember { mutableIntStateOf(-1) }
 
-    val session = MockTerminal.sessions.getOrNull(chatState.terminalIndex) ?: MockTerminal.sessions.first()
+    // 真实会话引擎：首个会话在首次进入时建立（要起子进程，首帧先渲染空盒）
+    val context = LocalContext.current
+    LaunchedEffect(Unit) { PiTerminal.ensure(context) }
+    val session = PiTerminal.sessions.getOrNull(chatState.terminalIndex) ?: PiTerminal.sessions.firstOrNull()
+    if (session == null) return Box(Modifier.fillMaxSize())
 
     // 吸底：新输出自动跟随（用户上滚后可暂停）
     LaunchedEffect(session.lines.size) {
@@ -94,7 +100,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
     fun runCommand(cmd: String) {
         if (cmd.isBlank()) return
         session.lines += TerminalLine("~ \$ $cmd", TerminalLineKind.COMMAND)
-        MockTerminal.run(cmd).forEach { session.lines += TerminalLine(it, TerminalLineKind.OUTPUT) }
+        PiTerminal.write(session, cmd)
         history.add(cmd)
         historyIndex = -1
         input = TextFieldValue("")
@@ -119,7 +125,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                         modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        MockTerminal.sessions.forEachIndexed { i, s ->
+                        PiTerminal.sessions.forEachIndexed { i, s ->
                             val sel = i == chatState.terminalIndex
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -147,7 +153,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                                 // 仅剩一个会话时不可关闭（Operit 同款约束，防空列表）
-                                if (MockTerminal.sessions.size > 1) {
+                                if (PiTerminal.sessions.size > 1) {
                                     Icon(
                                         Icons.Outlined.Close, "关闭终端会话",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -166,8 +172,8 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                         modifier = Modifier
                             .size(18.dp)
                             .clickable(onClick = {
-                            MockTerminal.newSession()
-                            chatState.terminalIndex = MockTerminal.sessions.lastIndex
+                            PiTerminal.newSession(context)
+                            chatState.terminalIndex = PiTerminal.sessions.lastIndex
                         })
                             .padding(2.dp),
                     )
@@ -214,7 +220,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                 ) {
                     QuickKey("Ctrl+C", "中断", termColors) {
-                        session.lines += TerminalLine("^C", TerminalLineKind.COMMAND)
+                        PiTerminal.interrupt(context, session)
                     }
                     QuickKey("Ctrl+L", "清屏", termColors) {
                         session.lines.clear()
@@ -249,7 +255,13 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                         ),
                         cursorBrush = SolidColor(termColors["white"]!!),
                         singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        // 终端输入必须关掉自动大写与纠错：Gboard 默认给首字母大写，
+                        // 实测 `cd /workspace` 变成 `CD /workspace` → bash: CD: command not found
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.None,
+                            autoCorrectEnabled = false,
+                            imeAction = ImeAction.Send,
+                        ),
                         keyboardActions = KeyboardActions(onSend = { runCommand(input.text) }),
                         modifier = Modifier.weight(1f).padding(start = 8.dp),
                     )
@@ -339,14 +351,14 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
 
         // ── 会话关闭二次确认（Operit onTabCloseRequest 同款弹窗） ──
         closeConfirmIndex?.let { i ->
-            MockTerminal.sessions.getOrNull(i)?.let { target ->
+            PiTerminal.sessions.getOrNull(i)?.let { target ->
                 PientDialog(
                     title = "关闭终端会话",
                     onDismiss = { closeConfirmIndex = null },
                     confirmText = "删除",
                     onConfirm = {
-                        MockTerminal.sessions.removeAt(i)
-                        if (chatState.terminalIndex >= MockTerminal.sessions.size) {
+                        PiTerminal.close(target)
+                        if (chatState.terminalIndex >= PiTerminal.sessions.size) {
                             chatState.terminalIndex = 0
                         }
                         closeConfirmIndex = null

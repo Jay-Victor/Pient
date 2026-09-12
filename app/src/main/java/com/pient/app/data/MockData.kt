@@ -280,61 +280,6 @@ object MockTerminal {
         add(TerminalLine(">> Your private local terminal environment on Android <<", TerminalLineKind.SLOGAN))
     }
 
-    val sessions = mutableStateListOf(
-        TerminalSession(1, "会话1").apply {
-            lines.addAll(banner)
-            lines += TerminalLine("~ \$ ls", TerminalLineKind.COMMAND)
-            lines += TerminalLine("README.md  app/  Docx/  assets/", TerminalLineKind.OUTPUT)
-            lines += TerminalLine("~ \$ python3 --version", TerminalLineKind.COMMAND)
-            lines += TerminalLine("Python 3.12.3", TerminalLineKind.OUTPUT)
-        },
-        TerminalSession(2, "会话2").apply {
-            lines.addAll(banner)
-            lines += TerminalLine("~ \$ git status", TerminalLineKind.COMMAND)
-            lines += TerminalLine("On branch main\nnothing to commit, working tree clean", TerminalLineKind.OUTPUT)
-        },
-    )
-
-    /** 会话编号计数（删除后新建不重名） */
-    private var sessionCounter = 2
-
-    /** 新建终端会话（Operit onNewSession 同款：横幅 + 切换选中） */
-    fun newSession(): TerminalSession {
-        sessionCounter++
-        val s = TerminalSession(sessionCounter, "会话$sessionCounter")
-        s.lines.addAll(banner)
-        sessions += s
-        return s
-    }
-
-    /** mock 命令执行：返回输出行列表；null = 不支持 */
-    fun run(command: String): List<String> {
-        val c = command.trim()
-        val parts = c.split(Regex("\\s+"))
-        return when {
-            c.isEmpty() -> emptyList()
-            c == "ls" || c.startsWith("ls ") -> listOf("README.md  app/  Docx/  assets/")
-            c == "pwd" -> listOf("/root")
-            c == "python3 --version" || c == "python --version" ->
-                listOf("Python 3.12.3 (main, Apr 10 2025, 05:13:16) [GCC 13.2.0] on linux")
-            c == "uname -a" -> listOf("Linux localhost 6.1.99-android14 pient #1 SMP aarch64 GNU/Linux")
-            c == "git status" -> listOf("On branch main", "nothing to commit, working tree clean")
-            c == "help" || c == "?" -> listOf(
-                "可用演示命令：",
-                "  ls / pwd / uname -a / python3 --version",
-                "  echo <text> / git status / apt install <pkg>",
-                "  help",
-            )
-            c.startsWith("echo ") -> listOf(c.removePrefix("echo "))
-            c.startsWith("apt ") -> listOf(
-                "Reading package lists... Done",
-                "Building dependency tree... Done",
-                "${parts.getOrElse(1) { "pkg" }} is already the newest version.",
-                "0 upgraded, 0 newly installed.",
-            )
-            c.startsWith("cat ") -> listOf("# 文件内容预览请使用「文件」面板（原型演示）")
-            c == "clear" -> emptyList()
-            else -> listOf("bash: ${parts.first()}: command not found")
-        }
-    }
+    // 会话与命令执行已改为真实实现：见 runtime/PiTerminal（每会话一个经 PRoot 落到 rootfs 的
+    // GNU bash 子进程）。本对象只保留品牌常量（Logo / 横幅），供终端首屏与关于页共用。
 }

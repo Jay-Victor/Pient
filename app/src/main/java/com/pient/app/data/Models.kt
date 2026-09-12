@@ -866,9 +866,4 @@ data class TerminalLine(
 
 enum class TerminalLineKind { COMMAND, OUTPUT, PROMPT, BANNER, SLOGAN }
 
-data class TerminalSession(
-    val id: Int,
-    val name: String,
-    val lines: androidx.compose.runtime.snapshots.SnapshotStateList<TerminalLine> =
-        androidx.compose.runtime.mutableStateListOf(),
-)
+
