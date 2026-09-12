@@ -14,6 +14,8 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- AI 对话：直连服务商 API（2026-09-09） -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 读系统 DNS（ConnectivityManager → LinkProperties.dnsServers）写进 rootfs 的 resolv.conf -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Shizuku 调试通道（2026-09-12）：向 Shizuku 服务申请 ADB 级授权 -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 

@@ -113,7 +113,7 @@ class PiRpcClient(private val context: Context) {
 
         return try {
             val pb = ProcessBuilder(command)
-                .directory(PiRuntime.appDir(context))
+                .directory(PiRuntime.workspaceDir(context))   // 当前项目目录（见 PiRuntime.setWorkspace）
                 .redirectErrorStream(false)
             PiRuntime.environment(context).forEach { (k, v) -> pb.environment()[k] = v }
             val proc = pb.start()

@@ -1,5 +1,7 @@
 package com.pient.app.ui.terminal
 
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -62,11 +64,27 @@ fun TerminalSetupScreen(nav: NavController) {
     var checks by remember { mutableStateOf(PiRuntime.terminalChecks(context)) }
     var probe by remember { mutableStateOf("") }
     var envReady by remember { mutableStateOf(false) }
+    var progress by remember { mutableStateOf("") }
+    val main = remember { Handler(Looper.getMainLooper()) }
+    // rootfs 缺失 = 可以「一键配置」（解包随包的归档）；其它项缺失只能重检/排查
+    val rootfsMissing = checks.firstOrNull()?.second == false
 
     suspend fun refresh() {
         checks = withContext(Dispatchers.IO) { PiRuntime.terminalChecks(context) }
         probe = withContext(Dispatchers.IO) { PiTerminal.execOnce(context, PROBE_CMD) }
         envReady = checks.all { it.second } && probe.isNotEmpty()
+    }
+
+    /** 一键配置：解包随包的 Ubuntu rootfs（进度回调来自 IO 线程 → 转主线程写状态） */
+    suspend fun provision() {
+        progress = "准备解包…"
+        withContext(Dispatchers.IO) {
+            PiRuntime.extractRootfs(context) { pct, text ->
+                main.post { progress = "${(pct * 100).toInt()}% · $text" }
+            }
+        }
+        refresh()
+        progress = if (envReady) "" else progress
     }
     LaunchedEffect(Unit) { refresh() }
 
@@ -118,9 +136,11 @@ fun TerminalSetupScreen(nav: NavController) {
 
             // 状态说明
             Text(
-                if (envReady) "环境就绪 · $probe\n终端页与 Agent 的 bash 工具共用同一 rootfs"
-                else "缺少：" + checks.filterNot { it.second }.joinToString("、") { it.first } +
-                    "\n（开发形态用 runtime/scripts 部署；首启解包待实现）",
+                when {
+                    envReady -> "环境就绪 · $probe\n终端页与 Agent 的 bash 工具共用同一 rootfs"
+                    progress.isNotEmpty() -> progress
+                    else -> "缺少：" + checks.filterNot { it.second }.joinToString("、") { it.first }
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = if (envReady) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -128,14 +148,18 @@ fun TerminalSetupScreen(nav: NavController) {
 
             // 一键配置 / 完成
             PientButton(
-                text = if (envReady) "完成" else "重新检测",
+                text = when {
+                    envReady -> "完成"
+                    rootfsMissing -> "一键配置"
+                    else -> "重新检测"
+                },
                 onClick = {
                     if (envReady) {
                         nav.popBackStack()
                     } else {
                         scope.launch {
                             configuring = true
-                            refresh()
+                            if (rootfsMissing) provision() else refresh()
                             configuring = false
                             if (!envReady) {
                                 Toast.makeText(context, "仍缺少组件：见上方清单", Toast.LENGTH_SHORT).show()

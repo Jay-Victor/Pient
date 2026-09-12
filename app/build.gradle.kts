@@ -117,6 +117,25 @@ val syncPientTerminalBinaries = tasks.register<Copy>("syncPientTerminalBinaries"
     into(pientJniRoot.map { it.dir(pientJniAbi) })
 }
 
+/**
+ * 终端层 rootfs 归档随包（首启解包用）：Ubuntu base 是 ~28MB 的 tar.gz，放 assets。
+ * 归档本身不入库（runtime/cache 已 gitignore），构建期从缓存复制过来 → 装完 APK 即可自解包，
+ * 不再依赖开发机手动铺（此前 files/pient-rt/rootfs 是用 run-as 手工解的）。
+ */
+val syncPientRootfsArchive = tasks.register<Copy>("syncPientRootfsArchive") {
+    description = "把 Ubuntu base rootfs 归档放进 assets（首启解包）"
+    onlyIf {
+        pientRootfsCacheDir.listFiles()?.any { it.name.startsWith("ubuntu-base-") && it.name.endsWith(".tar.gz") } == true
+    }
+    from(pientRootfsCacheDir) {
+        include("ubuntu-base-*.tar.gz")
+        // 后缀不能是 .gz：aapt 会把 assets 里的 *.gz **自动解压并去掉后缀**（实测 30MB 的
+        // tar.gz 变成 84MB 的 assets/pient-rootfs.tar，白胖 50MB）。改成 .tgz 就不触发。
+        rename { "pient-rootfs.tgz" }
+    }
+    into(layout.buildDirectory.dir("generated/pientAssets"))
+}
+
 // 打包形态 = 混合（2026-09-12 拍板）：**随包带 node + 核心库**（可 execve 的二进制必须在
 // native lib 目录，被加载的依赖也一并随包 → 离线可起宿主），**pi npm 包按需下载**（可独立升级）。
 val syncPientRuntimeLibs = tasks.register<Copy>("syncPientRuntimeLibs") {
@@ -161,7 +180,7 @@ android.sourceSets.getByName("main").jniLibs.srcDir(pientJniRoot)
 android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/pientAssets"))
 tasks.named("preBuild") {
     dependsOn(syncPientRuntime, syncPientRuntimeLibs, syncPientTerminalBinaries,
-        writePientRuntimeLibsManifest)
+        syncPientRootfsArchive, writePientRuntimeLibsManifest)
 }
 
 kotlin {

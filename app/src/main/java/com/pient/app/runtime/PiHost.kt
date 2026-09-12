@@ -79,6 +79,8 @@ object PiHost {
         val c = impl(ctx)
         PiRuntime.syncAgentAssets(ctx)   // 权限守门扩展 + 默认工具策略
         val providers = PiConfig.sync(ctx)
+        // 终端层准备：guest 的 DNS + root 侧启动器 + 档位→模式文件（PRoot / chroot）
+        PiRuntime.prepareTerminal(ctx)
         val started = c.start(provider, model)
         if (started) {
             scope.launch {

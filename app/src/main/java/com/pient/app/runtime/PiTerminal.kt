@@ -120,6 +120,11 @@ object PiTerminal {
 
     @Synchronized
     private fun start(context: Context, session: Session) {
+        PiRuntime.prepareTerminal(context)   // DNS / root 启动器 / 档位模式，会话启动时对齐
+        if (!PiRuntime.rootfsReady(context)) {
+            append(session, TerminalLine("rootfs 尚未初始化 —— 点上方「环境配置」→「一键配置」完成解包（约 28MB）", TerminalLineKind.OUTPUT))
+            return
+        }
         val shell = PiRuntime.shellPath(context)
         if (!shell.isFile) {
             append(session, TerminalLine("终端运行时缺失：${shell.absolutePath}", TerminalLineKind.OUTPUT))

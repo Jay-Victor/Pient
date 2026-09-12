@@ -52,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import com.pient.app.runtime.PiRuntime
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -181,6 +182,8 @@ fun SystemPermissionScreen(nav: NavController) {
 
     fun setActiveTier(tier: PermissionTier) {
         SettingsStore.permissionTier = tier
+        // 档位要落到终端层的模式文件（包装脚本现读）——PRoot / su+chroot 由它决定
+        PiRuntime.prepareTerminal(context)
         val hint = when {
             tierReady(tier, status, shizukuInstalled, shizukuRunning, shizukuAuthorized, deviceRooted, rootGranted) -> null
             tier == PermissionTier.DEBUGGER -> "需先完成 Shizuku 安装与授权"

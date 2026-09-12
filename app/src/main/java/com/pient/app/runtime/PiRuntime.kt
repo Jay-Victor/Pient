@@ -1,7 +1,10 @@
 package com.pient.app.runtime
 
 import android.content.Context
+import android.net.ConnectivityManager
 import android.os.Build
+import com.pient.app.data.PermissionTier
+import com.pient.app.data.SettingsStore
 import android.system.Os
 import android.util.Log
 import java.io.File
@@ -92,6 +95,167 @@ object PiRuntime {
      * 可以留在私有目录，不必像 node/proot 那样进 APK 的 native lib 目录）。
      */
     fun rootfsDir(context: Context): File = File(root(context), "rootfs")
+
+    /**
+     * 让 guest 里有 DNS：ubuntu-base 自带的 `/etc/resolv.conf` 是**空文件**（实测 0 字节），
+     * 表现为 guest 内 `apt-get update` / `getent` 全部 `Temporary failure resolving …`。
+     * 取系统的 DNS（ConnectivityManager → LinkProperties.dnsServers）写进去；读不到时给公共兜底。
+     * 幂等：内容一致就不落盘（每次会话启动都会调一次，网络切换后自动跟上）。
+     */
+    fun syncResolvConf(context: Context) {
+        val file = File(File(rootfsDir(context), "etc"), "resolv.conf")
+        if (!file.parentFile.exists()) {
+            Log.w(TAG, "rootfs 未就绪，跳过 resolv.conf：${file.absolutePath}")
+            return
+        }
+        val servers = linkedSetOf<String>()
+        runCatching {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            cm.allNetworks.forEach { network ->
+                cm.getLinkProperties(network)?.dnsServers?.forEach { addr ->
+                    addr.hostAddress?.takeIf { it.isNotBlank() }?.let(servers::add)
+                }
+            }
+        }.onFailure { Log.w(TAG, "读取系统 DNS 失败：${it.message}") }
+        if (servers.isEmpty()) servers.addAll(listOf("223.5.5.5", "8.8.8.8"))
+        val text = servers.joinToString("") { "nameserver $it" + "\n" }
+        val shown = servers.joinToString(" ")
+        runCatching {
+            if (!file.exists() || file.readText() != text) {
+                file.writeText(text)
+                Log.i(TAG, "resolv.conf 已写入：$shown")
+            }
+        }.onFailure { Log.w(TAG, "写 resolv.conf 失败：${it.message}") }
+    }
+
+    /** root 侧启动器（assets 随包；运行时落到私有目录，由 `su -c "sh …"` 以 root 身份执行） */
+    private const val ROOT_WRAPPER_ASSET = "pient-root-wrapper.sh"
+
+    /** 终端模式文件：`proot`（应用 uid + PRoot）或 `root`（su + chroot）；包装脚本每次现读 */
+    fun terminalModeFile(context: Context): File = File(root(context), "terminal_mode")
+
+    /** 工作区路径文件（应用写：bash 工具的 cwd 与 Ubuntu 里的 /workspace 都由它定） */
+    fun workspaceFile(context: Context): File = File(root(context), "workspace")
+
+    /** 当前工作区目录；没设过/路径已消失时退回随包工作区 `app/` */
+    fun workspaceDir(context: Context): File {
+        val raw = runCatching { workspaceFile(context).takeIf { it.isFile }?.readText()?.trim() }.getOrNull()
+        val dir = raw?.takeIf { it.isNotBlank() }?.let { File(it) }
+        return if (dir != null && dir.isDirectory) dir else appDir(context)
+    }
+
+    /**
+     * 设置工作区。**只接受真实存在的目录**：SAF 项目拿不到文件系统路径（`content://`，或位于
+     * /sdcard 而应用受分区存储限制够不到），那种情况保持随包工作区 —— 别把够不到的路径写进去，
+     * 否则 PRoot 绑定挂载会失败、agent 的 cwd 也会指向不可访问的目录。
+     */
+    fun setWorkspace(context: Context, dir: File?) {
+        val target = dir?.takeIf { it.isDirectory } ?: appDir(context)
+        runCatching {
+            val f = workspaceFile(context)
+            if (!f.exists() || f.readText().trim() != target.absolutePath) {
+                f.writeText(target.absolutePath)
+                Log.i(TAG, "工作区已设为：${target.absolutePath}")
+            }
+        }.onFailure { Log.w(TAG, "工作区写入失败：${it.message}") }
+    }
+
+    /** 由当前项目推导工作区（本地项目才可用；SAF 项目见 [setWorkspace] 说明） */
+    fun setWorkspaceForProject(context: Context, path: String?, isSaf: Boolean) {
+        setWorkspace(context, if (!isSaf && !path.isNullOrBlank()) File(path) else null)
+    }
+
+    /**
+     * 终端层准备（宿主启动、终端会话启动、切换权限档位时各调一次；幂等）：
+     * 1) guest 的 DNS —— ubuntu-base 自带的 `resolv.conf` 是空文件，不写就连 apt 都跑不动；
+     * 2) root 侧启动器落盘；
+     * 3) 权限档位 → 终端模式文件（照 Operit：默认 PRoot，条件具备（Root）时用 chroot）。
+     * 只有 Root 档才用 root：Shizuku（调试档）是 Java/binder 侧能力（IShizukuService.newProcess），
+     * shell 链路到不了，Operit 自己也是 root 门控 shell、Shizuku 供其它系统能力。
+     */
+    fun prepareTerminal(context: Context) {
+        syncResolvConf(context)
+        runCatching {
+            context.assets.open(ROOT_WRAPPER_ASSET).use { input ->
+                File(root(context), ROOT_WRAPPER_ASSET).outputStream().use { input.copyTo(it) }
+            }
+        }.onFailure { Log.w(TAG, "root 侧启动器写入失败：${it.message}") }
+        val mode = if (SettingsStore.permissionTier == PermissionTier.ROOT) "root" else "proot"
+        val file = terminalModeFile(context)
+        if (!file.parentFile.exists()) return
+        runCatching {
+            if (!file.exists() || file.readText().trim() != mode) {
+                file.writeText(mode)
+                Log.i(TAG, "终端模式已写入：$mode（档位 ${SettingsStore.permissionTier}）")
+            }
+        }.onFailure { Log.w(TAG, "终端模式写入失败：${it.message}") }
+    }
+
+    /** 随包的 rootfs 归档（assets；构建期由 syncPientRootfsArchive 放进来） */
+    private const val ROOTFS_ARCHIVE_ASSET = "pient-rootfs.tgz"   // 见 build.gradle：别用 .gz 后缀
+
+    /** rootfs 是否已解包（终端可用性的判据） */
+    fun rootfsReady(context: Context): Boolean = rootfsBash(context).isFile
+
+    /** ubuntu-base 的顶层目录（解包是流式的：这些目录按序出现，可当进度刻度） */
+    private val ROOTFS_TOP_ENTRIES = listOf(
+        "bin", "boot", "dev", "etc", "home", "lib", "lib64", "media", "mnt",
+        "opt", "proc", "root", "run", "sbin", "srv", "sys", "tmp", "usr", "var",
+    )
+
+    /**
+     * 首启解包：把随包的 rootfs 归档铺到私有目录（`files/pient-rt/rootfs`）。
+     *
+     * 为什么由应用自己跑 `/system/bin/sh` 解包：Linux rootfs 里有符号链接、权限位、上万个文件，
+     * Kotlin 侧逐个写不现实；toybox 的 `gunzip | tar -x` 在应用上下文里实测可用（就是当初手工铺
+     * rootfs 用的那条路），而且**解出来的文件属主就是应用自己**——正是 PRoot 要的。
+     * 进度：tar 的成员是按目录序排列的，数顶层目录出现的个数即可（比递归统计文件数便宜得多）。
+     */
+    fun extractRootfs(context: Context, onProgress: (Float, String) -> Unit): Boolean {
+        val rootfs = rootfsDir(context)
+        if (!rootfs.exists() && !rootfs.mkdirs()) {
+            onProgress(0f, "无法创建 ${rootfs.absolutePath}")
+            return false
+        }
+        val tar = File(tmpDir(context), "pient-rootfs.tgz")
+        try {
+            onProgress(0.02f, "释放归档…")
+            context.assets.open(ROOTFS_ARCHIVE_ASSET).use { input ->
+                tar.outputStream().use { input.copyTo(it) }
+            }
+            val mb = tar.length() / 1048576
+            onProgress(0.05f, "解包中（$mb MB）…")
+            val cmd = "cd ${rootfs.absolutePath} && gunzip -c ${tar.absolutePath} | tar -x"
+            val proc = ProcessBuilder("/system/bin/sh", "-c", cmd)
+                .redirectErrorStream(true)
+                .start()
+            val output = proc.inputStream.bufferedReader()
+            while (proc.isAlive) {
+                val done = ROOTFS_TOP_ENTRIES.count { File(rootfs, it).exists() }
+                val pct = 0.05f + 0.9f * (done.toFloat() / ROOTFS_TOP_ENTRIES.size)
+                onProgress(pct.coerceAtMost(0.95f), "解包中…（$done/${ROOTFS_TOP_ENTRIES.size} 顶层目录）")
+                Thread.sleep(250)
+            }
+            val tail = runCatching { output.readText() }.getOrDefault("").trim()
+            val code = proc.exitValue()
+            if (code != 0) {
+                // tar 对**硬链接**条目会报 Permission denied 并整体退出 1：SELinux 不允许
+                // untrusted_app 建硬链接（实测 avc: denied { link } … app_data_file）。
+                // ubuntu-base 里只有两个（perl5.38.2 / uncompress 这类别名），所以真正的判据是
+                // 「/bin/bash 在不在」，不是 tar 的退出码。
+                Log.w(TAG, "解包退出码 $code（多半只是硬链接被拒）：${tail.take(200)}")
+            }
+            val ok = rootfsReady(context)
+            onProgress(1f, if (ok) "解包完成" else "解包后仍未找到 /bin/bash")
+            return ok
+        } catch (e: Exception) {
+            Log.w(TAG, "解包异常：${e.message}")
+            onProgress(0f, "解包异常：${e.message}")
+            return false
+        } finally {
+            runCatching { tar.delete() }
+        }
+    }
 
     /** 终端环境的检测清单（环境配置页用；纯文件系统判定，不起进程） */
     fun terminalChecks(context: Context): List<Pair<String, Boolean>> {

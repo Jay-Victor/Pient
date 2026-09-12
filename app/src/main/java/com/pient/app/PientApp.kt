@@ -42,6 +42,7 @@ import com.pient.app.data.SettingsStore
 import com.pient.app.data.ThemeMode
 import com.pient.app.data.UsageStore
 import com.pient.app.runtime.PiHostService
+import com.pient.app.runtime.PiRuntime
 import com.pient.app.runtime.PiHost
 import com.pient.app.ui.chat.ChatScreen
 import com.pient.app.ui.onboarding.OnboardingScreen
@@ -166,6 +167,17 @@ fun PientApp() {
     LaunchedEffect(Unit) {
         snapshotFlow { SettingsStore.drawerMode }
             .collect { SettingsStore.saveDrawerMode(context) }
+    }
+
+    // 当前项目 → agent 工作区（bash 工具的 cwd 与 Ubuntu 里的 /workspace 同一处）；
+    // SAF 项目没有可给 agent 的文件系统路径 → 保持随包工作区（见 PiRuntime.setWorkspace）
+    LaunchedEffect(ready) {
+        if (!ready) return@LaunchedEffect
+        snapshotFlow { chatState.currentProject to chatState.projects.toList() }
+            .collect { (name, projects) ->
+                val proj = projects.firstOrNull { it.name == name }
+                PiRuntime.setWorkspaceForProject(context, proj?.path, proj?.uri != null)
+            }
     }
 
     // 权限档位持久化（系统权限设置页 / 首启引导页选定），重启后保持

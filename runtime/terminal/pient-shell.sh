@@ -12,6 +12,27 @@
 # 路径不写死：pi 传给子进程的 HOME = <pient-rt>/home，取其父目录即运行时根。
 P=$(dirname "$HOME")
 
+# ── 档位路由（照 Operit：默认 PRoot 运行，条件具备（Root）时用 chroot）──
+#   档位由应用写进 $P/terminal_mode（SettingsStore.permissionTier → pi 的 Root 档）。
+#   本脚本每次被执行时现读 → 改档后**下一个**命令/会话即生效（已在跑的会话进程不换）。
+# 工作区 = 当前项目目录（应用写；没设过就退回随包工作区 app/）——agent 的 cwd 与 guest 的 /workspace 同一处
+W=$(cat "$P/workspace" 2>/dev/null)
+[ -n "$W" ] && [ -d "$W" ] || W=$P/app
+
+MODE=$(cat "$P/terminal_mode" 2>/dev/null)
+if [ "$MODE" = "root" ]; then
+  if command -v su >/dev/null 2>&1; then
+    if [ "${1:-}" = "-c" ] && [ $# -ge 2 ]; then
+      mkdir -p "$P/tmp"
+      # 命令正文经文件转交，避免 su -c "...被引号拆坏..."（路径无空格，安全）
+      printf '%s' "$2" > "$P/tmp/root-cmd.sh"
+      exec su -c "sh $P/pient-root-wrapper.sh -c $P/tmp/root-cmd.sh"
+    fi
+    exec su -c "sh $P/pient-root-wrapper.sh"
+  fi
+  echo "[pient] 已选 Root 档，但设备上没有可用的 su（未 root / 未授权）——本次回退 PRoot（应用 uid）。" >&2
+fi
+
 # env -i：宿主环境是 Android 的（PATH 指向 /system/bin、LD_* 指向 Android 库），
 # 直接透传会把 guest 污染成四不像（实测：guest 里 `head`/`id` 全找不到）。
 exec env -i \
@@ -21,5 +42,5 @@ exec env -i \
   PROOT_LOADER=$P/bin/proot-loader \
   PROOT_TMP_DIR=$P/tmp \
   $P/bin/proot -0 -r $P/rootfs -w /workspace \
-    -b /dev -b /proc -b /sys -b $P/app:/workspace \
+    -b /dev -b /proc -b /sys -b $W:/workspace \
     /bin/bash "$@"
