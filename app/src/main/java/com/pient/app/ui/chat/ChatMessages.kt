@@ -251,10 +251,31 @@ fun ChatMessages(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             // 「显示更早的消息」（长会话防护，2026-09-12；Hermes showEarlier 同款胶囊按钮）：
-            // 仅当更早消息被窗口挡住时出现，点击往前翻一页并保持视口锚点（内容不被抽走）
+            // 仅当更早消息被窗口挡住时出现，点击往前翻一页，并把新加载的一页推进视野。
             if (startIndex > 0) {
                 item(key = "show-earlier") {
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    // 触控目标 = 整行 48dp（Material 最小触控尺寸），胶囊视觉不变：
+                    // 旧实现把 clickable 挂在只含 12dp/4dp 内边距的胶囊上（高 ≈26dp），
+                    // 手机上容易点空——与「点几次才有反应」的体感叠加（2026-09-12）。
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .clickable {
+                                // 翻页后**把刚加载的消息推进视野**：直接滚到列表顶端（第 0 行 = 按钮本身，
+                                // 它在翻页前后都是 0 行，所以不必等布局）。
+                                //
+                                // 为什么不再自己算锚点：
+                                // ① Compose 的 LazyColumn 本来就按 key 保持滚动位置——往前面插入条目时，
+                                //    原可见项会留在原位；再手动滚一次会与它叠加，视口位置不可控
+                                //    （2026-09-12 实测：同一个操作一次位移 291px、另一次纹丝不动）。
+                                // ② 就算把位置钉准，新内容也全在视口**上方**——用户点完看不到任何变化，
+                                //    真机反馈就是「点了无效、没加载出消息」。滚到顶端则新加载的一页直接可见。
+                                val added = onShowEarlier()
+                                if (added > 0) scope.launch { listState.scrollToItem(0) }
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Text(
                             "显示更早的消息",
                             style = MaterialTheme.typography.labelMedium,
@@ -267,19 +288,6 @@ fun ChatMessages(
                                     MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f),
                                     RoundedCornerShape(50),
                                 )
-                                .clickable {
-                                    // 翻页后**把刚加载的消息推进视野**：直接滚到列表顶端（第 0 行 = 按钮本身，
-                                    // 它在翻页前后都是 0 行，所以不必等布局）。
-                                    //
-                                    // 为什么不再自己算锚点：
-                                    // ① Compose 的 LazyColumn 本来就按 key 保持滚动位置——往前面插入条目时，
-                                    //    原可见项会留在原位；再手动滚一次会与它叠加，视口位置不可控
-                                    //    （2026-09-12 实测：同一个操作一次位移 291px、另一次纹丝不动）。
-                                    // ② 就算把位置钉准，新内容也全在视口**上方**——用户点完看不到任何变化，
-                                    //    真机反馈就是「点了无效、没加载出消息」。滚到顶端则新加载的一页直接可见。
-                                    val added = onShowEarlier()
-                                    if (added > 0) scope.launch { listState.scrollToItem(0) }
-                                }
                                 .padding(horizontal = 12.dp, vertical = 4.dp),
                         )
                     }
