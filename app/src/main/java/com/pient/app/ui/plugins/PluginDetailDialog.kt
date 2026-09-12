@@ -307,11 +307,14 @@ fun PluginDetailDialog(
                     modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
+                    // 三联等宽按钮行：每枚仅 ~97dp（窄屏更窄），须用小于组件默认 16dp 的内容内边距，
+                    // 否则「检查更新」这类 4 字标签会被 Ellipsis 截断
                     PientButton(
                         text = if (updateAvailable) "更新" else "检查更新",
                         enabled = !busy,
                         loading = busy,   // 检查中 / 更新中：文字位置都换成旋转圆弧
                         primary = false,
+                        contentPadding = 8,
                         onClick = {
                             if (updateAvailable) {
                                 updating = true
@@ -341,11 +344,12 @@ fun PluginDetailDialog(
                         },
                         modifier = Modifier.weight(1f),
                     )
-                    PientButton("删除", enabled = !busy, onClick = onDelete, modifier = Modifier.weight(1f))
+                    PientButton("删除", enabled = !busy, onClick = onDelete, contentPadding = 8, modifier = Modifier.weight(1f))
                     PientButton(
                         "关闭",
                         onClick = onDismiss,
                         primary = false,
+                        contentPadding = 8,
                         modifier = Modifier.weight(1f),
                     )
                 }

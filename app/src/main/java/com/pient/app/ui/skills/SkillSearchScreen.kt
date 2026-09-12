@@ -132,8 +132,8 @@ fun SkillSearchScreen(nav: NavController) {
                     },
                 )
             }
-            // 搜索按钮：PientButton 无内边距、宽度 wrap 内容——"搜索"两字(~30dp) < 高度(40dp)
-            // 会变成竖胶囊形；固定 72dp 宽 + 与输入框同高 44dp（2026-08-27 修复）
+            // 搜索按钮：与输入框同高 44dp；宽度固定 72dp 以对齐输入框行
+            //（PientButton 自身已带左右 20dp 内边距，2026-09-12 起）
             PientButton(
                 "搜索",
                 onClick = { searched = query },

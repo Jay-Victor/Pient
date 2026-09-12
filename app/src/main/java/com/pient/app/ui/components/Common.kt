@@ -478,6 +478,13 @@ fun PientDialog(
 
 // ─────────────────────────────────────────────────────────────
 // 主/次按钮（高 40dp，圆角 12dp）
+// ★ 内容内边距（2026-09-12）：按钮背景宽度 wrap 内容，若调用方不给外部宽度约束
+//   （weight/fillMaxWidth），文字会紧贴圆角边框 —— 实测「设为当前档位」按钮
+//   背景 82.3dp × 33.9dp 与文字 ink 完全同宽 = 左右内边距 0.0dp，观感「紧」。
+//   现由组件保证左右各 [contentPadding] 的内边距：外部已定宽的调用点不受影响
+//   （文字在更大盒子里居中），只有 wrap 内容的调用点会自然长出内边距。
+//   默认 16dp = 修掉贴边 + 给等宽多按钮行留足余量（3 联按钮行可用显式更小值，见
+//   PluginDetailDialog「检查更新 / 删除 / 关闭」行）。
 // ─────────────────────────────────────────────────────────────
 @Composable
 fun PientButton(
@@ -488,6 +495,7 @@ fun PientButton(
     enabled: Boolean = true,
     loading: Boolean = false,
     height: Int = 40,
+    contentPadding: Int = 16,   // 内容左右内边距（dp）
 ) {
     val shape = RoundedCornerShape(12.dp)
     val bg = if (primary) MaterialTheme.colorScheme.primary else Color.Transparent
@@ -509,7 +517,9 @@ fun PientButton(
     ) {
         // 加载态：文字位置换成旋转圆弧（2026-09-10 插件弹窗「检查更新」首用）
         if (loading) {
-            ArcSpinner(size = 16.dp, color = fg)
+            Box(Modifier.padding(horizontal = dp(contentPadding))) {
+                ArcSpinner(size = 16.dp, color = fg)
+            }
         } else {
             Text(
                 text,
@@ -517,6 +527,7 @@ fun PientButton(
                 color = if (enabled) fg else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = dp(contentPadding)),
             )
         }
     }
