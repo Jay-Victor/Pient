@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.FormatIndentIncrease
 import androidx.compose.material.icons.automirrored.outlined.ViewSidebar
+import androidx.compose.material.icons.outlined.Animation
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Compress
@@ -114,7 +115,7 @@ fun BehaviorSettingsScreen(nav: NavController) {
                         .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(16.dp))
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
                 ) {
-                    PreviewToggleRow(
+                    SettingToggleRow(
                         icon = Icons.Outlined.SwapHoriz,
                         title = "长行不折行（向右延展）",
                         desc = "带行号的文件：每行内容向右延伸并可横向滚动，行号与内容始终一一对应；关闭时超出宽度自动折行。",
@@ -123,13 +124,31 @@ fun BehaviorSettingsScreen(nav: NavController) {
                     )
                 }
             }
+            item { SectionHeader("开屏设置") }
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(16.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
+                ) {
+                    SettingToggleRow(
+                        icon = Icons.Outlined.Animation,
+                        title = "开屏动画",
+                        desc = "启动时显示品牌开屏页（logo + π 轮廓加载动画 + PIENT 解码文字），并保留最短展示时长；关闭后不显示开屏页、不做等待，直接进入主界面（首屏数据仍在后台加载）。",
+                        checked = SettingsStore.startupAnimation,
+                        onCheckedChange = { SettingsStore.startupAnimation = it },
+                    )
+                }
+            }
         }
     }
 }
 
-/** 开关型设置行（图标 + 标题 + 说明 + 开关；整行可点） */
+/** 开关型设置行（图标 + 标题 + 说明 + 开关；整行可点；文件预览页设置 / 开屏设置共用） */
 @Composable
-private fun PreviewToggleRow(
+private fun SettingToggleRow(
     icon: ImageVector,
     title: String,
     desc: String,

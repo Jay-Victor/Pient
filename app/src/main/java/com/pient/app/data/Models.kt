@@ -106,6 +106,10 @@ object SettingsStore {
     var language by mutableStateOf("zh-CN")
     var drawerMode by mutableStateOf(DrawerMode.SLIDE)
 
+    // ── 开屏设置（2026-09-12）：启动时是否播放开屏加载动画 ──
+    //   关 = 不显示开屏页（跳过动画与最短展示），数据仍在后台加载，直接进入主界面
+    var startupAnimation by mutableStateOf(true)
+
     // ── 文件预览页设置（2026-09-10）：带行号的文件长行不折行，改为向右延展 + 横向滚动 ──
     var filePreviewNoWrap by mutableStateOf(false)
 
@@ -175,6 +179,7 @@ object SettingsStore {
         drawerMode = runCatching {
             DrawerMode.valueOf(p.getString("drawer_mode", "SLIDE") ?: "SLIDE")
         }.getOrDefault(DrawerMode.SLIDE)
+        startupAnimation = p.getBoolean("startup_animation", true)
         filePreviewNoWrap = p.getBoolean("file_preview_no_wrap", false)
         customAccentEnabled = p.getBoolean("custom_accent_enabled", false)
         customAccentHue = p.getFloat("custom_accent_hue", 215f).coerceIn(0f, 360f)
@@ -251,6 +256,14 @@ object SettingsStore {
         androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
             .edit()
             .putString("drawer_mode", drawerMode.name)
+            .apply()
+    }
+
+    /** 保存开屏设置（行为设置：是否播放开屏加载动画），重启后保持 */
+    fun saveStartupAnimation(androidCtx: android.content.Context) {
+        androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("startup_animation", startupAnimation)
             .apply()
     }
 

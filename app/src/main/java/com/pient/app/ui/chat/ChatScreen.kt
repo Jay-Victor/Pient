@@ -100,9 +100,12 @@ import kotlin.math.abs
 /**
  * 聊天主页（P1）：顶栏常驻，下方区域在 消息区 / 文件内容预览区（P3）/ 终端页（P4）
  * 之间切换承载；侧栏抽屉与文件树均为同窗口浮层（玻璃真模糊要求）。
+ *
+ * @param startupReady 首屏数据（项目/会话/AI 配置）是否已读盘完成。关掉「开屏动画」时开屏页
+ *   不渲染，这个标志用来压住「数据未就绪 → 引导清单误闪」（原先由开屏页盖住）。
  */
 @Composable
-fun ChatScreen(chatState: ChatState, nav: NavController) {
+fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean = true) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val context = LocalContext.current
@@ -421,6 +424,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                     when (chatState.activePanel) {
                         Panel.MESSAGES -> MessagesPanel(
                             chatState = chatState,
+                            startupReady = startupReady,
                             scope = scope,
                             listState = messagesListState,
                             viewportDp = listViewportDp,
@@ -911,6 +915,8 @@ private fun ChatTopBar(
 @Composable
 private fun MessagesPanel(
     chatState: ChatState,
+    /** 首屏数据是否已读盘完成（关掉开屏动画时用来压住引导清单误闪） */
+    startupReady: Boolean,
     scope: kotlinx.coroutines.CoroutineScope,
     listState: LazyListState,
     /** 列表可视高度（dp）——长会话窗口按它折算「几屏内容」 */
@@ -920,6 +926,11 @@ private fun MessagesPanel(
     onMessageLongPress: (Int, Rect) -> Unit,
     onConfigureAi: () -> Unit,
 ) {
+    if (!startupReady) {
+        // 首屏数据未就绪：先留空（等待期间由开屏页盖住；关掉开屏动画时也不显示引导清单，
+        // 否则会先闪一屏「创建项目 / 配置 AI」再跳回真实会话）
+        return
+    }
     if (chatState.currentProject == null || !chatState.aiConfigured) {
         // 2026-09-08 用户定：项目与 AI 配置两者齐备前，消息区显示引导清单
         // （任一未完成即显示，已完成步骤打勾提示）

@@ -101,9 +101,12 @@ fun PientApp() {
                 UsageStore.load(context)
             }
             PientRuntime.dataLoaded = true
-            // 最短展示：真机读盘可能百毫秒内完成，过短会像「闪一下」
-            val elapsed = SystemClock.uptimeMillis() - startedAt
-            if (elapsed < STARTUP_MIN_SHOW_MS) delay(STARTUP_MIN_SHOW_MS - elapsed)
+            // 最短展示：真机读盘可能百毫秒内完成，过短会像「闪一下」。
+            // 行为设置里关掉「开屏动画」时不做这层等待——不显示开屏页，读盘完就直接进主界面。
+            if (SettingsStore.startupAnimation) {
+                val elapsed = SystemClock.uptimeMillis() - startedAt
+                if (elapsed < STARTUP_MIN_SHOW_MS) delay(STARTUP_MIN_SHOW_MS - elapsed)
+            }
         }
         ready = true
     }
@@ -136,6 +139,12 @@ fun PientApp() {
     LaunchedEffect(Unit) {
         snapshotFlow { SettingsStore.drawerMode }
             .collect { SettingsStore.saveDrawerMode(context) }
+    }
+
+    // 开屏设置持久化（行为设置：是否播放开屏加载动画），重启后保持
+    LaunchedEffect(Unit) {
+        snapshotFlow { SettingsStore.startupAnimation }
+            .collect { SettingsStore.saveStartupAnimation(context) }
     }
 
     // 输入框设置持久化（样式 + 材质 + 透明度/纹理强度），重启后保持
@@ -263,7 +272,7 @@ fun PientApp() {
                         })
                     }
                     composable("chat") {
-                        ChatScreen(chatState = chatState, nav = nav)
+                        ChatScreen(chatState = chatState, nav = nav, startupReady = ready)
                     }
                     composable("skills") {
                         SkillsScreen(nav = nav)
@@ -303,8 +312,9 @@ fun PientApp() {
                     }
                 }
 
-                // 开屏加载层（最后渲染 = 在最上层）：首屏数据未就绪期间盖住下层界面
-                StartupOverlay(visible = !ready)
+                // 开屏加载层（最后渲染 = 在最上层）：首屏数据未就绪期间盖住下层界面。
+                // 行为设置里关掉「开屏动画」时整层不渲染（数据仍在后台加载，主界面直接进入；见 ChatScreen 的 startupReady 门控）。
+                StartupOverlay(visible = !ready && SettingsStore.startupAnimation)
             }
         }
     }
