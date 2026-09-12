@@ -84,6 +84,7 @@ import com.pient.app.data.Msg
 import com.pient.app.data.Panel
 import com.pient.app.data.Quote
 import com.pient.app.data.SettingsStore
+import com.pient.app.data.SidebarStyle
 import com.pient.app.ui.components.isTabletLayout
 import com.pient.app.ui.components.StatusBadge
 import com.pient.app.ui.files.FilesPanel
@@ -264,6 +265,14 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     // 平板端 = 常驻侧边栏语义（导航切换/点外一律不收起，2026-08-30 用户决策）；手机端点击即收
     val persistentDrawer = isTablet
     val drawerWidth = 296.dp
+    // ★ 悬浮侧栏（侧边栏样式）整体外缩 12dp：面板右缘 = 296dp + 12dp = 308dp。
+    //   **所有按「侧栏宽」算的位移/宽度/点外阈值一律用 drawerRevealWidth（面板右缘）**——
+    //   仍按 296dp 算会让侧栏右缘（含右描边）压在聊天页上 12dp
+    //   （2026-09-12 用户报「侧栏右侧部分遮挡聊天页」；实测：内容右移 777px=296dp、
+    //   面板右缘 808.5px=308dp → 重叠 31.5px=12dp）。贴边样式 inset = 0，
+    //   三模式的数值与改造前逐项一致（3D 的 0.82×宽仍是 Operit 口径，不受影响）。
+    val sidebarFloating = SettingsStore.sidebarStyle == SidebarStyle.FLOATING
+    val drawerRevealWidth = if (sidebarFloating) drawerWidth + SidebarFloatingInset else drawerWidth
 
     // 抽屉动画进度（Operit PhoneLayout：开 LowBouncy / 关 NoBouncy，stiffness 1000；
     // 平板压缩模式对齐 Operit TabletLayout 的 tween 280ms 宽度动画；
@@ -296,11 +305,14 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     val contentScale = if (use3D) 1f - (0.08f * progress) else 1f
     val contentRotationY = if (use3D) -7f * progress else 0f
     val contentCornerRadius = if (use3D) 24.dp * progress else 0.dp
-    val drawerOffset = -drawerWidth * (1f - progress)
+    // 抽屉自身滑入起始位：按「面板右缘」退到屏幕外（贴边=296dp / 悬浮=308dp），
+    // 否则悬浮样式在动画起点会露出面板右端 12dp 的一小条
+    val drawerOffset = -drawerRevealWidth * (1f - progress)
     val drawerScale = if (use3D) 0.92f + (0.08f * progress) else 1f
     val drawerAlpha = if (use3D) 0.72f + (0.28f * progress) else 1f
-    // 侧栏宽（px）——scrim 关闭判定用：点击 x 超过该值才算「点侧栏之外」
-    val drawerWidthPx = with(LocalDensity.current) { drawerWidth.toPx() }
+    // 面板右缘（px）——点外关闭判定用：点击 x 超过该值才算「点侧栏之外」
+    // （悬浮样式下 296dp 位置其实是侧栏本体的右端，按 296dp 判定会把「点侧栏右端」当点外）
+    val drawerRevealWidthPx = with(LocalDensity.current) { drawerRevealWidth.toPx() }
 
     Box(
         Modifier
@@ -373,10 +385,10 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                             clip = true
                             shape = RoundedCornerShape(contentCornerRadius)
                         }
-                        usePush -> Modifier.offset(x = drawerWidth * progress)
+                        usePush -> Modifier.offset(x = drawerRevealWidth * progress)
                         useCompress -> Modifier
-                            .width(configuration.screenWidthDp.dp - drawerWidth * progress)
-                            .offset(x = drawerWidth * progress)
+                            .width(configuration.screenWidthDp.dp - drawerRevealWidth * progress)
+                            .offset(x = drawerRevealWidth * progress)
                         else -> Modifier
                     },
                 ),
@@ -491,7 +503,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                                 .fillMaxSize()
                                 .pointerInput(Unit) {
                                     detectTapGestures { offset ->
-                                        if (offset.x > drawerWidthPx) chatState.drawerOpen = false
+                                        if (offset.x > drawerRevealWidthPx) chatState.drawerOpen = false
                                     }
                                 },
                         )
@@ -536,7 +548,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
                         .background(MaterialTheme.colorScheme.scrim)
                         .pointerInput(Unit) {
                             detectTapGestures { offset ->
-                                if (offset.x > drawerWidthPx) chatState.drawerOpen = false
+                                if (offset.x > drawerRevealWidthPx) chatState.drawerOpen = false
                             }
                         },
                 )

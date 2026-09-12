@@ -108,6 +108,18 @@ import java.util.Date
 import java.util.Locale
 
 /**
+ * 悬浮侧边栏的四周留白（左/上/下 12dp，与「悬浮输入框」同口径 28dp 圆角配套）。
+ *
+ * ★ 这份留白也算「侧栏右缘」的一部分：面板右缘 = 展开位移量 296dp + 本值 = 308dp。
+ *   凡是按「侧栏宽」算的数值——**推动展开的主内容位移、抽屉自身滑入起始位、平板压缩的
+ *   宽度/位移、点外关闭的 x 阈值**——都必须用 `296dp + SidebarFloatingInset`，
+ *   只算 296dp 会让侧栏右缘（含右描边）压在聊天页上 12dp
+ *   （2026-09-12 用户报「侧栏右侧部分遮挡聊天页」）。贴边样式本值不参与（= 0）。
+ *   本常量与 [SessionDrawer] 里的 `padding(start=…)` 是同一份实现，改一处即可。
+ */
+internal val SidebarFloatingInset = 12.dp
+
+/**
  * 会话侧栏（P2，设计计划 3.2）：
  * 品牌 + 搜索 / 批量管理 / 新建会话 / 项目选择器（切换 + 新建；项目行三点菜单重命名/删除）/
  * 会话列表（按项目过滤、时间分组；关键字搜索；行尾三点菜单）
@@ -216,7 +228,11 @@ fun SessionDrawer(
             modifier = modifier
                 .then(
                     if (sidebarFloating) {
-                        Modifier.padding(start = 12.dp, top = 12.dp, bottom = 12.dp)
+                        Modifier.padding(
+                            start = SidebarFloatingInset,
+                            top = SidebarFloatingInset,
+                            bottom = SidebarFloatingInset,
+                        )
                     } else {
                         Modifier
                     },
