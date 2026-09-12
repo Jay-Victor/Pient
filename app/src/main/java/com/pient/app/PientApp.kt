@@ -3,6 +3,7 @@ package com.pient.app
 import android.app.Activity
 import android.content.Context
 import android.graphics.drawable.ColorDrawable
+import android.os.SystemClock
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
@@ -47,11 +48,13 @@ import com.pient.app.ui.settings.ThemeSettingsScreen
 import com.pient.app.ui.settings.UsageScreen
 import com.pient.app.ui.skills.SkillSearchScreen
 import com.pient.app.ui.skills.SkillsScreen
+import com.pient.app.ui.startup.StartupOverlay
 import com.pient.app.ui.terminal.TerminalSetupScreen
 import com.pient.app.ui.theme.AppBackgroundLayer
 import com.pient.app.ui.theme.PientGlassProvisioning
 import com.pient.app.ui.theme.PientTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.withContext
 
@@ -76,16 +79,33 @@ fun PientApp() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("pient_prefs", Context.MODE_PRIVATE) }
     var onboarded by remember { mutableStateOf(prefs.getBoolean("onboarded", false)) }
+    // ★ 启动加载（2026-09-12）：原实现在**组合期同步读盘**（state.json 实测 505KB + 价格表资产
+    //   + AI 配置 + 用量台账），主线程被占住 → 系统启动画面一直挂到第一帧，实测停留 3.6s。
+    //   现改为：① ChatState 与「已加载」标记提到进程级（Activity 重建不重走开屏、也不重读盘）；
+    //   ② 读盘整体下放 IO 线程；③ 加载期间由 StartupOverlay 覆盖（含数据未就绪时
+    //   「创建项目 / 配置 AI」引导的误闪）。
     val chatState = remember {
-        ChatState().also {
-            // 内置模型价格表（assets/model_pricing.tsv，Operit 式内置定价）
-            ModelPricingDefaults.load(context)
-            // 会话记录与 AI 配置恢复（2026-09-09：项目/会话/消息记录跨重启保留）
-            AiConfigStore.load(context)
-            ChatStore.load(context, it)
-            // 用量台账恢复（2026-09-11：模型用量信息页的真实数据源）
-            UsageStore.load(context)
+        PientRuntime.chatState ?: ChatState().also { PientRuntime.chatState = it }
+    }
+    var ready by remember { mutableStateOf(PientRuntime.dataLoaded) }
+    LaunchedEffect(Unit) {
+        if (!PientRuntime.dataLoaded) {
+            val startedAt = SystemClock.uptimeMillis()
+            withContext(Dispatchers.IO) {
+                // 内置模型价格表（assets/model_pricing.tsv，Operit 式内置定价）
+                ModelPricingDefaults.load(context)
+                // 会话记录与 AI 配置恢复（2026-09-09：项目/会话/消息记录跨重启保留）
+                AiConfigStore.load(context)
+                ChatStore.load(context, chatState)
+                // 用量台账恢复（2026-09-11：模型用量信息页的真实数据源）
+                UsageStore.load(context)
+            }
+            PientRuntime.dataLoaded = true
+            // 最短展示：真机读盘可能百毫秒内完成，过短会像「闪一下」
+            val elapsed = SystemClock.uptimeMillis() - startedAt
+            if (elapsed < STARTUP_MIN_SHOW_MS) delay(STARTUP_MIN_SHOW_MS - elapsed)
         }
+        ready = true
     }
     val nav = rememberNavController()
 
@@ -155,8 +175,11 @@ fun PientApp() {
         }.collect { SettingsStore.saveFont(context) }
     }
 
-    // AI 配置持久化（2026-09-09：服务商/密钥/模型/参数 + 连接测试标记；2026-09-11 加模型定价与汇率），重启后保持
-    LaunchedEffect(Unit) {
+    // AI 配置持久化（2026-09-09：服务商/密钥/模型/参数 + 连接测试标记；2026-09-11 加模型定价与汇率），重启后保持。
+    // ★ 必须 gate 在 ready 之后（2026-09-12 实测事故）：AiConfigStore 现在是异步读盘，
+    //   snapshotFlow 一旦先启动就会把「尚未读盘的空配置」当成初值写盘 → 把用户配置清空。
+    LaunchedEffect(ready) {
+        if (!ready) return@LaunchedEffect
         snapshotFlow {
             listOf(
                 AiConfigStore.configs.mapValues { it.value },
@@ -169,7 +192,9 @@ fun PientApp() {
 
     // 项目会话记录持久化（2026-09-09：项目/会话/消息记录全量落盘），重启后保持。
     // snapshotFlow 内遍历全部会话与消息：任意增删改都会触发；写盘放 IO 线程防卡 UI。
-    LaunchedEffect(Unit) {
+    // ★ 同样 gate 在 ready 之后：否则空 ChatState 会被先写盘（同上事故）。
+    LaunchedEffect(ready) {
+        if (!ready) return@LaunchedEffect
         snapshotFlow {
             chatState.projects.toList() to
                 chatState.sessions.mapValues { it.value.toList() } to
@@ -185,8 +210,9 @@ fun PientApp() {
         }
     }
 
-    // 用量台账持久化（2026-09-11：每次回复记一笔，防抖落盘 usage.json）
-    LaunchedEffect(Unit) {
+    // 用量台账持久化（2026-09-11：每次回复记一笔，防抖落盘 usage.json）。★ 同样 gate 在 ready 之后
+    LaunchedEffect(ready) {
+        if (!ready) return@LaunchedEffect
         snapshotFlow { UsageStore.records.toList() }.debounce(800).collect {
             withContext(Dispatchers.IO) { UsageStore.save(context) }
         }
@@ -276,7 +302,23 @@ fun PientApp() {
                         AboutScreen(nav = nav)
                     }
                 }
+
+                // 开屏加载层（最后渲染 = 在最上层）：首屏数据未就绪期间盖住下层界面
+                StartupOverlay(visible = !ready)
             }
         }
     }
 }
+
+/**
+ * 进程级运行时（Activity 重建不丢）：
+ * - chatState：首屏数据只读一次盘，重建时复用同一个 ChatState 实例；
+ * - dataLoaded：仅「本进程首次组合」需要走开屏加载页（重建/回前台不再闪开屏）。
+ */
+private object PientRuntime {
+    var chatState: ChatState? = null
+    var dataLoaded = false
+}
+
+/** 开屏加载页最短展示时长（读盘过快时避免「闪一下」） */
+private const val STARTUP_MIN_SHOW_MS = 500L

@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="pient_bg">#0D1117</color>
+    <!-- 开屏底色（系统启动画面 + StartupOverlay 共用）：values 亮色 / values-night 深色，
+         见 values-night/colors.xml。系统启动画面取 windowBackground，故 themes.xml 也用它。 -->
+    <color name="pient_splash_bg">#FFFFFF</color>
 </resources>

@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.Pient" parent="android:Theme.Material.NoActionBar">
-        <!-- 窗口底色仅作 Compose 首帧兜底（默认主题为深色）。
-             运行时窗口底色由 MainActivity/PientApp 按主题动态设置；
+        <!-- 窗口底色兼系统启动画面底色（Android 12+ 的 starting window 取 windowBackground）：
+             day/night 跟随系统 —— `@color/pient_splash_bg`（values 白 / values-night #0D1117）。
+             旧值写死 @color/pient_bg（#0D1117）导致亮色主题用户冷启动先闪一记近黑底（2026-09-12 修）。
+             运行时窗口底色仍由 MainActivity/PientApp 按**应用主题**动态设置；
              页面真实底色统一由 PientApp 根部绘制 colorScheme.background。 -->
-        <item name="android:windowBackground">@color/pient_bg</item>
+        <item name="android:windowBackground">@color/pient_splash_bg</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
