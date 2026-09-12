@@ -3,6 +3,7 @@ package com.pient.app.ui.chat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,8 +50,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
@@ -109,6 +112,7 @@ fun ChatInputBar(
     var fullscreenOpen by rememberSaveable { mutableStateOf(false) }
     val streaming = chatState.isStreaming
     val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
     LaunchedEffect(focusTick) {
         if (focusTick > 0) runCatching { focusRequester.requestFocus() }
     }
@@ -137,6 +141,24 @@ fun ChatInputBar(
                 end = if (floating) 12.dp else 0.dp,
                 bottom = if (floating) 10.dp else 0.dp,
             )
+            // ★ 整块面板 = 输入框的点击面（2026-09-12 修「有时点输入框键盘不弹」）：
+            //   面板高 289px 里原先只有输入框那一条 126px 响应该点，其余全是死区
+            //   （左右 12dp 内边距、面板上/下内边距、输入框与控件行之间的空白条、
+            //   控件行中央 Spacer 约 81dp×48dp）——空面板看着像「一个大输入框」，
+            //   用户点在哪儿都以为点的是输入框。这里让面板空白处也算输入框：
+            //   聚焦 + 显式拉起键盘（文本框已聚焦但键盘被 BACK 收起时，只 requestFocus
+            //   不会重新弹键盘，必须补 show()）。
+            //   面板内的按键（模型选择器 / 上下文指示器 / 系统提示词 / + / 发送 /
+            //   全屏输入 / 附件 × ）都是本节点的子节点，Main pass 子节点先消费事件，
+            //   所以不会误触发这里；长按选词同理（子节点消费后本手势自动取消）。
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = {
+                        runCatching { focusRequester.requestFocus() }
+                        keyboard?.show()
+                    },
+                )
+            }
             .onGloballyPositioned { onDockTopPositioned(it.positionInRoot().y) },
     ) {
     Column(
