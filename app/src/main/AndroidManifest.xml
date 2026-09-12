@@ -17,6 +17,13 @@
     <!-- Shizuku 调试通道（2026-09-12）：向 Shizuku 服务申请 ADB 级授权 -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
+    <!-- 后台保活（2026-09-12，开发计划 §6.4）：宿主跑在前台服务里，常驻通知「Agent 运行中」。
+         dataSync 类型是唯一不需要额外用户动作即可长期持有的类型（Google Play 政策口径）。
+         Android 13+ 没给 POST_NOTIFICATIONS 时服务照常运行，只是通知不显示。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- 包可见性（Android 11+）：权限页要探测 Shizuku 与各 Root 管理器是否安装，
          未在 <queries> 声明的包 getPackageInfo 一律抛 NameNotFoundException（实测踩过：
          装了 Shizuku 也显示「未安装」）。Operit 用 QUERY_ALL_PACKAGES 全量放开，
@@ -75,6 +82,14 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <!-- pi 宿主的前台服务容器（工具层保活）：常驻通知 + START_STICKY；
+             stopWithTask=false 让「划掉最近任务」不杀宿主（开发计划 §6.4） -->
+        <service
+            android:name=".runtime.PiHostService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
     </application>
 
 </manifest>

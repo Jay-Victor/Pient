@@ -1,9 +1,14 @@
 package com.pient.app
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.drawable.ColorDrawable
+import android.os.Build
 import android.os.SystemClock
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
@@ -24,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -35,6 +41,8 @@ import com.pient.app.data.ModelPricingDefaults
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ThemeMode
 import com.pient.app.data.UsageStore
+import com.pient.app.runtime.PiHostService
+import com.pient.app.runtime.PiHost
 import com.pient.app.ui.chat.ChatScreen
 import com.pient.app.ui.onboarding.OnboardingScreen
 import com.pient.app.ui.plugins.PluginsScreen
@@ -110,6 +118,24 @@ fun PientApp() {
             }
         }
         ready = true
+    }
+
+    // pi 宿主（工具层底座）：数据加载完成后交给**前台服务**托管（开发计划 §6.4 保活）——
+    // 常驻通知「Agent 运行中」+ START_STICKY，宿主（Node 子进程）随服务存活；
+    // 服务内部做模型接线（需要服务商/模型配置，所以不能放在 Activity.onCreate）。
+    val notifPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
+    LaunchedEffect(ready) {
+        if (!ready) return@LaunchedEffect
+        // Android 13+：没通知权限时前台服务照常跑，但用户看不到「Agent 运行中」→ 顺手要一次
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        PiHostService.start(context.applicationContext)
     }
     val nav = rememberNavController()
 
@@ -335,10 +361,15 @@ fun PientApp() {
  * - chatState：首屏数据只读一次盘，重建时复用同一个 ChatState 实例；
  * - dataLoaded：仅「本进程首次组合」需要走开屏加载页（重建/回前台不再闪开屏）。
  */
-private object PientRuntime {
+/** 进程级运行时状态（Activity 重建不重走开屏/不重读盘）；前台服务也读它，故为 internal */
+internal object PientRuntime {
     var chatState: ChatState? = null
     var dataLoaded = false
+
+    /** pi 宿主是否已拉起过（进程级；Activity 重建不重复拉起） */
+    var hostStarted = false
 }
 
 /** 开屏加载页最短展示时长（读盘过快时避免「闪一下」） */
 private const val STARTUP_MIN_SHOW_MS = 500L
+
