@@ -128,6 +128,9 @@ class ChatState {
     /** 由 root→leaf 重建上屏消息流（切分支后调用；条目树本身不动） */
     fun rebuildMessagesFromLeaf(sid: String) {
         val entries = entriesBySession[sid] ?: return
+        // 上屏窗口起点按「消息下标」记：切分支/换叶后同一会话的消息流换了内容，
+        // 旧下标不再对应同一段消息 → 清掉记录，让窗口回到「最近 N 屏」自动口径。
+        messageWindowStartBySession.remove(sid)
         val byId = entries.associateBy { it.id }
         val path = mutableListOf<Msg>()
         var cur = leafBySession[sid]?.let { byId[it] }
@@ -795,17 +798,31 @@ class ChatState {
     // 参考 Hermes 桌面端长会话（components/assistant-ui/thread/list.tsx 的 showEarlier）：
     // 只把最近一段内容交给列表渲染，更早的靠「显示更早的消息」一页一页往前翻。
     // 计价用**估算高度**（屏数）而不是条数——条数在长短消息差异大的两端表现完全不同
-    // （用户真机实测发现，2026-09-12）。每会话独立记「已展开屏数」，仅内存态不落盘。
-    private val messageWindowPagesBySession = mutableStateMapOf<String, Float>()
+    // （用户真机实测发现，2026-09-12）。
+    //
+    // 状态 = **每会话的上屏窗口起点**（翻到哪记哪，仅内存不落盘）。不能记「已展开屏数」
+    // 再从最新一条重算起点：单条超长消息会顶住累加（见 showEarlierMessages），
+    // 「再加一屏」算出来的起点原地不动 → 新增 0 条 → 点击既不加载也不滚动
+    // （2026-09-12 用户报「点好几次才加载出消息」）。
+    private val messageWindowStartBySession = mutableStateMapOf<String, Int>()
 
     /**
-     * 上屏窗口起点（0 = 全部消息都在窗口内）：从最新一条往前累计**估算高度**，
-     * 直到达到「该会话已展开的屏数」× [screenDp]，再按条数下限兜底。
-     * 剩余更早内容估算不足 [WINDOW_TAIL_SCREENS] 屏时直接全显（按钮不出现）。
+     * 上屏窗口起点（0 = 全部消息都在窗口内）。
+     *
+     * = 用户翻到的位置（翻过页就尊重它：之后到达的新消息不会把窗口推回去），
+     * 但**不超过**「最近 [WINDOW_SCREENS] 屏」的自动窗口（会话变短 / 切分支后自动让位：
+     * [rebuildMessagesFromLeaf] 会清掉该会话的记录）。
      */
     fun messageWindowStart(sessionId: String?, messages: List<Msg>, screenDp: Float): Int {
         if (sessionId == null || messages.isEmpty() || screenDp <= 0f) return 0
-        val targetDp = (messageWindowPagesBySession[sessionId] ?: WINDOW_SCREENS) * screenDp
+        val auto = autoWindowStart(messages, screenDp)
+        val paged = messageWindowStartBySession[sessionId] ?: return auto
+        return paged.coerceIn(0, auto)
+    }
+
+    /** 「最近 [WINDOW_SCREENS] 屏」自动窗口：从最新一条往前累计估算高度，条数下限兜底 */
+    private fun autoWindowStart(messages: List<Msg>, screenDp: Float): Int {
+        val targetDp = WINDOW_SCREENS * screenDp
         var acc = 0f
         var count = 0
         var i = messages.lastIndex
@@ -815,34 +832,47 @@ class ChatState {
             i--
             if (acc >= targetDp && count >= WINDOW_MIN_MESSAGES) break
         }
-        val start = (i + 1).coerceAtLeast(0)
-        if (start == 0) return 0
-        // 更早的剩余内容太少 → 直接全显（避免按钮点一下几乎没变化）
+        return withTailRule(messages, (i + 1).coerceAtLeast(0), screenDp)
+    }
+
+    /** 剩余更早内容估算不足 [WINDOW_TAIL_SCREENS] 屏时直接全显（按钮不出现，避免「点一下没变化」） */
+    private fun withTailRule(messages: List<Msg>, start: Int, screenDp: Float): Int {
+        if (start <= 0) return 0
         var older = 0f
         for (k in 0 until start) older += estimatedMessageHeightDp(messages[k])
         return if (older < screenDp * WINDOW_TAIL_SCREENS) 0 else start
     }
 
-    /** 「显示更早的消息」：再展开一屏；返回**本次新增条数**（列表据此保持视口锚点） */
+    /**
+     * 「显示更早的消息」：把窗口起点再往前推**一屏**；返回**本次新增条数**。
+     *
+     * 关键 = 从**当前起点**本地往前量，而不是按「已展开屏数 × 一屏」从最新一条重算：
+     * 单条消息可能远比一屏高（实测 6.2 万字符 ≈ 68 屏），从最新一条重算时累加会被它顶住，
+     * 起点算出来还是原值 → 新增 0 条 → 点击既不加载也不滚动（2026-09-12 实测：连点 6 次
+     * 界面逐字零变化，按公式要连点 ≈75 次才越过那条消息）。本地量保证**每次点击至少往前 1 条**：
+     * 一屏装不下的那条整条放进来（消息不能切半条），其余情况仍是一屏。
+     */
     fun showEarlierMessages(sessionId: String?, messages: List<Msg>, screenDp: Float): Int {
-        if (sessionId == null) return 0
+        if (sessionId == null || messages.isEmpty() || screenDp <= 0f) return 0
         val before = messageWindowStart(sessionId, messages, screenDp)
-        if (before == 0) return 0
-        val cur = messageWindowPagesBySession[sessionId] ?: WINDOW_SCREENS
-        messageWindowPagesBySession[sessionId] = cur + WINDOW_PAGE_SCREENS
-        val after = messageWindowStart(sessionId, messages, screenDp)
+        if (before <= 0) return 0
+        var acc = 0f
+        var i = before - 1
+        while (i >= 0) {
+            acc += estimatedMessageHeightDp(messages[i])
+            i--
+            if (acc >= screenDp * WINDOW_PAGE_SCREENS) break
+        }
+        val after = withTailRule(messages, (i + 1).coerceAtLeast(0), screenDp)
+        messageWindowStartBySession[sessionId] = after
         return before - after
     }
 
-    /** 定位跳转前把目标消息纳入窗口（按目标到末尾的估算高度把屏数放大到够用） */
+    /** 定位跳转前把目标消息纳入窗口（窗口起点直接落到目标处，一次到位） */
     fun ensureMessageVisible(sessionId: String?, messages: List<Msg>, screenDp: Float, index: Int) {
         if (sessionId == null || messages.isEmpty() || index < 0 || screenDp <= 0f) return
         if (index >= messageWindowStart(sessionId, messages, screenDp)) return
-        var acc = 0f
-        for (k in index..messages.lastIndex) acc += estimatedMessageHeightDp(messages[k])
-        val needed = acc / screenDp + 0.2f
-        val cur = messageWindowPagesBySession[sessionId] ?: WINDOW_SCREENS
-        if (needed > cur) messageWindowPagesBySession[sessionId] = needed
+        messageWindowStartBySession[sessionId] = index
     }
 
     // ── 文件页状态 ────────────────────────────────────────
