@@ -30,6 +30,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -58,6 +59,11 @@ fun ThinkingLevelSlider(
     level: ThinkingLevel,
     onChange: (ThinkingLevel) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 该服务商是否支持档位调节（2026-09-12）：`false` 时滑轨整体降透明度并**关闭拖拽/键盘交互**
+     * （档位值仍保留，重新选回支持档位的服务商即恢复）——避免「调了没有任何效果」的死控件错觉。
+     */
+    enabled: Boolean = true,
 ) {
     val levels = ThinkingLevel.entries
     val n = levels.size
@@ -75,7 +81,7 @@ fun ThinkingLevelSlider(
     val rawP = level.ordinal / (n - 1).toFloat()
     val p by animateFloatAsState(rawP, tween(200), label = "sliderFill")
 
-    Column(modifier) {
+    Column(modifier.alpha(if (enabled) 1f else 0.45f)) {
         // 标题行：思考程度 + 当前档位名称
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -89,7 +95,7 @@ fun ThinkingLevelSlider(
             Text(
                 level.label,
                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.primary,
+                color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 8.dp),
             )
         }
@@ -104,25 +110,29 @@ fun ThinkingLevelSlider(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(40.dp)
-                .focusable()
-                .onKeyEvent { event ->
-                    if (event.type != KeyEventType.KeyDown) false
-                    else when (event.key) {
-                        Key.DirectionLeft, Key.DirectionDown -> {
-                            onChange(levels[(level.ordinal - 1).coerceAtLeast(0)]); true
+                .then(
+                    if (!enabled) Modifier
+                    else Modifier
+                        .focusable()
+                        .onKeyEvent { event ->
+                            if (event.type != KeyEventType.KeyDown) false
+                            else when (event.key) {
+                                Key.DirectionLeft, Key.DirectionDown -> {
+                                    onChange(levels[(level.ordinal - 1).coerceAtLeast(0)]); true
+                                }
+                                Key.DirectionRight, Key.DirectionUp -> {
+                                    onChange(levels[(level.ordinal + 1).coerceAtMost(n - 1)]); true
+                                }
+                                else -> false
+                            }
                         }
-                        Key.DirectionRight, Key.DirectionUp -> {
-                            onChange(levels[(level.ordinal + 1).coerceAtMost(n - 1)]); true
-                        }
-                        else -> false
-                    }
-                }
-                .pointerInput(n) {
-                    detectDragGestures(
-                        onDragStart = { pos -> onChange(levelAt(pos.x, size.width.toFloat(), thumbPx, n)) },
-                        onDrag = { change, _ -> onChange(levelAt(change.position.x, size.width.toFloat(), thumbPx, n)) },
-                    )
-                },
+                        .pointerInput(n) {
+                            detectDragGestures(
+                                onDragStart = { pos -> onChange(levelAt(pos.x, size.width.toFloat(), thumbPx, n)) },
+                                onDrag = { change, _ -> onChange(levelAt(change.position.x, size.width.toFloat(), thumbPx, n)) },
+                            )
+                        },
+                ),
         ) {
             val wPx = with(density) { maxWidth.toPx() }
             val pad = thumbPx / 2 // 首尾偏移补偿（Codex: 填充宽 = p% + 16 - 16p/100 px）

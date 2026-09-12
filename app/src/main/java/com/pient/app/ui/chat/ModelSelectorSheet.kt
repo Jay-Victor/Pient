@@ -41,6 +41,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pient.app.data.AiBackend
+import com.pient.app.data.AiConfigStore
 import com.pient.app.data.AiModel
 import com.pient.app.data.ChatState
 import com.pient.app.data.ProviderCatalog
@@ -115,10 +117,25 @@ fun ModelSelectorSheet(
                     )
                 }
                 if (chatState.thinkingEnabled) {
+                    // 档位是否对该服务商有效（2026-09-12）：与请求体共用 AiBackend.levelWire 的判断，
+                    // 面板不出现「说 A 实际发 B」；不支持档位的服务商滑轨置灰并明确说明。
+                    val cfg = chatState.selectedModel?.provider?.let { AiConfigStore.configs[it] }
+                    val wire = cfg?.let { AiBackend.levelWire(it, chatState.thinkingLevel) }
                     ThinkingLevelSlider(
                         level = chatState.thinkingLevel,
                         onChange = { chatState.thinkingLevel = it },
+                        enabled = wire != null && wire != AiBackend.LevelWire.Unsupported,
                         modifier = Modifier.padding(top = 12.dp),
+                    )
+                    Text(
+                        when (wire) {
+                            is AiBackend.LevelWire.Word -> "服务商实际收到：${wire.value}"
+                            is AiBackend.LevelWire.Budget -> "思考预算：${wire.tokens} tokens"
+                            else -> "当前服务商不支持档位调节（只支持开 / 关）"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
                     )
                 }
             }

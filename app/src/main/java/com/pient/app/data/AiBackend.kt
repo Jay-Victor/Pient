@@ -57,23 +57,8 @@ object AiBackend {
         return e.contains("anthropic.com") || e.endsWith("/anthropic")
     }
 
-    /** 思考级别 → Anthropic thinking budget（tokens） */
-    fun thinkingBudget(level: ThinkingLevel): Int = when (level) {
-        ThinkingLevel.MINIMAL -> 1024
-        ThinkingLevel.LOW -> 2048
-        ThinkingLevel.MEDIUM -> 4096
-        ThinkingLevel.HIGH -> 8192
-        ThinkingLevel.XHIGH -> 16384
-    }
-
-    /** 思考级别 → OpenAI reasoning_effort（xhigh 无对应档，收敛为 high） */
-    fun reasoningEffort(level: ThinkingLevel): String = when (level) {
-        ThinkingLevel.MINIMAL -> "minimal"
-        ThinkingLevel.LOW -> "low"
-        ThinkingLevel.MEDIUM -> "medium"
-        ThinkingLevel.HIGH -> "high"
-        ThinkingLevel.XHIGH -> "high"
-    }
+    // 档位映射见下方 levelWire()/sampleIndex()（2026-09-12）：五档 → 服务商实际档位，
+    // 旧的 thinkingBudget()/reasoningEffort() 一对一映射已被它取代（不再有 xhigh→high 这种硬收敛）。
 
     private fun chatUrl(cfg: ProviderConfig): String {
         val e = cfg.endpoint.trim().trimEnd('/')
@@ -221,18 +206,79 @@ object AiBackend {
     }
 
     /**
+     * 档位采样（2026-09-12 映射层）：**服务商的档位数量未必是 5**——DeepSeek 官方只有
+     * `low/high/max`、OpenAI 只有 4 档（无 xhigh）、有的服务商根本没有档位（只有开关）。
+     * 采样规则 = 把我们的 5 档按比例落到对方的 n 档上：`round(ordinal × (n−1) / 4)`。
+     * 同思路的参考实现：Operit `DeepseekProvider.resolveDeepseekThinkingEffort`
+     * （五档 → `listOf("low","high","max","max","max")`）、Hermes 的最近邻收敛
+     * （`xhigh→high`、`minimal→low`、否则 medium、否则第一个）。
+     */
+    private fun sampleIndex(level: ThinkingLevel, size: Int): Int =
+        if (size <= 1) 0 else (level.ordinal * (size - 1) + 2) / 4
+
+    /** 预算型档位阶梯（Anthropic `budget_tokens` / 千问·硅基流动 `thinking_budget`） */
+    private val BUDGET_LADDER = listOf(1024, 2048, 4096, 8192, 16384)
+
+    /** 档位在该服务商 + 格式下的线上形态 */
+    sealed interface LevelWire {
+        /** 词表型：写进 `reasoning_effort` / `reasoning.effort` */
+        data class Word(val value: String) : LevelWire
+
+        /** 预算型：写进 `budget_tokens` / `thinking_budget` */
+        data class Budget(val tokens: Int) : LevelWire
+
+        /** 该服务商/格式不支持档位（只支持开 / 关）——UI 据此置灰滑轨 */
+        data object Unsupported : LevelWire
+    }
+
+    /** 各格式的档位词表（未列出且非预算型 = 不支持档位） */
+    private fun levelWordsFor(format: ReasoningFormat): List<String>? = when (format) {
+        ReasoningFormat.OPENAI -> listOf("minimal", "low", "medium", "high")      // OpenAI 无 xhigh 档
+        ReasoningFormat.DEEPSEEK -> listOf("low", "high", "max")                   // DeepSeek 官方词表
+        ReasoningFormat.OPENROUTER -> listOf("minimal", "low", "medium", "high")
+        else -> null
+    }
+
+    /** 档位走预算写的格式 */
+    private fun levelUsesBudget(format: ReasoningFormat): Boolean =
+        format == ReasoningFormat.QWEN || format == ReasoningFormat.SILICONFLOW
+
+    /**
+     * 档位 → 线上形态（**请求体与 UI 提示共用同一判断**，不会出现「面板说 A、实际发 B」）：
+     * Anthropic 协议固定预算；其余按格式的词表/预算；都不支持则 [LevelWire.Unsupported]。
+     * 服务商若声明了 `thinkingLevels` 覆盖（ProviderCatalog），优先用它。
+     */
+    fun levelWire(cfg: ProviderConfig, level: ThinkingLevel): LevelWire {
+        if (cfg.reasoningFormat == ReasoningFormat.NONE) return LevelWire.Unsupported
+        val override = ProviderCatalog.byId[cfg.providerId]?.thinkingLevels
+        if (override != null) {
+            override.words?.let { return LevelWire.Word(it[sampleIndex(level, it.size)]) }
+            override.budgets?.let { return LevelWire.Budget(it[sampleIndex(level, it.size)]) }
+            return LevelWire.Unsupported
+        }
+        if (isAnthropicProtocol(cfg.endpoint)) {
+            return LevelWire.Budget(BUDGET_LADDER[sampleIndex(level, BUDGET_LADDER.size)])
+        }
+        val format = effectiveReasoningFormat(cfg)
+        levelWordsFor(format)?.let { return LevelWire.Word(it[sampleIndex(level, it.size)]) }
+        if (levelUsesBudget(format)) return LevelWire.Budget(BUDGET_LADDER[sampleIndex(level, BUDGET_LADDER.size)])
+        return LevelWire.Unsupported
+    }
+
+    /**
      * 写入思考参数（2026-09-12 真实化）：**关闭思考模式 = 显式禁用；开启 = 显式启用**，
      * 不再靠「省略参数」假装关闭（省略只对「默认不思考」的模型有效）。
      *
      * 各服务商写法取自 pi `thinkingFormat` 枚举（packages/ai/src/types.ts:578）与 Operit
      * 各 Provider 类的实测口径（DeepseekProvider/KimiProvider/DoubaoAIProvider 发
      * `thinking:{"type":"disabled"}`；Qwen/Nvidia/MNN 发 `enable_thinking=false`）：
-     * - OPENAI：`reasoning_effort`=档位 / `"none"`
-     * - DEEPSEEK：`thinking.enabled` + `reasoning_effort` / `thinking.disabled`
-     * - ZAI：`thinking.enabled` / `thinking.disabled`（智谱默认就开思考，必须显式禁用；
-     *   `reasoning_effort` 仅 GLM-5.2+ 支持，故此处不发，避免旧模型报错）
-     * - QWEN：`enable_thinking`=true / false
-     * - SILICONFLOW：`enable_thinking` + `thinking_budget` / `enable_thinking=false`
+     * - OPENAI：`reasoning_effort`=档位词 / `"none"`
+     * - DEEPSEEK：`thinking.enabled` + `reasoning_effort`（词表 low/high/max）/ `thinking.disabled`
+     * - ZAI：`thinking.enabled` / `thinking.disabled`（智谱不下发档位——GLM-4.5/4.6 的
+     *   `reasoning_effort` 不认，仅 GLM-5.2+ 支持；不发即不报错，UI 会置灰滑轨说明）
+     * - QWEN / SILICONFLOW：`enable_thinking` 布尔 +（开启时）`thinking_budget` 预算
+     * - OPENROUTER：`reasoning.effort` / `reasoning.enabled=false`
+     * - ANTHROPIC（OpenAI 兼容端点上的等价形态）：只发 `thinking.type`
      * - NONE：什么都不发（模型自带推理且不吃禁用字面量时的逃生口）
      *
      * Anthropic Messages 协议固定用官方 `thinking.type`（enabled+budget / disabled），
@@ -248,27 +294,30 @@ object AiBackend {
             body.put(
                 "thinking",
                 if (thinkingLevel != null) {
-                    JSONObject().put("type", "enabled").put("budget_tokens", thinkingBudget(thinkingLevel))
+                    val budget = (levelWire(cfg, thinkingLevel) as? LevelWire.Budget)?.tokens
+                        ?: BUDGET_LADDER.last()
+                    JSONObject().put("type", "enabled").put("budget_tokens", budget)
                 } else {
                     JSONObject().put("type", "disabled")
                 },
             )
             return
         }
+        // 未开启 = 不发档位；不支持档位的服务商（Unsupported）也只发开关
+        val word = thinkingLevel?.let { (levelWire(cfg, it) as? LevelWire.Word)?.value }
+        val budget = thinkingLevel?.let { (levelWire(cfg, it) as? LevelWire.Budget)?.tokens }
         when (effectiveReasoningFormat(cfg)) {
             ReasoningFormat.NONE, ReasoningFormat.AUTO -> Unit   // AUTO 已被 effectiveReasoningFormat 解析
-            ReasoningFormat.OPENAI ->
-                body.put("reasoning_effort", thinkingLevel?.let { reasoningEffort(it) } ?: "none")
+            ReasoningFormat.OPENAI -> body.put("reasoning_effort", word ?: if (thinkingLevel == null) "none" else "medium")
             ReasoningFormat.DEEPSEEK -> {
                 body.put("thinking", JSONObject().put("type", if (thinkingLevel != null) "enabled" else "disabled"))
-                if (thinkingLevel != null) body.put("reasoning_effort", reasoningEffort(thinkingLevel))
+                if (word != null) body.put("reasoning_effort", word)
             }
             ReasoningFormat.ZAI ->
                 body.put("thinking", JSONObject().put("type", if (thinkingLevel != null) "enabled" else "disabled"))
-            ReasoningFormat.QWEN -> body.put("enable_thinking", thinkingLevel != null)
-            ReasoningFormat.SILICONFLOW -> {
+            ReasoningFormat.QWEN, ReasoningFormat.SILICONFLOW -> {
                 body.put("enable_thinking", thinkingLevel != null)
-                if (thinkingLevel != null) body.put("thinking_budget", thinkingBudget(thinkingLevel))
+                if (budget != null) body.put("thinking_budget", budget)
             }
             // Anthropic 写法在 OpenAI 兼容端点上的等价形态（中转/代理端常见）
             ReasoningFormat.ANTHROPIC ->
@@ -277,7 +326,7 @@ object AiBackend {
                 body.put(
                     "reasoning",
                     if (thinkingLevel != null) {
-                        JSONObject().put("effort", reasoningEffort(thinkingLevel))
+                        JSONObject().put("effort", word ?: "medium")
                     } else {
                         JSONObject().put("enabled", false)
                     },

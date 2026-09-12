@@ -22,10 +22,27 @@ data class ProviderInfo(
     /** 暗色主题专用 logo（0 = 复用 logoRes）。用于固有色在暗色卡片上不可见的图标 */
     @DrawableRes val logoResDark: Int = 0,
     /**
-     * 该服务商确定的思考参数写法（2026-09-12）：新增服务商时预置为 `ProviderConfig.reasoningFormat`；
+     * 该服务商**确定的**思考参数写法（2026-09-12）：新增服务商时预置为 `ProviderConfig.reasoningFormat`；
      * AUTO 只留给「自定义」服务商（按模型名推断）。
      */
     val reasoningFormat: ReasoningFormat = ReasoningFormat.NONE,
+    /**
+     * 该服务商的**档位词表/预算**覆盖（2026-09-12）：null = 用格式默认（见 `AiBackend.levelWire`）。
+     * 用于「格式默认猜不出该家档位」的情形——例如某家只有 2/3 档、或档位用预算而非词表。
+     * `ThinkingLevels(words=null, budgets=null)` = 明确声明「该家不支持档位调节」（UI 置灰滑轨）。
+     */
+    val thinkingLevels: ThinkingLevels? = null,
+)
+
+/**
+ * 服务商的档位表达（ProviderCatalog 声明；[AiBackend.levelWire] 里按 5 档等距采样取值）。
+ * - [words]：词表型（如 DeepSeek 官方只有 low/high/max）
+ * - [budgets]：预算型（如 Anthropic budget_tokens 的阶梯）
+ * - 两者都空 = 不支持档位调节（只有开 / 关）
+ */
+data class ThinkingLevels(
+    val words: List<String>? = null,
+    val budgets: List<Int>? = null,
 )
 
 object ProviderCatalog {
@@ -67,11 +84,14 @@ object ProviderCatalog {
             "https://api.deepseek.com", reasoningFormat = ReasoningFormat.DEEPSEEK),
         p("kimi-coding", "Kimi For Coding", R.drawable.provider_kimi_coding, mono = false,
             "https://api.kimi.com/coding", reasoningFormat = ReasoningFormat.DEEPSEEK,
+            thinkingLevels = ThinkingLevels(),   // Kimi 思考版无档位（要么不思考、要么一直思考）
             logoResDark = R.drawable.provider_kimi_coding_dark),
         p("moonshotai", "Moonshot AI", R.drawable.provider_moonshot, mono = true,
-            "https://api.moonshot.ai/v1", reasoningFormat = ReasoningFormat.DEEPSEEK),
+            "https://api.moonshot.ai/v1", reasoningFormat = ReasoningFormat.DEEPSEEK,
+            thinkingLevels = ThinkingLevels()),
         p("moonshotai-cn", "Moonshot AI CN", R.drawable.provider_moonshot, mono = true,
-            "https://api.moonshot.cn/v1", reasoningFormat = ReasoningFormat.DEEPSEEK),
+            "https://api.moonshot.cn/v1", reasoningFormat = ReasoningFormat.DEEPSEEK,
+            thinkingLevels = ThinkingLevels()),
         p("minimax", "MiniMax", R.drawable.provider_minimax, mono = false,
             "https://api.minimax.io/anthropic", reasoningFormat = ReasoningFormat.ANTHROPIC),
         p("minimax-cn", "MiniMax CN", R.drawable.provider_minimax, mono = false,
@@ -162,10 +182,13 @@ object ProviderCatalog {
          * `ProviderConfig.reasoningFormat`，用户不必自己选。写法来源 = pi `thinkingFormat`
          * 枚举 + Operit 各 Provider 类；拿不准的一律 NONE（不发参数，绝不猜）。
          */
-        reasoningFormat: ReasoningFormat = ReasoningFormat.NONE) = ProviderInfo(
+        reasoningFormat: ReasoningFormat = ReasoningFormat.NONE,
+        /** 档位词表/预算覆盖（null = 用格式默认）；`ThinkingLevels()` = 该家不支持档位调节 */
+        thinkingLevels: ThinkingLevels? = null) = ProviderInfo(
         id, name, logoRes, mono, defaultEndpoint,
         if (endpoints.isEmpty()) listOf(defaultEndpoint) else endpoints,
         logoResDark,
         reasoningFormat,
+        thinkingLevels,
     )
 }
