@@ -47,3 +47,6 @@ desktop.ini
 .env.*
 !.env.*.example
 node_modules/
+
+# ===== 工具层运行时缓存（下载物，不入库） =====
+runtime/cache/
