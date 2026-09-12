@@ -37,6 +37,7 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
@@ -82,6 +83,7 @@ import com.pient.app.data.AiConfigStore
 import com.pient.app.data.ChatState
 import com.pient.app.data.ProviderCatalog
 import com.pient.app.data.ProviderConfig
+import com.pient.app.data.ReasoningFormat
 import com.pient.app.data.ProviderInfo
 import com.pient.app.ui.components.DividerLine
 import com.pient.app.ui.components.PientButton
@@ -103,6 +105,9 @@ import kotlinx.coroutines.launch
  *    弹窗切换多端点）、API密钥（遮蔽输入）、模型列表（输入框 + 图案按钮弹出
  *    模型选择弹窗：搜索框 + 端点可用模型列表，点选自动填入）。
  * ③ 上下文设置卡片：上下文长度 / 最大输出长度（单位 K Tokens）。
+ * ③b 思考设置卡片（2026-09-12）：思考参数格式（自动识别/不发送/OpenAI/DeepSeek·Kimi/
+ *    智谱 GLM/通义千问/硅基流动）——决定「思考模式开关」在请求体里怎么表达：
+ *    关闭 = 显式禁用字面量、开启 = 显式启用（此前只有「省略参数」一种行为）。
  * ④ 模型参数设置卡片：温度（开关 + 数值）、Top_P / Top_K（开关 + 数值）。
  * 2026-09-09 起全部真实化：配置读写 AiConfigStore（自动持久化）、「测试连接」与
  * 「刷新模型列表」走真实 API（AiBackend.listModels）；成功置 chatState.aiConfigured。
@@ -131,6 +136,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     var keyVisible by remember { mutableStateOf(false) }       // API密钥显隐
     var testState by remember { mutableStateOf<String?>(null) } // 测试连接/刷新反馈
     var refreshing by remember { mutableStateOf(false) }       // 模型列表刷新中
+    var reasoningFormatOpen by remember { mutableStateOf(false) } // 思考参数格式下拉
 
     /** 更新当前服务商配置（写入 AiConfigStore，自动持久化） */
     fun updateConfig(transform: (ProviderConfig) -> ProviderConfig) {
@@ -422,6 +428,92 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 },
                                 placeholder = "64",
                             )
+                        }
+                    }
+                }
+            }
+
+            // ── ③b 思考设置（2026-09-12 真实化：关闭思考模式 = 显式禁用，开启 = 显式启用） ──
+            if (provider != null && cfg != null) {
+                item {
+                    Column {
+                        SectionHeader("思考设置", icon = Icons.Outlined.Psychology)
+                        ConfigCard {
+                            Box {
+                                val effective = AiBackend.effectiveReasoningFormat(cfg)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { reasoningFormatOpen = true }
+                                        .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 12.dp),
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            "思考参数格式",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                        Text(
+                                            // 自动识别时把「实际生效的写法」摊开给用户看，避免「选了自动但不知道发了什么」
+                                            if (cfg.reasoningFormat == ReasoningFormat.AUTO) {
+                                                "自动识别 → 当前生效：${effective.label}（${effective.wire}）"
+                                            } else {
+                                                cfg.reasoningFormat.wire
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(top = 2.dp),
+                                        )
+                                    }
+                                    Text(
+                                        cfg.reasoningFormat.label,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(start = 10.dp),
+                                    )
+                                    Icon(
+                                        Icons.Outlined.ExpandMore, null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 2.dp).size(18.dp),
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = reasoningFormatOpen,
+                                    onDismissRequest = { reasoningFormatOpen = false },
+                                    modifier = Modifier.width(320.dp),
+                                ) {
+                                    // 注意：不能 forEach（lambda 非 @Composable 上下文），用 for 循环
+                                    for (f in ReasoningFormat.entries) {
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Column(Modifier.weight(1f)) {
+                                                        Text(f.label, style = MaterialTheme.typography.bodyMedium)
+                                                        Text(
+                                                            f.wire,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            maxLines = 2,
+                                                            overflow = TextOverflow.Ellipsis,
+                                                        )
+                                                    }
+                                                    if (f == cfg.reasoningFormat) {
+                                                        Icon(
+                                                            Icons.Outlined.Check, null,
+                                                            tint = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.size(16.dp),
+                                                        )
+                                                    }
+                                                }
+                                            },
+                                            onClick = {
+                                                updateConfig { it.copy(reasoningFormat = f) }
+                                                reasoningFormatOpen = false
+                                            },
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
