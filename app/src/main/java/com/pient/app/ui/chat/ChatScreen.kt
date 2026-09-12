@@ -919,9 +919,11 @@ private fun MessagesPanel(
         isStreaming = chatState.isStreaming,
         streamDraft = chatState.streamDraft,
         listState = listState,
-        // 思考模式：流式思考实时预览（Hermes 口径的「思考中」+ 正文贴底）+ 刚流式完的块保持展开
-        streamThinking = chatState.streamThinking,
-        streamThinkingStartedAt = chatState.streamThinkingStartedAt,
+        // 思考模式：流式思考实时预览（Hermes 口径的「思考中」+ 正文贴底）+ 刚流式完的块保持展开。
+        // 展示侧同样按开关门控（数据侧 runChat 已门控；此处兜住「流式途中关掉思考模式」——
+        // 关掉即不再显示，且同一口径：思考模式关闭 = 思考内容永不上屏）。
+        streamThinking = if (chatState.thinkingEnabled) chatState.streamThinking else "",
+        streamThinkingStartedAt = if (chatState.thinkingEnabled) chatState.streamThinkingStartedAt else 0L,
         streamThinkingLevel = if (chatState.thinkingEnabled) chatState.thinkingLevel.piValue else "",
         liveThinkingIndex = chatState.liveThinkingIndex,
         bottomInset = bottomInset,

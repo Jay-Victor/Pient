@@ -526,13 +526,16 @@ class ChatState {
         onDelta: (String) -> Unit,
         onThinking: (String) -> Unit = {},
     ): ChatOutcome {
+        // 思考模式的总开关：null = 不给服务商发思考参数、且**服务商自带的推理内容一律不展示不落库**
+        // （DeepSeek-R1 / GLM / Kimi 思考系列不靠 reasoning_effort 也会回 reasoning_content，
+        //   开关关着却把推理显示出来＝越权；2026-09-12 用户报「关了思考模式，流式期间仍显示思考内容、
+        //   回答完又消失」即此处漏门控——流式分支当时漏了判 `thinking != null`，只落了「不落库」）。
         val thinking = if (thinkingEnabled) thinkingLevel else null
         if (!streamingOutputEnabled) {
             val result = AiBackend.chat(cfg, systemPrompt, history, thinking)
-            val th = result.thinking.orEmpty()
-            // 非流式：思考一口气到达；此时思考模式关闭 = 服务商自带的推理内容也不展示
-            if (thinking != null && th.isNotEmpty()) onThinking(th)
-            return ChatOutcome(result.text, result.usage, th.takeIf { thinking != null }.orEmpty())
+            val th = result.thinking.orEmpty().takeIf { thinking != null }.orEmpty()
+            if (th.isNotEmpty()) onThinking(th)
+            return ChatOutcome(result.text, result.usage, th)
         }
         val sb = StringBuilder()
         val th = StringBuilder()
@@ -543,7 +546,7 @@ class ChatState {
                     sb.append(ev.text)
                     onDelta(sb.toString())
                 }
-                is ChatEvent.ThinkingDelta -> {
+                is ChatEvent.ThinkingDelta -> if (thinking != null) {
                     th.append(ev.text)
                     onThinking(th.toString())
                 }
@@ -552,7 +555,7 @@ class ChatState {
                 ChatEvent.Done -> Unit
             }
         }
-        return ChatOutcome(sb.toString(), usage, if (thinking != null) th.toString() else "")
+        return ChatOutcome(sb.toString(), usage, th.toString())
     }
 
     /** 单次请求结果：正文 + usage + 思考文本（思考模式关闭时为空串） */
