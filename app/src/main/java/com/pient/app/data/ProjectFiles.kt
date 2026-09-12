@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Environment
+import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import java.io.File
 import java.io.BufferedOutputStream
@@ -183,13 +185,29 @@ object ProjectFiles {
         }
     }
 
-    /** 重命名节点（父目录 = source 的上一级；SAF 用 DocumentFile.renameTo） */
+    /**
+     * 重命名节点（父目录 = source 的上一级）。
+     *
+     * SAF 分支**不能**用 `DocumentFile.fromSingleUri(...).renameTo()` ——
+     * androidx.documentfile 1.0.0/1.0.1 的 `SingleDocumentFile.renameTo` 是未实现的占位
+     * （字节码实测直接 `throw UnsupportedOperationException`，"No implementation for renameTo()"），
+     * 异常被本函数 catch 吞掉后表现为「SAF 项目里重命名永远失败」；只有 `TreeDocumentFile`
+     * （fromTreeUri 那条路）才有真实实现。这里直接调框架 API（DocumentFile 的实现也是转调它）：
+     * `DocumentsContract.renameDocument` 成功返回新文档 URI、失败抛异常（FileNotFound/Security/…）。
+     */
     fun renameEntry(context: Context, node: FileNode, newName: String): Boolean {
         if (newName.isBlank() || newName.contains('/') || newName.contains('\\')) return false
+        if (newName == node.name) return false
         val src = node.source ?: return false
         return try {
             if (src.startsWith("content://")) {
-                DocumentFile.fromSingleUri(context, Uri.parse(src))?.renameTo(newName) ?: false
+                val uri = Uri.parse(src)
+                // 仅文档 URI 可改名；树 URI（项目根，UI 里不可长按）走不了 SAF 改名
+                if (!DocumentsContract.isDocumentUri(context, uri)) return false
+                val renamed = DocumentsContract.renameDocument(context.contentResolver, uri, newName) ?: return false
+                // 结果校验：按新名回查一次（查不到再退回「URI 是否已变」判断）
+                val actual = runCatching { DocumentFile.fromSingleUri(context, renamed)?.name }.getOrNull()
+                if (actual != null) actual == newName else renamed != uri
             } else {
                 val f = File(src)
                 if (!f.exists()) return false
@@ -198,6 +216,43 @@ object ProjectFiles {
         } catch (e: Exception) {
             false
         }
+    }
+
+    // ── 展示用位置（详细信息弹窗的「位置」行） ──
+
+    /**
+     * 节点位置的可读文本（FileTreePanel 详细信息弹窗用）。
+     * **不要把 node.source 直接显示给用户**：SAF 项目的 source 是 percent-encoding 的 content URI，
+     * 弹窗里「位置」末尾那段「文件名」会显示成 `primary%3AAlarms%2FAgentWork%2Fa.txt`，
+     * 与文件树里的真实名字对不上（用户实测反馈）。
+     */
+    fun displayLocation(node: FileNode): String = readablePath(node.source)
+
+    /**
+     * source/path 字符串 → 可读位置：本地路径原样返回；content:// 尽量还原成文件系统路径
+     * （`primary:Alarms/AgentWork/a.txt` → `/storage/emulated/0/Alarms/AgentWork/a.txt`）；
+     * 无法映射的 provider（云盘等）退化为去掉 percent-encoding 的 URI 文本。
+     */
+    fun readablePath(source: String?): String {
+        if (source.isNullOrBlank()) return "—"
+        if (!source.startsWith("content://")) return source
+        val uri = Uri.parse(source)
+        val docId = runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull()
+            ?: runCatching { DocumentsContract.getTreeDocumentId(uri) }.getOrNull()
+        if (docId != null) {
+            val sep = docId.indexOf(':')
+            if (sep > 0) {
+                val volume = docId.substring(0, sep)
+                val relative = docId.substring(sep + 1)
+                val root = if (volume.equals("primary", ignoreCase = true)) {
+                    Environment.getExternalStorageDirectory().absolutePath
+                } else {
+                    "/storage/$volume"
+                }
+                return "$root/$relative"
+            }
+        }
+        return Uri.decode(source)
     }
 
     /** 删除节点（目录递归删除） */

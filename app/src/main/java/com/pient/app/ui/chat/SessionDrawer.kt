@@ -889,7 +889,7 @@ fun SessionDrawer(
                     modifier = Modifier.padding(top = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    DetailRow("位置", project.path)
+                    DetailRow("位置", ProjectFiles.readablePath(project.path))
                     DetailRow("大小", info.size)
                     DetailRow("修改时间", info.modified)
                 }

@@ -680,7 +680,7 @@ fun FileTreePanel(
                     modifier = Modifier.padding(top = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    DetailRow("位置", node.source ?: "—")
+                    DetailRow("位置", ProjectFiles.displayLocation(node))
                     DetailRow("大小", formatSize(size))
                     DetailRow(
                         "修改时间",
