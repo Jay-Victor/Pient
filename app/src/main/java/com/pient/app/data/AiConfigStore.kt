@@ -29,6 +29,12 @@ data class ProviderConfig(
     val topKValue: String = "0",
     val topPEnabled: Boolean = false,
     val topPValue: String = "1.0",
+    /**
+     * 思考参数写法（2026-09-12 真实化）：决定「思考模式开关」在线上怎么表达——
+     * 关闭 = 显式禁用字面量、开启 = 显式启用（详见 [ReasoningFormat]）。
+     * 老配置缺该字段 → AUTO（按模型名推断，识别不出则维持「不发参数」的老行为）。
+     */
+    val reasoningFormat: ReasoningFormat = ReasoningFormat.AUTO,
 ) {
     val models: List<String>
         get() = modelList.split(";").map { it.trim() }.filter { it.isNotEmpty() }
@@ -117,6 +123,9 @@ object AiConfigStore {
                     topKValue = o.optString("topKValue", "0"),
                     topPEnabled = o.optBoolean("topPEnabled", false),
                     topPValue = o.optString("topPValue", "1.0"),
+                    reasoningFormat = runCatching {
+                        ReasoningFormat.valueOf(o.optString("reasoningFormat", "AUTO"))
+                    }.getOrDefault(ReasoningFormat.AUTO),
                 )
             }
         } catch (e: Exception) {
@@ -143,7 +152,8 @@ object AiConfigStore {
                         .put("topKEnabled", c.topKEnabled)
                         .put("topKValue", c.topKValue)
                         .put("topPEnabled", c.topPEnabled)
-                        .put("topPValue", c.topPValue),
+                        .put("topPValue", c.topPValue)
+                        .put("reasoningFormat", c.reasoningFormat.name),
                 )
             }
             root.put("providers", arr)

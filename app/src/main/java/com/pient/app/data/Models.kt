@@ -726,6 +726,35 @@ enum class ThinkingLevel(val piValue: String, val label: String) {
     }
 }
 
+/**
+ * 思考参数的**线上写法**（2026-09-12 真实化；此前只有「省略」一种行为）。
+ *
+ * 参考源：pi 的 `thinkingFormat` 枚举（packages/ai/src/types.ts:578）+ Operit 每服务商
+ * 一个 Provider 类各自拼参数（DeepseekProvider/KimiProvider/DoubaoAIProvider 都发
+ * `thinking:{"type":"disabled"}`，QwenProvider/NvidiaProvider 发 `enable_thinking:false`）。
+ *
+ * 语义：**关闭思考模式 = 按该格式显式禁用；开启 = 显式启用**（不再靠省略参数假装关闭）。
+ *
+ * @param label 配置页展示名
+ * @param wire 线上一句话说明（配置页 hint）
+ */
+enum class ReasoningFormat(val label: String, val wire: String) {
+    /** 按模型名推断（deepseek/glm/qwen 系列）；识别不出 = NONE（不发参数） */
+    AUTO("自动识别", "按模型名判断写法；识别不出则不发送思考参数"),
+    /** 完全不发送思考参数（模型无法关闭思考时用，如 Gemini 3 系列） */
+    NONE("不发送", "不发任何思考参数（模型自带推理且关不掉时用）"),
+    /** OpenAI 官方：reasoning_effort 档位；关闭 = reasoning_effort=none */
+    OPENAI("OpenAI", "开：reasoning_effort=档位；关：reasoning_effort=none"),
+    /** DeepSeek / Kimi / 豆包：thinking.type + 档位 */
+    DEEPSEEK("DeepSeek / Kimi", "开：thinking.enabled + reasoning_effort；关：thinking.disabled"),
+    /** 智谱 GLM：thinking.type（默认就开思考，必须显式禁用） */
+    ZAI("智谱 GLM", "开：thinking.enabled；关：thinking.disabled"),
+    /** 通义千问 / 百炼 / 开源 Qwen3：enable_thinking 布尔 */
+    QWEN("通义千问", "开：enable_thinking=true；关：enable_thinking=false"),
+    /** 硅基流动等：enable_thinking + thinking_budget */
+    SILICONFLOW("硅基流动", "开：enable_thinking=true + thinking_budget；关：enable_thinking=false"),
+}
+
 // ─────────────────────────────────────────────────────────────
 // 技能 / 插件
 // ─────────────────────────────────────────────────────────────

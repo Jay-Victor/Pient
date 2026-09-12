@@ -204,6 +204,75 @@ object AiBackend {
 
     // ───────────────────────── 请求体 ─────────────────────────
 
+    /**
+     * 生效的思考参数写法：显式配置优先；AUTO 按模型名推断（deepseek → DEEPSEEK、
+     * glm/zhipu → ZAI、qwen/qwq/通义 → QWEN），**识别不出 = NONE**（维持「不发参数」的
+     * 老行为——对未知端点发它不认识的字段会直接 400，宁可保守）。
+     */
+    fun effectiveReasoningFormat(cfg: ProviderConfig): ReasoningFormat {
+        if (cfg.reasoningFormat != ReasoningFormat.AUTO) return cfg.reasoningFormat
+        val m = modelNameOf(cfg).lowercase()
+        return when {
+            m.contains("deepseek") -> ReasoningFormat.DEEPSEEK
+            m.contains("glm") || m.contains("zhipu") || m.contains("chatglm") -> ReasoningFormat.ZAI
+            m.contains("qwen") || m.contains("qwq") || m.contains("tongyi") -> ReasoningFormat.QWEN
+            else -> ReasoningFormat.NONE
+        }
+    }
+
+    /**
+     * 写入思考参数（2026-09-12 真实化）：**关闭思考模式 = 显式禁用；开启 = 显式启用**，
+     * 不再靠「省略参数」假装关闭（省略只对「默认不思考」的模型有效）。
+     *
+     * 各服务商写法取自 pi `thinkingFormat` 枚举（packages/ai/src/types.ts:578）与 Operit
+     * 各 Provider 类的实测口径（DeepseekProvider/KimiProvider/DoubaoAIProvider 发
+     * `thinking:{"type":"disabled"}`；Qwen/Nvidia/MNN 发 `enable_thinking=false`）：
+     * - OPENAI：`reasoning_effort`=档位 / `"none"`
+     * - DEEPSEEK：`thinking.enabled` + `reasoning_effort` / `thinking.disabled`
+     * - ZAI：`thinking.enabled` / `thinking.disabled`（智谱默认就开思考，必须显式禁用；
+     *   `reasoning_effort` 仅 GLM-5.2+ 支持，故此处不发，避免旧模型报错）
+     * - QWEN：`enable_thinking`=true / false
+     * - SILICONFLOW：`enable_thinking` + `thinking_budget` / `enable_thinking=false`
+     * - NONE：什么都不发（模型自带推理且不吃禁用字面量时的逃生口）
+     *
+     * Anthropic Messages 协议固定用官方 `thinking.type`（enabled+budget / disabled），
+     * 但仍受 NONE 逃生口约束。
+     */
+    private fun applyReasoningParams(
+        body: JSONObject,
+        cfg: ProviderConfig,
+        thinkingLevel: ThinkingLevel?,
+    ) {
+        if (cfg.reasoningFormat == ReasoningFormat.NONE) return
+        if (isAnthropicProtocol(cfg.endpoint)) {
+            body.put(
+                "thinking",
+                if (thinkingLevel != null) {
+                    JSONObject().put("type", "enabled").put("budget_tokens", thinkingBudget(thinkingLevel))
+                } else {
+                    JSONObject().put("type", "disabled")
+                },
+            )
+            return
+        }
+        when (effectiveReasoningFormat(cfg)) {
+            ReasoningFormat.NONE, ReasoningFormat.AUTO -> Unit   // AUTO 已被 effectiveReasoningFormat 解析
+            ReasoningFormat.OPENAI ->
+                body.put("reasoning_effort", thinkingLevel?.let { reasoningEffort(it) } ?: "none")
+            ReasoningFormat.DEEPSEEK -> {
+                body.put("thinking", JSONObject().put("type", if (thinkingLevel != null) "enabled" else "disabled"))
+                if (thinkingLevel != null) body.put("reasoning_effort", reasoningEffort(thinkingLevel))
+            }
+            ReasoningFormat.ZAI ->
+                body.put("thinking", JSONObject().put("type", if (thinkingLevel != null) "enabled" else "disabled"))
+            ReasoningFormat.QWEN -> body.put("enable_thinking", thinkingLevel != null)
+            ReasoningFormat.SILICONFLOW -> {
+                body.put("enable_thinking", thinkingLevel != null)
+                if (thinkingLevel != null) body.put("thinking_budget", thinkingBudget(thinkingLevel))
+            }
+        }
+    }
+
     private fun buildRequestBody(
         cfg: ProviderConfig,
         systemPrompt: String?,
@@ -224,10 +293,9 @@ object AiBackend {
                 }
                 put("messages", msgs)
                 put("stream", stream)
+                applyReasoningParams(this, cfg, thinkingLevel)
                 if (thinking) {
                     // Anthropic：思考开启时 temperature 必须为 1 且不可传 top_p/top_k
-                    put("thinking", JSONObject().put("type", "enabled")
-                        .put("budget_tokens", thinkingBudget(thinkingLevel)))
                     put("temperature", 1.0)
                 } else {
                     if (cfg.tempEnabled) cfg.tempValue.toFloatOrNull()?.let { put("temperature", it) }
@@ -248,7 +316,7 @@ object AiBackend {
                 put("messages", msgs)
                 put("stream", stream)
                 if (maxTokens != null) put("max_tokens", maxTokens)
-                if (thinking) put("reasoning_effort", reasoningEffort(thinkingLevel))
+                applyReasoningParams(this, cfg, thinkingLevel)
                 if (cfg.tempEnabled) cfg.tempValue.toFloatOrNull()?.let { put("temperature", it) }
                 if (cfg.topPEnabled) cfg.topPValue.toFloatOrNull()?.let { put("top_p", it) }
             }
