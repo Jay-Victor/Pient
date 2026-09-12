@@ -46,6 +46,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -116,9 +117,17 @@ fun ChatScreen(chatState: ChatState, nav: NavController) {
     val messagesListState = rememberLazyListState()
     // 消息列表的可视高度（dp）——「一屏」的计量单位：优先用实测视口高度，
     // 首帧还没测量时用屏幕高 × 0.72 估（扣掉顶栏与输入栏）。长会话窗口按它折算屏数。
-    val listViewportDp = with(density) {
-        val px = messagesListState.layoutInfo.viewportSize.height
-        (if (px > 0) px else (screenHpx * 0.72f).toInt()).toDp().value
+    //
+    // ★ 必须走 derivedStateOf，不能在组合期直接读 layoutInfo：layoutInfo 是**粗粒度**状态，
+    //   每次测量都可能换一个新对象，直接在组合期读它 → 整页（顶栏/抽屉/输入栏/消息区）
+    //   跟着反复重组，白白占用 UI 线程（2026-09-12 滚动卡顿排查实测：滑动时 ChatScreen
+    //   每秒重组 8~19 次，绝大多数由这个视口高度读取触发）。派生块把「读」收窄成
+    //   **视口高度真的变了才通知**。
+    val listViewportDp by remember(density) {
+        derivedStateOf {
+            val px = messagesListState.layoutInfo.viewportSize.height
+            with(density) { (if (px > 0) px else (screenHpx * 0.72f).toInt()).toDp().value }
+        }
     }
     // 长按消息 → fork 上下文菜单（2026-09-02 分支功能设计 §4）：目标消息下标 + 气泡根坐标
     var forkMenuTarget by remember { mutableStateOf<Pair<Int, Rect>?>(null) }
