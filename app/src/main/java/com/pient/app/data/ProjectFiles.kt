@@ -426,6 +426,30 @@ object ProjectFiles {
      * SAF 项目：DocumentFile.delete——TreeDocumentFile 底层 DocumentsContract.deleteDocument
      * 对树文档递归删除整棵子树。
      */
+    /**
+     * 重置工作区（2026-09-14 对齐 Operit `createAndResetWorkspaceDirectory`）：**清空项目根目录内容并保留根目录本身**。
+     *
+     * 本地项目 = 删目录再重建；SAF 项目 = 只删根下的子节点（删掉 tree 根会连持久化授权一起丢）。
+     * 破坏性操作，调用方必须先给红字确认弹窗。调用方须在 IO 线程执行。
+     */
+    fun resetProjectRoot(context: Context, project: Project): Boolean {
+        return try {
+            if (project.uri != null) {
+                val tree = DocumentFile.fromTreeUri(context, Uri.parse(project.uri)) ?: return false
+                tree.listFiles().forEach { runCatching { it.delete() } }
+                true
+            } else {
+                val f = File(project.path)
+                when {
+                    !f.exists() -> f.mkdirs()
+                    else -> f.deleteRecursively() && f.mkdirs()
+                }
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     fun deleteProjectRoot(context: Context, project: Project): Boolean {
         return try {
             if (project.uri != null) {

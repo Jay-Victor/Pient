@@ -227,6 +227,11 @@ fun PientApp() {
         }.collect { SettingsStore.saveEnvironment(context) }
     }
 
+    // SAF 书签持久化（项目选择器里增删/改名）
+    LaunchedEffect(Unit) {
+        snapshotFlow { SettingsStore.safBookmarks }.collect { SettingsStore.saveEnvironment(context) }
+    }
+
     // apt 镜像源落到 rootfs（选定即生效；rootfs 未就绪时静默跳过，解包后靠下次启动对齐）
     LaunchedEffect(Unit) {
         snapshotFlow { SettingsStore.aptMirror }
