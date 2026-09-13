@@ -2,6 +2,7 @@ package com.pient.app.runtime
 
 import android.content.Context
 import android.util.Log
+import com.pient.app.PientRuntime
 import com.pient.app.data.AiBackend
 import com.pient.app.data.AiConfigStore
 import com.pient.app.data.ProviderConfig
@@ -79,9 +80,11 @@ object PiConfig {
     /**
      * 设置接线（settings.json，**合并写**——文件里可能已经有 pi 自己落的键）：
      * 1. `shellPath` → 随包包装脚本（bash 工具的执行环境入口）；
-     * 2. `defaultTools` → **七工具全集**：pi 默认只激活 `read/bash/edit/write` 四个
-     *    （pi `core/sdk.ts:256` 的 `defaultActiveToolNames`），不写这个键的话
+     * 2. `defaultTools` → **七工具全集**（当前选中的模型「支持 ToolCall」时）：pi 默认只激活
+     *    `read/bash/edit/write` 四个（pi `core/sdk.ts:256` 的 `defaultActiveToolNames`），不写这个键的话
      *    **grep / find / ls 根本不会出现在模型看到的工具表里**（实测 tools=4）。
+     *    选中模型**关掉** ToolCall 时写空表：宿主没有应用内那套文本标记机制，只能表达「这个模型不挂工具」，
+     *    与直连路径（关 = 软件内机制）语义上不同——见 `references/model-capabilities-and-app-tools.md`。
      * pi 只在启动时读一次设置，所以必须在本进程拉起宿主**之前**写好（[sync] 的调用点在宿主启动前）。
      */
     private fun syncSettings(context: Context) {
@@ -90,9 +93,23 @@ object PiConfig {
             if (file.exists()) JSONObject(file.readText()) else JSONObject()
         }.getOrDefault(JSONObject())
         json.put("shellPath", PiRuntime.shellPath(context).absolutePath)
-        json.put("defaultTools", JSONArray(PIENT_TOOLS))
+        val tools = if (selectedConfig()?.toolCallEnabled != false) PIENT_TOOLS else emptyList()
+        json.put("defaultTools", JSONArray(tools))
         writeJson(file, json)
-        Log.i(TAG, "pi 设置已写入：shellPath=${PiRuntime.shellPath(context).absolutePath} defaultTools=${PIENT_TOOLS.size} 个")
+        Log.i(
+            TAG,
+            "pi 设置已写入：shellPath=${PiRuntime.shellPath(context).absolutePath} " +
+                "defaultTools=${tools.size} 个（ToolCall=${selectedConfig()?.toolCallEnabled != false}）",
+        )
+    }
+
+    /**
+     * 宿主能力接线跟**当前选中的服务商**走（[PientRuntime.chatState] 的 `selectedModel`）；
+     * 没有选中项时退回第一个已配置服务商。没配置任何服务商 → null（此时 [sync] 已经提前返回了）。
+     */
+    private fun selectedConfig(): ProviderConfig? {
+        val sel = PientRuntime.chatState?.selectedModel
+        return (sel?.let { AiConfigStore.configs[it.provider] }) ?: AiConfigStore.configs.values.firstOrNull()
     }
 
     /** pi 的服务商 id：允许字母数字与 `-._`，其余归一为 `-`（pi 侧 id 会出现在模型 id 里） */
@@ -107,6 +124,11 @@ object PiConfig {
 
     private fun modelJson(name: String, cfg: ProviderConfig): JSONObject {
         val o = JSONObject().put("id", name).put("name", name)
+        // 模型能力：识图开关 → pi 的模型输入声明（`input: ("text"|"image")[]`，model-config 的 schema 认这个键）。
+        // 音频/视频 pi 的模型 schema 没有对应取值（只有 text/image），那两个开关只作用于应用内直连路径。
+        val input = JSONArray().put("text")
+        if (cfg.imageDirectEnabled) input.put("image")
+        o.put("input", input)
         cfg.ctxLenK.trim().toIntOrNull()?.let { o.put("contextWindow", it * 1000) }
         cfg.maxOutK.trim().toIntOrNull()?.let { o.put("maxTokens", it * 1000) }
         // 思考：只有写法已知（非 NONE/AUTO）才声明 reasoning，AUTO 时保守不声明（模型按不支持思考处理）

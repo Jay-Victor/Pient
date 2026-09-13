@@ -17,6 +17,7 @@ import com.pient.app.runtime.PiHost
 import com.pient.app.runtime.PiHostState
 import com.pient.app.runtime.PiRuntime
 import com.pient.app.runtime.PiSessions
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -447,6 +448,12 @@ class ChatState {
     var pendingPermission by mutableStateOf<PendingPermission?>(null)
 
     /**
+     * 直连路径（应用内工具）的授权询问回执通道：宿主路径走 RPC 的 `extension_ui_request`，
+     * 应用内没有 RPC，用这个 deferred 承接**同一个对话框**的答案（[pendingPermission] 也是同一个状态）。
+     */
+    private var inAppAsk: CompletableDeferred<String>? = null
+
+    /**
      * 发送消息并请求 AI 回复：历史重建 = 当前会话的 User/Assistant（跳过错误消息与
      * 思考/工具条目），system prompt 走 ChatState.systemPrompt；思考级别/流式开关/
      * 模型参数均来自输入栏与配置页状态。请求失败以 error 助手消息呈现（不进 API 上下文）。
@@ -801,11 +808,13 @@ class ChatState {
             if (answer.isNotBlank()) appendEntry(Msg.Assistant(answer.trim()))
             val results = ArrayList<String>()
             for (c in calls) {
+                // 授权策略（与宿主路径同一份 pient_gate.json：read/grep/find/ls 默认 ALLOW，write/edit/bash 默认 ASK）
+                val allowed = ctx != null && askInAppPermission(ctx, c.name, c.arguments)
                 onTool(PiAgentEvent.ToolStart(c.id, c.name, c.arguments))
-                val outcome = if (ctx != null) {
-                    AppTools.run(ctx, c.name, c.arguments)
-                } else {
-                    AppTools.Outcome("工具不可用：应用上下文缺失", true)
+                val outcome = when {
+                    ctx == null -> AppTools.Outcome("工具不可用：应用上下文缺失", true)
+                    !allowed -> AppTools.Outcome("已拒绝：用户未授权执行「${c.name}」（下次调用会再问一次）", true)
+                    else -> AppTools.run(ctx, c.name, c.arguments)
                 }
                 onTool(
                     PiAgentEvent.ToolEnd(c.id, c.name, outcome.output, outcome.isError, outcome.diff),
@@ -830,6 +839,41 @@ class ChatState {
         val text = if (lastText.isNotBlank()) lastText else streamDraft.trim().ifBlank { "（已达单轮工具调用上限 ${AppTools.MAX_ROUNDS} 轮）" }
         return ChatOutcome(text, usageTotal.takeIf { it.inTokens + it.outTokens > 0 }, streamThinking)
     }
+
+    /**
+     * 直连路径执行工具前的授权询问（[ToolPolicy] / `pient_gate.json`，与宿主路径同一份策略）：
+     * `ALLOW` 直接放行、`FORBID` 直接拒、`ASK` 弹**同一个**授权对话框并挂起等待回执。
+     * 宿主路径的询问来自守门扩展的 `extension_ui_request`，应用内没有 RPC，故用 [inAppAsk] 承接答案。
+     */
+    private suspend fun askInAppPermission(ctx: Context, name: String, args: String): Boolean {
+        return when (ToolPolicy.policyFor(ctx, name)) {
+            ToolPolicy.ALLOW -> true
+            ToolPolicy.FORBID -> false
+            else -> {
+                val d = CompletableDeferred<String>()
+                inAppAsk = d
+                pendingPermission = PendingPermission(
+                    id = "app:" + System.currentTimeMillis(),
+                    toolName = name,
+                    argsSummary = args.take(400),
+                    dangerous = isDangerousCall(name, args),
+                )
+                val answer = d.await()
+                answer == ToolPolicy.OPT_ONCE || answer == ToolPolicy.OPT_ALWAYS
+            }
+        }
+    }
+
+    /** 高危调用（授权弹窗走破坏色变体）：保守启发式，与宿主守门扩展同类；只看 bash 的破坏性指令 */
+    private fun isDangerousCall(name: String, args: String): Boolean {
+        if (name != "bash") return false
+        val cmd = args.lowercase()
+        return DANGEROUS_SUBSTRINGS.any { cmd.contains(it) }
+    }
+
+    private val DANGEROUS_SUBSTRINGS = listOf(
+        "rm -rf", "rm -fr", "sudo ", "su -", "mkfs", "dd if=", "chmod 777", "> /dev/", "shutdown", "reboot",
+    )
 
     /** 单次请求结果：正文 + usage + 思考文本（思考模式关闭时为空串） */
     private data class ChatOutcome(val text: String, val usage: Usage?, val thinking: String)
@@ -960,6 +1004,20 @@ class ChatState {
         val ask = pendingPermission ?: return
         pendingPermission = null
         val ctx = PiHost.appContextOrNull()
+        // 直连路径：回执交给等待中的协程（不走 RPC）
+        inAppAsk?.let { d ->
+            if (always && ctx != null) ToolPolicy.setToolPolicy(ctx, ask.toolName, ToolPolicy.ALLOW)
+            inAppAsk = null
+            d.complete(
+                when {
+                    always -> ToolPolicy.OPT_ALWAYS
+                    deny -> ToolPolicy.OPT_DENY
+                    allowOnce -> ToolPolicy.OPT_ONCE
+                    else -> ""   // 取消
+                },
+            )
+            return
+        }
         when {
             always -> {
                 if (ctx != null) ToolPolicy.setToolPolicy(ctx, ask.toolName, ToolPolicy.ALLOW)
