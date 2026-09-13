@@ -30,7 +30,9 @@ from fetch_runtime import CACHE, MIRROR, deb_files, download, log, resolve_filen
 # PRoot 及其依赖（Termux 仓库固定版本，2026-09-12 实测同一来源）
 PKGS = {
     # pkg: (版本, 文件名模板)；版本仅作「固定路径优先」尝试，404 时自动回退到仓库索引里的当前版本
-    "proot": ("5.1.107-62", "pool/main/p/proot/proot_{ver}_{abi}.deb"),
+    # 5.1.107-62 已从 termux 索引下架（2026-09-13 实测：固定版本不可用 → 回退到索引版本 5.1.107.92，
+    # 两份 ABI 都如此）。把 pin 对齐到当前索引版本，避免每次拉取都走"回退"这条不可复现的路径。
+    "proot": ("5.1.107.92", "pool/main/p/proot/proot_{ver}_{abi}.deb"),
     "libtalloc": ("2.4.3", "pool/main/libt/libtalloc/libtalloc_{ver}_{abi}.deb"),
     # proot 的依赖（deb 的 Depends 就这两个，缺一个都起不来）：
     #   libandroid-shmem → 匿名共享内存垫片；libtalloc → 内存池库
