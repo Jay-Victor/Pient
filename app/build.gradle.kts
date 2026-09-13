@@ -1,3 +1,5 @@
+import java.io.RandomAccessFile
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -65,10 +67,47 @@ val pientRuntimeLibDir = rootProject.layout.projectDirectory
     .dir("runtime/cache/usr/lib")
     .asFile
 // 终端层（Ubuntu rootfs + PRoot）缓存，见 runtime/scripts/fetch_rootfs.py
+//
+// ⚠️ **两套 ABI 名必须映射，别直接拿 Android ABI 去拼缓存目录**：fetch_rootfs.py 的 `--abi` 是
+// Debian 口径（`aarch64` / `x86_64`），Android 是 `arm64-v8a` / `x86_64`。曾经直接拼
+// `rootfs-$pientRuntimeAbi` → arm64 构建去找 `runtime/cache/rootfs-arm64-v8a`（不存在）→
+// `syncPientTerminalBinaries` / `syncPientRootfsArchive` 双双被 onlyIf 静默跳过 → **APK 里塞的是
+// 上一次 x86_64 构建留下的归档与 proot**（装到 arm64 真机上就是坏的）。现在映射 + 缓存缺失直接报错。
+val pientRootfsAbi = when (pientRuntimeAbi) {
+    "arm64-v8a", "aarch64" -> "aarch64"
+    "x86_64" -> "x86_64"
+    else -> pientRuntimeAbi
+}
 val pientRootfsCacheDir = rootProject.layout.projectDirectory
-    .dir("runtime/cache/rootfs-$pientRuntimeAbi")
+    .dir("runtime/cache/rootfs-$pientRootfsAbi")
     .asFile
 val pientRootfsLibDir = File(pientRootfsCacheDir, "usr/lib")
+
+/** 终端层缓存缺失时的统一报错文案（带上要跑的命令，别让人猜） */
+fun pientRootfsCacheError(what: String): String =
+    "终端层缓存缺少$what：${pientRootfsCacheDir.absolutePath}\n" +
+        "  先拉取：python runtime/scripts/fetch_rootfs.py --abi $pientRootfsAbi\n" +
+        "  （别再靠 onlyIf 静默跳过——那会打出混入其它 ABI 的错包）"
+
+/** 缓存里的 rootfs 归档（ubuntu-base-*.tar.gz） */
+fun pientRootfsArchive(): File? = pientRootfsCacheDir.listFiles()
+    ?.firstOrNull { it.name.startsWith("ubuntu-base-") && it.name.endsWith(".tar.gz") }
+
+/** 脚本口径的 ABI 名（fetch_runtime.py / fetch_rootfs.py 的 --abi 取值一致：x86_64 / aarch64） */
+val pientRuntimeFetchAbi = pientRootfsAbi
+
+/** ELF 的 e_machine（小端，偏移 18）：0x3E = x86_64，0xB7 = aarch64；读不到返回 null */
+fun pientElfMachine(file: File): String? = runCatching {
+    RandomAccessFile(file, "r").use { raf ->
+        val head = ByteArray(20)
+        raf.readFully(head)
+        when (head[18].toInt() and 0xff) {
+            0x3e -> "x86_64"
+            0xb7 -> "aarch64"
+            else -> null
+        }
+    }
+}.getOrNull()
 
 // ABI 策略（2026-09-12 拍板，与 Operit 同口径）：**单 ABI 出包**——运行时 260MB，
 // fat APK 会翻倍；ABI 切分（AAB）只在走 Play 分发时才有意义。默认 x86_64 供模拟器开发，
@@ -92,7 +131,29 @@ val pientJniRoot = layout.buildDirectory.dir("pientJniLibs")
 
 val syncPientRuntime = tasks.register<Copy>("syncPientRuntimeBinaries") {
     description = "把 pi 宿主运行时二进制以 lib*.so 形式放入 jniLibs 目录"
-    onlyIf { pientRuntimeCacheDir.isDirectory }
+    // 缓存目录是「最后一次拉取」语义（usr/bin 不带 ABI 路径）→ 切 ABI 忘重拉时会把上一套
+    // ABI 的 node/rg/fd 打进本包（实测：arm64 包里躺着 x86_64 的 node）。构建期验 ELF。
+    doFirst {
+        if (!pientRuntimeCacheDir.isDirectory) {
+            throw GradleException(
+                "运行时缓存缺失：${pientRuntimeCacheDir.absolutePath}\n" +
+                    "  先拉取：python runtime/scripts/fetch_runtime.py --abi $pientRuntimeFetchAbi",
+            )
+        }
+        val expect = if (pientJniAbi == "arm64-v8a") "aarch64" else "x86_64"
+        val wrong = listOf("node", "rg", "fd")
+            .map { File(pientRuntimeCacheDir, it) }
+            .filter { it.isFile }
+            .filter { pientElfMachine(it) != null && pientElfMachine(it) != expect }
+        if (wrong.isNotEmpty()) {
+            throw GradleException(
+                "运行时二进制 ABI 与目标不符（目标 $expect）：" +
+                    wrong.joinToString("、") { "${it.name}=${pientElfMachine(it)}" } +
+                    "\n  先重拉：python runtime/scripts/fetch_runtime.py --abi $pientRuntimeFetchAbi" +
+                    "\n  （runtime/cache/usr 不带 ABI 路径，切 ABI 必须重拉）",
+            )
+        }
+    }
     from(pientRuntimeCacheDir) {
         include("node", "rg", "fd")
         rename { name -> "libpient_$name.so" }
@@ -108,7 +169,8 @@ val syncPientRuntime = tasks.register<Copy>("syncPientRuntimeBinaries") {
  */
 val syncPientTerminalBinaries = tasks.register<Copy>("syncPientTerminalBinaries") {
     description = "把 PRoot 与 loader 以 lib*.so 形式放入 jniLibs 目录"
-    onlyIf { File(pientRootfsCacheDir, "bin/proot").isFile }
+    // 缺缓存 = 这个包一定是坏的（终端跑不起来），出声失败而不是静默跳过
+    doFirst { if (!File(pientRootfsCacheDir, "bin/proot").isFile) throw GradleException(pientRootfsCacheError(" PRoot（bin/proot）")) }
     from(File(pientRootfsCacheDir, "bin/proot")) { rename { "libpient_proot.so" } }
     from(File(pientRootfsCacheDir, "libexec/proot/loader")) { rename { "libpient_proot_loader.so" } }
     // pi 的 bash 工具要一个「shellPath」：shebang 脚本在私有目录同样不能 exec（实测 EACCES），
@@ -126,8 +188,15 @@ val syncPientTerminalBinaries = tasks.register<Copy>("syncPientTerminalBinaries"
  */
 val syncPientRootfsArchive = tasks.register<Copy>("syncPientRootfsArchive") {
     description = "把 Ubuntu base rootfs 归档放进 assets（首启解包）"
-    onlyIf {
-        pientRootfsCacheDir.listFiles()?.any { it.name.startsWith("ubuntu-base-") && it.name.endsWith(".tar.gz") } == true
+    // 缺归档 = 打出来的包点「一键配置」必然失败（真机已踩过），出声失败
+    doFirst {
+        val archive = pientRootfsArchive() ?: throw GradleException(pientRootfsCacheError(" rootfs 归档（ubuntu-base-*.tar.gz）"))
+        // 目标目录是跨 ABI 共用的，切 ABI 时必须先删上一次那份，否则会留下一份 ABI 不符的归档
+        val stale = layout.buildDirectory.file("generated/pientAssets/pient-rootfs.tgz").get().asFile
+        if (stale.isFile && stale.length() != archive.length()) {
+            logger.lifecycle("替换 rootfs 归档：${stale.length()} → ${archive.length()} 字节（${archive.name}）")
+            stale.delete()
+        }
     }
     from(pientRootfsCacheDir) {
         include("ubuntu-base-*.tar.gz")
@@ -183,6 +252,16 @@ android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("ge
 tasks.named("preBuild") {
     dependsOn(syncPientRuntime, syncPientRuntimeLibs, syncPientTerminalBinaries,
         syncPientRootfsArchive, writePientRuntimeLibsManifest)
+    // 切 ABI 时清掉上一次构建留在 jniLibs 源目录里的另一套 ABI（jniLibs 源是整个
+    // build/pientJniLibs，不清就会 fat 出包：实测 arm64 包里混进了 x86_64 的 proot/loader）
+    doFirst {
+        pientJniRoot.get().asFile.listFiles()?.forEach { dir ->
+            if (dir.isDirectory && dir.name != pientJniAbi) {
+                logger.lifecycle("清掉旧 ABI 的 jniLibs 目录：${dir.name}（目标 $pientJniAbi）")
+                dir.deleteRecursively()
+            }
+        }
+    }
 }
 
 kotlin {

@@ -98,9 +98,18 @@ object ExecEnvs {
         val su = RootGateway.deviceRooted(context)
         val rootfsMissing = PiRuntime.ubuntuChecks(context).none { it.first.contains("rootfs") && it.second }
         return when {
+            rootfsMissing && PiRuntime.isUnpacking() -> EnvStatus(
+                false,
+                "正在自动解包 rootfs：${PiRuntime.unpackNote().ifBlank { "准备中…" }}",
+            )
+            rootfsMissing && !PiRuntime.rootfsArchiveAvailable(context) -> EnvStatus(
+                false,
+                "此 APK 未内置 rootfs 归档：构建时没跑 fetch_rootfs.py --abi 本机 ABI（arm64 真机要 --abi aarch64），" +
+                    "syncPientRootfsArchive 被跳过 —— 换用含归档的包，或按文档重新打包",
+            )
             rootfsMissing -> EnvStatus(
                 false,
-                "缺少 Ubuntu rootfs（随包归档未解包）",
+                "缺少 Ubuntu rootfs（随包归档未解包，约 30MB / 1–2 分钟）",
                 EnvAction.UNPACK_ROOTFS,
             )
             missing.isNotEmpty() -> EnvStatus(false, "缺少：" + missing.joinToString("、"))

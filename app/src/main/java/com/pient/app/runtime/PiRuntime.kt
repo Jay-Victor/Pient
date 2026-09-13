@@ -192,10 +192,62 @@ object PiRuntime {
                 Log.i(TAG, "执行环境已写入：$env")
             }
         }.onFailure { Log.w(TAG, "执行环境写入失败：${it.message}") }
+        ensureRootfsAsync(context)   // 环境按需自补：Operit 口径，无需用户手动点解包（见函数注释）
+    }
+
+    /** 解包进度/原因的公开快照（页面与终端页都要显示「正在解包 …%」） */
+    @Volatile
+    private var unpackNote: String = ""
+
+    fun unpackNote(): String = unpackNote
+
+    /**
+     * **按需自动解包**（对齐 Operit 的口径：环境缺什么，用之前就地补，不需要用户手动点）。
+     *
+     * Operit 把 `install_ubuntu()` 写进生成的启动脚本（common.sh），首次起终端会话自动解包并把进度
+     * 回显到终端；Pient 在这里做到更进一步——**只要运行时准备过一次**（App 起、开会话、进终端页、
+     * 进环境配置页都会调 [prepareTerminal]），就已经在后台解包，用户连终端页都不用打开。
+     *
+     * 三重条件缺一不可：rootfs 未就绪 / 没有别的解包在跑 / **APK 里确实带了归档**（自建 arm64 包
+     * 常见漏拉 rootfs；这种情况返回 false，由 UI 给出「换用含归档的包」的明确说明，不再静默失败）。
+     */
+    fun ensureRootfsAsync(context: Context): Boolean {
+        if (rootfsReady(context) || isUnpacking()) return false
+        if (!rootfsArchiveAvailable(context)) {
+            Log.w(TAG, "rootfs 未就绪，且 APK 未内置归档（构建时没跑 fetch_rootfs.py --abi ${abiLabel()}）")
+            return false
+        }
+        Thread {
+            Log.i(TAG, "自动解包开始（后台，无需用户操作）")
+            val ok = extractRootfs(context) { pct, text -> unpackNote = "${(pct * 100).toInt()}% · $text" }
+            unpackNote = if (ok) "" else unpackNote
+            Log.i(TAG, if (ok) "自动解包完成：${rootfsBash(context).absolutePath}" else "自动解包失败：$unpackNote")
+        }.apply {
+            isDaemon = true
+            name = "pient-rootfs-autounpack"
+        }.start()
+        return true
     }
 
     /** 随包的 rootfs 归档（assets；构建期由 syncPientRootfsArchive 放进来） */
     private const val ROOTFS_ARCHIVE_ASSET = "pient-rootfs.tgz"   // 见 build.gradle：别用 .gz 后缀
+
+    /**
+     * **本 APK 是否内置了 rootfs 归档**。
+     *
+     * 为什么必须单独判一次：`syncPientRootfsArchive` 是 `onlyIf { cache 里有 ubuntu-base-*.tar.gz }` ——
+     * 没跑过 `fetch_rootfs.py --abi <该 ABI>` 时任务被静默跳过，**APK 里就没有这个资产**（arm64 真机
+     * 第一次踩到：界面只会说「缺少 rootfs」，点「一键配置」抛 FileNotFoundException 且当时无任何提示，
+     * 表现为"点了没反应"）。有它之后 UI 才能给出准确说明。
+     */
+    fun rootfsArchiveAvailable(context: Context): Boolean =
+        runCatching { context.assets.list("")?.contains(ROOTFS_ARCHIVE_ASSET) == true }.getOrDefault(false)
+
+    /** 是否已有解包在跑（避免终端页 + 环境页并发解包同一份归档） */
+    @Volatile
+    private var unpacking = false
+
+    fun isUnpacking(): Boolean = unpacking
 
     /** rootfs 是否已解包（终端可用性的判据） */
     fun rootfsReady(context: Context): Boolean = rootfsBash(context).isFile
@@ -215,8 +267,22 @@ object PiRuntime {
      * 进度：tar 的成员是按目录序排列的，数顶层目录出现的个数即可（比递归统计文件数便宜得多）。
      */
     fun extractRootfs(context: Context, onProgress: (Float, String) -> Unit): Boolean {
+        if (unpacking) {
+            onProgress(0f, "已有一个解包任务在进行中…")
+            return false
+        }
+        if (!rootfsArchiveAvailable(context)) {
+            // 极常见的自建包情形：构建时没跑 fetch_rootfs.py --abi <本机 ABI>，任务被 onlyIf 跳过
+            val msg = "此 APK 未内置 rootfs 归档（构建时未拉取本机 ABI 的 rootfs：先跑 " +
+                "runtime/scripts/fetch_rootfs.py --abi ${abiLabel()} 再打包）"
+            Log.w(TAG, msg)
+            onProgress(0f, msg)
+            return false
+        }
+        unpacking = true
         val rootfs = rootfsDir(context)
         if (!rootfs.exists() && !rootfs.mkdirs()) {
+            unpacking = false
             onProgress(0f, "无法创建 ${rootfs.absolutePath}")
             return false
         }
@@ -256,6 +322,7 @@ object PiRuntime {
             onProgress(0f, "解包异常：${e.message}")
             return false
         } finally {
+            unpacking = false
             runCatching { tar.delete() }
         }
     }

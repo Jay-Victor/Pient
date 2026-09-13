@@ -121,9 +121,42 @@ object PiTerminal {
     @Synchronized
     private fun start(context: Context, session: Session) {
         PiRuntime.prepareTerminal(context)   // DNS / root 启动器 / 执行环境，会话启动时对齐
-        // 终端页固定是 Ubuntu 环境（装工具链、跑脚本都在这）；缺 rootfs 时给出可执行的下一步
+        // 终端页固定是 Ubuntu 环境（装工具链、跑脚本都在这）
         if (!PiRuntime.rootfsReady(context)) {
-            append(session, TerminalLine("rootfs 尚未初始化 —— 点上方「环境配置」→「一键配置」完成解包（约 28MB）", TerminalLineKind.OUTPUT))
+            // 对齐 Operit 的口径：**不需要用户手动点解包** —— Operit 把 install_ubuntu 写进生成的
+            // 启动脚本（common.sh），首次起会话自动解包并把进度回显到终端。这里照做。
+            if (PiRuntime.isUnpacking()) {
+                append(session, TerminalLine("rootfs 正在解包（已有任务在跑）—— 完成后重开本页即可", TerminalLineKind.OUTPUT))
+                return
+            }
+            if (!PiRuntime.rootfsArchiveAvailable(context)) {
+                append(
+                    session,
+                    TerminalLine(
+                        "此 APK 未内置 rootfs 归档（构建时没跑 fetch_rootfs.py --abi 本机 ABI）—— 无法自动解包；请换用含归档的包",
+                        TerminalLineKind.OUTPUT,
+                    ),
+                )
+                return
+            }
+            append(session, TerminalLine("rootfs 未初始化：自动解包中（约 30MB / 1–2 分钟，进度见下）…", TerminalLineKind.OUTPUT))
+            Thread {
+                val ok = runCatching {
+                    PiRuntime.extractRootfs(context) { pct, text ->
+                        append(session, TerminalLine("[${(pct * 100).toInt()}%] $text", TerminalLineKind.OUTPUT))
+                    }
+                }.getOrDefault(false)
+                if (ok) {
+                    append(session, TerminalLine("解包完成，启动会话…", TerminalLineKind.OUTPUT))
+                    start(context, session)   // 这次 rootfsReady=true，正常往下走
+                    write(session, INIT_CMD)
+                } else {
+                    append(session, TerminalLine("自动解包失败：原因见上；也可到「环境配置」页重试", TerminalLineKind.OUTPUT))
+                }
+            }.apply {
+                isDaemon = true
+                name = "pient-rootfs-unpack"
+            }.start()
             return
         }
         val shell = PiRuntime.shellPath(context)

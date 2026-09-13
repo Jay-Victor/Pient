@@ -62,6 +62,7 @@ import com.pient.app.ui.components.SectionHeader
 import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -107,6 +108,14 @@ fun TerminalSetupScreen(nav: NavController) {
     LaunchedEffect(EnvProvision.running) {
         if (!EnvProvision.running) detected = withContext(Dispatchers.IO) {
             EnvProvision.detect(context, UBUNTU_COMPONENTS)
+        }
+    }
+    // rootfs 自动解包可能由 App 启动时的后台线程触发（不经过本页）→ 解包期间让状态行自己刷新，
+    // 用户看得见「正在自动解包 rootfs：n% · …」，不再是「点了/等了都没反应」
+    LaunchedEffect(Unit) {
+        while (true) {
+            if (PiRuntime.isUnpacking()) refresh()
+            delay(1000)
         }
     }
 
@@ -157,14 +166,22 @@ fun TerminalSetupScreen(nav: NavController) {
         scope.launch {
             unpacking = true
             progress = "准备解包…"
-            withContext(Dispatchers.IO) {
+            val ok = withContext(Dispatchers.IO) {
                 PiRuntime.extractRootfs(context) { pct, text ->
                     main.post { progress = "${(pct * 100).toInt()}% · $text" }
                 }
             }
             refresh()
             unpacking = false
-            progress = ""
+            if (ok) {
+                progress = ""
+                toast("Ubuntu rootfs 解包完成")
+            } else {
+                // 失败必须看得见：把原因留在页面上 + toast 一次（此前失败是静默的，
+                // 真机上表现为"点「一键配置」没反应"）
+                val msg = progress.substringAfter("· ", progress).ifBlank { "解包失败" }
+                toast(msg)
+            }
         }
     }
 
