@@ -160,22 +160,6 @@ object ProjectFiles {
         return out
     }
 
-    /**
-     * 递归遍历 SAF 目录（每个目录一次 query，粒度同 [listSafChildren]）——SafWorkspace 物化时用。
-     * [onEntry] 收到 (目录项, 相对根的路径)。
-     */
-    internal fun safWalk(context: Context, treeUri: Uri, onEntry: (SafEntry, String) -> Unit) {
-        val rootDocId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull() ?: return
-        fun recurse(parentDocId: String, prefix: String, depth: Int) {
-            if (depth > MAX_DEPTH) return
-            for (e in listSafChildren(context, treeUri, parentDocId)) {
-                val rel = if (prefix.isEmpty()) e.name else "$prefix/${e.name}"
-                onEntry(e, rel)
-                if (e.isDir) recurse(e.docId, rel, depth + 1)
-            }
-        }
-        recurse(rootDocId, "", 0)
-    }
 
     private fun loadSafRoot(context: Context, treeUri: Uri, budget: ScanBudget): FileNode? {
         val rootDocId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull() ?: return null

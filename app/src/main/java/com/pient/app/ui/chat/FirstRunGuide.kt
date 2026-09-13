@@ -1,12 +1,7 @@
 package com.pient.app.ui.chat
 
-import android.content.Intent
-import android.net.Uri
-import android.os.Environment
-import android.provider.DocumentsContract
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -47,7 +42,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.documentfile.provider.DocumentFile
 import com.pient.app.R
 import com.pient.app.data.ChatState
 import com.pient.app.ui.components.PientDialog
@@ -57,7 +51,7 @@ import java.io.File
 /**
  * 聊天页首次引导（2026-09-08 用户定：移除 mock 后初次进入无项目，2026-09-08 晚迭代为
  * 双步骤清单——两个条件任一未满足即显示引导，已完成步骤打勾提示，两者齐备才进入聊天）：
- * ① 创建项目（绑定项目文件夹）：新建文件夹 / SAF 选择本地文件夹；
+ * ① 创建项目（新建文件夹；2026-09-14 用户拍板：移除 SAF「选择本地文件夹」）；
  * ② 配置 AI 模型：跳转服务商与模型配置页，「测试连接」成功后标记完成。
  */
 @Composable
@@ -190,7 +184,7 @@ private fun GuideActionCard(
 
 /**
  * 创建项目弹窗（2026-09-08 新增，聊天页引导入口；与侧边栏新建项目同语义）：
- * 输入名称 → 应用私有目录 Projects/ 下真实创建；底部「或选择本地文件夹」走 SAF
+ * 输入名称 → 应用私有目录 Projects/ 下真实创建（可选项目类型模板）
  * 目录选择器绑定现有文件夹（tree URI 持久化授权）。
  */
 @Composable
@@ -203,42 +197,6 @@ private fun CreateProjectDialog(
     val confirmEnabled = name.isNotBlank() && !name.contains('/') &&
         chatState.projects.none { it.name == name.trim() }
 
-    // 选择本地文件夹（SAF，2026-09-02 侧边栏同款实现）：目录选择器 → tree URI 持久化授权 → 新项目
-    val pickFolderLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree(),
-    ) { uri: Uri? ->
-        if (uri == null) return@rememberLauncherForActivityResult // 用户取消
-        val doc = DocumentFile.fromTreeUri(context, uri)
-        if (doc == null || !doc.isDirectory) {
-            Toast.makeText(context, "请选择文件夹，不支持文件", Toast.LENGTH_SHORT).show()
-            return@rememberLauncherForActivityResult
-        }
-        val folderName = doc.name ?: uri.lastPathSegment ?: "本地文件夹"
-        val realPath = try {
-            val docId = DocumentsContract.getTreeDocumentId(uri)
-            val parts = docId.split(':')
-            if (uri.authority == "com.android.externalstorage.documents" &&
-                parts.size == 2 && parts[0] == "primary"
-            ) {
-                Environment.getExternalStorageDirectory().absolutePath + "/" + parts[1]
-            } else null
-        } catch (e: Exception) {
-            null
-        }
-        try {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-            )
-        } catch (e: SecurityException) {
-            // 个别 provider 不支持持久化授权，按本次会话临时授权继续
-        }
-        if (!chatState.addProject(folderName, realPath ?: uri.toString(), uri.toString())) {
-            Toast.makeText(context, "已存在同名项目「$folderName」", Toast.LENGTH_SHORT).show()
-        } else {
-            onDismiss()
-        }
-    }
 
     Box(Modifier.fillMaxSize()) {
         PientDialog(
@@ -276,27 +234,6 @@ private fun CreateProjectDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
                 )
-                Spacer(Modifier.height(6.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = { pickFolderLauncher.launch(null) })
-                        .padding(vertical = 6.dp),
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    Icon(
-                        Icons.Outlined.FolderOpen, null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Text(
-                        "或选择本地文件夹",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(start = 6.dp),
-                    )
-                }
             }
         }
     }

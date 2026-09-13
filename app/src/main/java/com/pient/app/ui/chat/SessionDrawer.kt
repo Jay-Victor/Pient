@@ -1,12 +1,7 @@
 package com.pient.app.ui.chat
 
-import android.content.Intent
 import android.net.Uri
-import android.os.Environment
-import android.provider.DocumentsContract
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -88,7 +83,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
-import androidx.documentfile.provider.DocumentFile
 import com.pient.app.R
 import com.pient.app.data.ChatState
 import com.pient.app.data.PanelMaterial
@@ -96,8 +90,6 @@ import com.pient.app.data.Project
 import com.pient.app.data.ProjectFiles
 import com.pient.app.data.ProjectTemplates
 import com.pient.app.data.ProjectType
-import com.pient.app.data.SafBookmark
-import com.pient.app.data.SafWorkspace
 import com.pient.app.data.Session
 import com.pient.app.data.SessionGroup
 import com.pient.app.data.SettingsStore
@@ -164,55 +156,12 @@ fun SessionDrawer(
     var projectUnbindConfirmFor by remember { mutableStateOf<String?>(null) }
     // 重置工作区（2026-09-14 对齐 Operit createAndResetWorkspaceDirectory）
     var projectResetConfirmFor by remember { mutableStateOf<String?>(null) }
-    // SAF 选目录后先弹「保存为书签」命名弹窗（对齐 Operit repo_bookmark_name 的命名校验），不再直接建项目
-    var pendingSafUri by remember { mutableStateOf<String?>(null) }
-    var pendingSafPath by remember { mutableStateOf<String?>(null) }
-    var pendingSafName by remember { mutableStateOf("") }
     var renameFor by remember { mutableStateOf<String?>(null) }
     var deleteConfirmFor by remember { mutableStateOf<String?>(null) }
     var batchMode by remember { mutableStateOf(false) }
     var batchDeleteConfirm by remember { mutableStateOf(false) }
     val selectedIds = remember { mutableStateListOf<String>() }
     val context = LocalContext.current
-
-    // 选择本地文件夹（SAF，2026-09-02 实现）：系统目录选择器 → tree URI 持久化授权 → 新项目。
-    // 结果校验必须是目录（系统选择器 UI 仍会显示文件条目，文件不可作为项目根）；
-    // 主存储映射为真实路径 /storage/emulated/0/...，其他 provider 回退 content URI。
-    val pickFolderLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree(),
-    ) { uri: Uri? ->
-        if (uri == null) return@rememberLauncherForActivityResult // 用户取消
-        val doc = DocumentFile.fromTreeUri(context, uri)
-        if (doc == null || !doc.isDirectory) {
-            Toast.makeText(context, "请选择文件夹，不支持文件", Toast.LENGTH_SHORT).show()
-            return@rememberLauncherForActivityResult
-        }
-        val name = doc.name ?: uri.lastPathSegment ?: "本地文件夹"
-        // primary:xxx → /storage/emulated/0/xxx；SD 卡/云盘 provider 无法映射时保留 content URI
-        val realPath = try {
-            val docId = DocumentsContract.getTreeDocumentId(uri)
-            val parts = docId.split(':')
-            if (uri.authority == "com.android.externalstorage.documents" &&
-                parts.size == 2 && parts[0] == "primary"
-            ) {
-                Environment.getExternalStorageDirectory().absolutePath + "/" + parts[1]
-            } else null
-        } catch (e: Exception) {
-            null
-        }
-        try {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-            )
-        } catch (e: SecurityException) {
-            // 个别 provider 不支持持久化授权，按本次会话临时授权继续
-        }
-        // 不再直接建项目：先弹「保存为书签」命名弹窗（对齐 Operit 的 repo_bookmark_name 校验）
-        pendingSafUri = uri.toString()
-        pendingSafPath = realPath ?: uri.toString()
-        pendingSafName = name
-    }
 
     val projectSessions = chatState.sessionsFor(chatState.currentProject ?: "")
     // 时间分组（普通模式列表用；批量模式进入时也要用它把列表一次性全展开，故提到这里）
@@ -429,37 +378,6 @@ fun SessionDrawer(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            // SAF 项目：agent 的工具只吃真路径，SAF 只给令牌 → AI 在物化副本上工作，回写是显式动作
-            // （不自动回写：原目录可能同时被别的 App 改，静默覆盖会丢东西）
-            if (proj?.uri != null) {
-                val scope = rememberCoroutineScope()
-                val context = LocalContext.current
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(top = 6.dp),
-                ) {
-                    Text(
-                        "AI 副本（SAF）",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        "保存回原目录",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable {
-                                scope.launch {
-                                    val n = withContext(Dispatchers.IO) { SafWorkspace.saveBack(context, proj) }
-                                    Toast.makeText(context, "已回写 $n 个文件到原目录", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                    )
-                }
-            }
             // 项目选择层（项目行限高滚动；新建项目行固定在最底部不被挤走）
             AnimatedVisibility(visible = projectPickerOpen) {
                 Column(Modifier.padding(top = 10.dp)) {
@@ -589,131 +507,34 @@ fun SessionDrawer(
                             .height(1.dp)
                             .background(MaterialTheme.colorScheme.outlineVariant),
                     )
-                    // ── 新建项目 / 选择本地文件夹：同一行，中间竖分隔线 ──
+                    // ── 新建项目（2026-09-14 用户拍板：移除「选择本地文件夹」整条链路，只留这一个入口）──
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = {
+                                // 弹窗输入名称 → 真实创建文件夹（可选项目类型模板）
+                                newProjectDialogOpen = true
+                            })
+                            .padding(vertical = 8.dp),
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier
-                                .weight(1f)
-                                .offset(x = (-10).dp) // 2026-09-02 用户要求：整体稍左移
-                                .clickable(onClick = {
-                                    // 2026-09-02 实现：弹窗输入名称 → 真实创建文件夹
-                                    newProjectDialogOpen = true
-                                }),
-                        ) {
-                            Icon(
-                                Icons.Outlined.CreateNewFolder, null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Text(
-                                "新建项目",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(start = 6.dp),
-                            )
-                        }
-                        Box(
-                            Modifier
-                                .width(1.dp)
-                                .height(20.dp)
-                                .background(MaterialTheme.colorScheme.outlineVariant),
+                        Icon(
+                            Icons.Outlined.CreateNewFolder, null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp),
                         )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable(onClick = {
-                                    // 2026-09-02 实现：SAF 系统目录选择器 + tree URI 持久化授权
-                                    pickFolderLauncher.launch(null)
-                                }),
-                        ) {
-                            Icon(
-                                Icons.Outlined.FolderOpen, null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Text(
-                                "选择本地文件夹",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(start = 6.dp),
-                            )
-                        }
+                        Text(
+                            "新建项目",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
                     }
                 }
             }
         }
 
-        // ── SAF 书签（2026-09-14，对齐 Operit safBookmarks）：选过一次的目录一键绑定，
-            //    不必再走系统选择器。「书签」与「项目」分离：解绑项目后书签仍在 ──
-        if (SettingsStore.safBookmarks.isNotEmpty()) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp),
-            ) {
-                Icon(
-                    Icons.Outlined.Bookmarks, null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(14.dp),
-                )
-                Text(
-                    "书签",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 6.dp),
-                )
-            }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(bottom = 6.dp),
-            ) {
-                SettingsStore.safBookmarks.forEach { bm ->
-                    val bound = chatState.projects.any { it.uri == bm.uri }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(
-                                if (bound) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
-                                else MaterialTheme.colorScheme.surfaceContainerLow,
-                            )
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
-                            .clickable {
-                                // 一键绑定：已绑定则切换过去；未绑定则建项目（同名则切换）
-                                val existing = chatState.projects.firstOrNull { it.name == bm.name }
-                                if (existing != null) {
-                                    chatState.setProject(existing.name)
-                                } else if (!chatState.addProject(bm.name, bm.uri, bm.uri)) {
-                                    Toast.makeText(context, "已存在同名项目「${bm.name}」", Toast.LENGTH_SHORT).show()
-                                }
-                                projectPickerOpen = false
-                            }
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                    ) {
-                        Icon(
-                            if (bound) Icons.Outlined.Bookmark else Icons.Outlined.BookmarkBorder, null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(14.dp),
-                        )
-                        Text(
-                            bm.name,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (bound) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier.padding(start = 5.dp),
-                        )
-                    }
-                }
-            }
-        }
         // ── 搜索框（项目选择器下方；自动聚焦） ──
         if (searchOpen) {
             val focusRequester = remember { FocusRequester() }
@@ -1041,69 +862,6 @@ fun SessionDrawer(
         }
     }
 
-    // SAF「保存为书签」弹窗（2026-09-14：选目录后先命名再绑定；对齐 Operit repo_bookmark_name 的命名校验）
-    if (pendingSafUri != null) {
-        var bmName by remember(pendingSafUri) { mutableStateOf(pendingSafName) }
-        val trimmed = bmName.trim()
-        val dupProject = chatState.projects.any { it.name == trimmed }
-        val dupBookmark = SettingsStore.safBookmarks.any { it.name == trimmed }
-        val ok = trimmed.isNotEmpty() && !trimmed.contains('/')
-        Box(Modifier.fillMaxSize()) {
-            PientDialog(
-                title = "保存为书签",
-                onDismiss = { pendingSafUri = null },
-                confirmText = if (dupProject) "切换" else "绑定",
-                showClose = false,
-                confirmEnabled = ok,
-                onConfirm = {
-                    val uri = pendingSafUri
-                    if (uri != null && ok) {
-                        if (!dupBookmark) {
-                            SettingsStore.safBookmarks =
-                                (SettingsStore.safBookmarks + SafBookmark(trimmed, uri)).sortedBy { it.name }
-                        }
-                        if (dupProject) {
-                            chatState.setProject(trimmed)
-                        } else if (!chatState.addProject(trimmed, pendingSafPath ?: uri, uri)) {
-                            Toast.makeText(context, "已存在同名项目「$trimmed」", Toast.LENGTH_SHORT).show()
-                        }
-                        pendingSafUri = null
-                        projectPickerOpen = false
-                    }
-                },
-            ) {
-                Text(
-                    "把这台设备上的文件夹存成书签：下次在项目选择器里一键绑定，不用再走系统选择器。名称同时用作项目名。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                BasicTextField(
-                    value = bmName,
-                    onValueChange = { bmName = it },
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onBackground),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp)
-                        .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(10.dp))
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-                        .padding(12.dp),
-                )
-                Text(
-                    when {
-                        !ok -> "名称不能为空、且不能含 /"
-                        dupProject -> "已有同名项目：确认将直接切到它（书签仍会保存）"
-                        dupBookmark -> "已有同名书签：将复用同一条（刷新 URI）"
-                        else -> "AI 会在副本上工作，改完记得「保存回原目录」"
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-            }
-        }
-    }
 
     // 重置工作区确认（2026-09-14：清空项目根目录内容、保留根目录本身；破坏性 → 红字确认）
     projectResetConfirmFor?.let { rn ->

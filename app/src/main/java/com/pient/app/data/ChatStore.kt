@@ -111,7 +111,16 @@ object ChatStore {
                 for (i in 0 until projects.length()) {
                     val p = projects.getJSONObject(i)
                     val uri = if (p.isNull("uri")) null else p.optString("uri")
-                    state.addProjectSilently(p.optString("name"), p.optString("path"), uri)
+                    // 2026-09-14 用户拍板移除 SAF「选择本地文件夹」→ 旧的 SAF 项目（uri != null）不再可用
+                    // （没有物化副本、也没有 ContentResolver 通路）：这里直接跳过，别让它以坏状态出现在列表里。
+                    if (!uri.isNullOrEmpty()) {
+                        android.util.Log.i(
+                            "PiHost",
+                            "跳过遗留的 SAF 项目「${p.optString("name")}」（SAF 支持已移除）",
+                        )
+                        continue
+                    }
+                    state.addProjectSilently(p.optString("name"), p.optString("path"), null)
                 }
             }
 

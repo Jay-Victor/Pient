@@ -199,7 +199,7 @@ class ChatState {
 
     /**
      * 添加项目（2026-09-02 实现真实功能）：
-     * 「新建文件夹」= filesDir/Projects/<name> 真实目录；「选择本地文件夹」= SAF tree URI。
+     * 输入名称 → `filesDir/Projects/<name>` 真实目录（2026-09-14 起唯一形态；SAF「选择本地文件夹」已按用户要求移除）。
      * 重名返回 false（不重复添加）。成功后切换为当前项目。
      */
     fun addProject(name: String, path: String, uri: String? = null): Boolean {

@@ -40,7 +40,6 @@ import com.pient.app.data.APT_MIRRORS
 import com.pient.app.data.ChatState
 import com.pient.app.data.ChatStore
 import com.pient.app.data.ModelPricingDefaults
-import com.pient.app.data.SafWorkspace
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ThemeMode
 import com.pient.app.data.UsageStore
@@ -175,42 +174,15 @@ fun PientApp() {
             .collect { SettingsStore.saveDrawerMode(context) }
     }
 
-    // 当前项目 → agent 工作区（bash 工具的 cwd 与 Ubuntu 里的 /workspace 同一处）；
-    // SAF 项目没有可给 agent 的文件系统路径 → 保持随包工作区（见 PiRuntime.setWorkspace）
+    // 当前项目 → agent 工作区（bash 工具的 cwd 与 Ubuntu 里的 /workspace 同一处）。
+    // 2026-09-14 用户拍板：移除 SAF「选择本地文件夹」整条链路 → 项目一律是应用私有目录下的真路径，
+    // 物化副本 / 回写那套（SafWorkspace）随之作废。
     LaunchedEffect(ready) {
         if (!ready) return@LaunchedEffect
-        // 已物化过的 (项目名, SAF uri)：项目列表本身变动时不要重复物化（4080 文件的目录要几十秒）
-        var staged: Pair<String, String?>? = null
         snapshotFlow { chatState.currentProject to chatState.projects.toList() }
             .collect { (name, projects) ->
                 val proj = projects.firstOrNull { it.name == name }
-                when {
-                    proj == null -> PiRuntime.setWorkspace(context, null)
-                    proj.uri == null -> {
-                        staged = null
-                        PiRuntime.setWorkspace(context, File(proj.path))
-                    }
-                    else -> {
-                        // SAF 项目：agent 只吃真路径 → 物化到 files/saf_work/<名>（切回本项目会重新物化）。
-                        // **先切工作区、物化转后台**：几千个文件的 SAF 目录要几十秒，卡在这里会把
-                        // 后续的项目切换全部排队堵住（实测踩过）。
-                        val key = proj.name to proj.uri
-                        PiRuntime.setWorkspace(context, SafWorkspace.stageDir(context, proj.name))
-                        if (staged != key) {
-                            staged = key
-                            launch(Dispatchers.IO) {
-                                val (files, bytes) = SafWorkspace.stage(context, proj)
-                                withContext(Dispatchers.Main) {
-                                    Toast.makeText(
-                                        context,
-                                        "AI 副本已同步：$files 个文件（${bytes / 1048576}MB）",
-                                        Toast.LENGTH_SHORT,
-                                    ).show()
-                                }
-                            }
-                        }
-                    }
-                }
+                PiRuntime.setWorkspace(context, proj?.let { File(it.path) })
             }
     }
 
@@ -225,11 +197,6 @@ fun PientApp() {
         snapshotFlow {
             Triple(SettingsStore.execEnv, SettingsStore.aptMirror, SettingsStore.selectedComponents)
         }.collect { SettingsStore.saveEnvironment(context) }
-    }
-
-    // SAF 书签持久化（项目选择器里增删/改名）
-    LaunchedEffect(Unit) {
-        snapshotFlow { SettingsStore.safBookmarks }.collect { SettingsStore.saveEnvironment(context) }
     }
 
     // apt 镜像源落到 rootfs（选定即生效；rootfs 未就绪时静默跳过，解包后靠下次启动对齐）

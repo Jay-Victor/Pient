@@ -123,10 +123,6 @@ object SettingsStore {
     //    用户点「安装所选」或「跳过」后置位，永不再自动弹（可在「环境配置」页手动再进）──
     var envSetupDone by mutableStateOf(false)
 
-    // ── SAF 书签（2026-09-14，对齐 Operit 的 safBookmarks）：选过一次的目录存成可命名书签，
-    //    下次在项目选择器里一键绑定，不必再走系统选择器。name 兼作项目名（唯一性由 addProject 保证）──
-    var safBookmarks by mutableStateOf<List<SafBookmark>>(emptyList())
-
     // ── 开屏设置（2026-09-12）：启动时是否播放开屏加载动画 ──
     //   关 = 不显示开屏页（跳过动画与最短展示），数据仍在后台加载，直接进入主界面
     var startupAnimation by mutableStateOf(true)
@@ -208,13 +204,6 @@ object SettingsStore {
         selectedComponents = p.getStringSet("ubuntu_components", setOf("ca", "git", "curl"))
             ?.toSet() ?: setOf("ca", "git", "curl")
         envSetupDone = p.getBoolean("env_setup_done", false)
-        safBookmarks = p.getStringSet("saf_bookmarks", emptySet())
-            .orEmpty()
-            .mapNotNull { s ->
-                val i = s.indexOf('\u0001')
-                if (i <= 0) null else SafBookmark(s.substring(0, i), s.substring(i + 1))
-            }
-            .sortedBy { it.name }
         startupAnimation = p.getBoolean("startup_animation", true)
         filePreviewNoWrap = p.getBoolean("file_preview_no_wrap", false)
         customAccentEnabled = p.getBoolean("custom_accent_enabled", false)
@@ -311,8 +300,6 @@ object SettingsStore {
             .putString("apt_mirror", aptMirror)
             .putStringSet("ubuntu_components", selectedComponents)
             .putBoolean("env_setup_done", envSetupDone)
-            // SAF 书签：name\u0001uri 逐条（操作频繁、量小，用字符串集合足够）
-            .putStringSet("saf_bookmarks", safBookmarks.map { "${it.name}\u0001${it.uri}" }.toSet())
             .apply()
     }
 
@@ -445,14 +432,6 @@ data class Project(
     val uri: String? = null, // SAF tree URI（访问文件用；本地项目为 null）
 )
 
-/**
- * SAF 书签（对齐 Operit `ApiPreferences.safBookmarks`）：name 为用户命名（也作项目名），
- * uri 为持久化授权过的 tree URI。书签与项目**不是一回事**——解绑项目后书签仍在，可再一键绑定。
- */
-data class SafBookmark(
-    val name: String,
-    val uri: String,
-)
 
 data class Session(
     val id: String,

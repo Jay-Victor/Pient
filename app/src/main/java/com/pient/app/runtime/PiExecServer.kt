@@ -97,19 +97,7 @@ object PiExecServer {
 
             val json = when {
                 requestLine.startsWith("POST /exec") -> execute(body)
-                // SAF 文件操作桥（路线 A）：宿主侧 fs 门面把 `/saf/…` 路径翻译成这里的一跳
-                requestLine.startsWith("POST /fs") -> {
-                    val c = appContext
-                    if (c == null) {
-                        JSONObject().put("error", "no-context").put("message", "回桥未初始化")
-                    } else {
-                        runCatching { SafFileBridge.handle(c, JSONObject(body)) }.getOrElse {
-                            JSONObject().put("error", "fs-failed")
-                                .put("message", it.message ?: it.javaClass.simpleName)
-                        }
-                    }
-                }
-                else -> JSONObject().put("error", "not-found").put("message", "支持 POST /exec 与 POST /fs")
+                else -> JSONObject().put("error", "not-found").put("message", "只支持 POST /exec")
             }
             val bytes = json.toString().toByteArray(Charsets.UTF_8)
             val header = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" +
