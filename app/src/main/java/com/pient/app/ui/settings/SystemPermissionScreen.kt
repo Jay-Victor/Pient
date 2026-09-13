@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Build
@@ -288,12 +289,21 @@ fun SystemPermissionScreen(nav: NavController) {
                     CardDivider()
                     Spacer(Modifier.height(12.dp))
 
-                    // 档位选择（三档，可预览）
+                    // 档位选择（三档，可预览）——**设备不具备的能力不给选**：
+                    // Root 档在未 Root 设备上变暗且点不动（2026-09-14 用户要求：不支持的不让用户选）
+                    val tierSupported = PermissionTier.values().map { t ->
+                        when (t) {
+                            // 标准档永远可用；调试档只依赖可安装的 Shizuku（未装时给向导，不算不支持）
+                            PermissionTier.STANDARD, PermissionTier.DEBUGGER -> true
+                            PermissionTier.ROOT -> deviceRooted
+                        }
+                    }
                     PientSegmented(
                         labels = PermissionTier.values().map { it.title },
                         selected = displayed.ordinal,
                         onSelect = { displayed = PermissionTier.values()[it] },
                         modifier = Modifier.fillMaxWidth(),
+                        enabled = tierSupported,
                     )
 
                     Spacer(Modifier.height(10.dp))
@@ -312,7 +322,22 @@ fun SystemPermissionScreen(nav: NavController) {
                     // 设为当前档位 / 当前使用中
                     Spacer(Modifier.height(12.dp))
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        if (displayed != activeTier) {
+                        if (!tierSupported[displayed.ordinal]) {
+                            // 设备不支持该档：不给「设为当前档位」，只如实说明
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Outlined.Info, null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Text(
+                                    "设备不支持：未检测到 Root（Magisk / su）",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 4.dp),
+                                )
+                            }
+                        } else if (displayed != activeTier) {
                             PientButton(
                                 "设为当前档位",
                                 onClick = { setActiveTier(displayed) },
@@ -392,10 +417,13 @@ fun SystemPermissionScreen(nav: NavController) {
                             desc = t.detail.ifBlank { t.tier.desc },
                             ready = t.ready,
                             current = t.tier == effective,
-                            onAction = when (t.tier) {
-                                ShellTier.ADB -> if (!t.ready) ({ grantShizuku() }) else null
-                                ShellTier.ROOT -> if (!t.ready) ({ requestRoot() }) else null
-                                ShellTier.STANDARD -> null
+                            // 设备不支持（未 Root 设备上的 Root 档）→ 不给任何入口
+                            supported = t.supported,
+                            onAction = when {
+                                !t.supported -> null
+                                t.tier == ShellTier.ADB && !t.ready -> ({ grantShizuku() })
+                                t.tier == ShellTier.ROOT && !t.ready -> ({ requestRoot() })
+                                else -> null
                             },
                         )
                     }
@@ -635,6 +663,7 @@ private fun AndroidShellTierRow(
     ready: Boolean,
     current: Boolean,
     onAction: (() -> Unit)?,
+    supported: Boolean = true,
 ) {
     Row(
         verticalAlignment = Alignment.Top,
@@ -665,6 +694,14 @@ private fun AndroidShellTierRow(
                 "可用 ✓",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        } else if (!supported) {
+            // 设备不具备该能力：如实标注、不给入口（用户不可能选到一条跑不通的通道）
+            Text(
+                "设备不支持",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 8.dp),
             )
         } else if (onAction != null) {

@@ -45,6 +45,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -260,6 +261,8 @@ fun PientSegmented(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
     icons: List<ImageVector?>? = null,
+    /** 逐项可用性：false = 设备不具备该能力（如未 Root 设备上的 Root 档）→ 变暗且点不动 */
+    enabled: List<Boolean>? = null,
 ) {
     val shape = RoundedCornerShape(10.dp)
     Row(
@@ -271,6 +274,7 @@ fun PientSegmented(
     ) {
         labels.forEachIndexed { i, label ->
             val sel = i == selected
+            val on = enabled?.getOrNull(i) ?: true
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -286,12 +290,13 @@ fun PientSegmented(
                         if (sel) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f) else Color.Transparent,
                         shape,
                     )
-                    .clickable(onClick = { onSelect(i) }),
+                    .clickable(enabled = on, onClick = { onSelect(i) }),
                 contentAlignment = Alignment.Center,
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.alpha(if (on) 1f else 0.4f),
                 ) {
                     icons?.getOrNull(i)?.let { icon ->
                         Icon(

@@ -49,7 +49,14 @@ enum class ExecEnv(
 }
 
 /** 未就绪时的初始化入口（页面据此给按钮；不靠文案猜测） */
-enum class EnvAction { NONE, UNPACK_ROOTFS, REQUEST_ROOT }
+enum class EnvAction {
+    NONE,
+    UNPACK_ROOTFS,
+    REQUEST_ROOT,
+
+    /** 设备不具备该能力（如未 Root 设备上的 chroot）：页面显示为不可用、不给操作入口 */
+    UNSUPPORTED,
+}
 
 /** 环境就绪状态：ready + 一句面向用户的说明（未就绪时说明缺什么）+ 该给什么初始化入口 */
 data class EnvStatus(val ready: Boolean, val detail: String, val action: EnvAction = EnvAction.NONE)
@@ -90,7 +97,13 @@ enum class ShellTier(val id: String, val title: String, val desc: String) {
 }
 
 /** 某档当前是否可用 + 状态说明 */
-data class ShellTierStatus(val tier: ShellTier, val ready: Boolean, val detail: String)
+data class ShellTierStatus(
+    val tier: ShellTier,
+    val ready: Boolean,
+    val detail: String,
+    /** 设备是否**具备**该档能力：false = 设备不支持（未 Root 的设备上的 Root 档），页面不给操作入口 */
+    val supported: Boolean = true,
+)
 
 /**
  * 三档 Android shell 的实时状态（**唯一实现**：系统权限页与工具错误信息都从这里取）。
@@ -119,7 +132,8 @@ object AndroidShell {
             ShellTierStatus(
                 ShellTier.ROOT,
                 rooted,
-                if (rooted) "可用：设备已 Root，命令以 uid 0 执行" else "不可用：设备未 Root（模拟器 / 未 Root 真机）",
+                if (rooted) "可用：设备已 Root，命令以 uid 0 执行" else "设备不支持：未检测到 su / Root 管理器（模拟器、未 Root 真机）",
+                supported = rooted,
             ),
         )
     }
@@ -160,10 +174,13 @@ object ExecEnvs {
                 EnvAction.UNPACK_ROOTFS,
             )
             missing.isNotEmpty() -> EnvStatus(false, "缺少：" + missing.joinToString("、"))
+            // chroot 档要 su。区分两种「拿不到 su」：
+            //   设备本就未 Root（无 su 二进制 / 无 Root 管理器）→ 设备不支持，不给请求入口（不让用户选）；
+            //   设备有 su 但本应用未授权 → 给「请求 Root 授权」入口。
             chroot && !su -> EnvStatus(
                 false,
-                "rootfs 已就绪，但设备上没有可用的 su（未 Root / 未授权）",
-                EnvAction.REQUEST_ROOT,
+                "设备未 Root：chroot 档不可用（用默认的 PRoot 即可，功能一致、只是有模拟开销）",
+                EnvAction.UNSUPPORTED,
             )
             chroot -> EnvStatus(true, "rootfs 已就绪 · 将以 su + chroot 运行（首次命令会请求 Root 授权）")
             else -> EnvStatus(true, "rootfs 已就绪 · 经 PRoot 运行（应用 uid）")

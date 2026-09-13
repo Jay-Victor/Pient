@@ -504,6 +504,15 @@ private fun EnvRow(
                         height = 34,
                         contentPadding = 12,
                     )
+                    // 设备不具备该能力（未 Root 设备上的 chroot）：不给可点的操作入口，只如实说明
+                    EnvAction.UNSUPPORTED -> PientButton(
+                        text = "设备不支持",
+                        onClick = {},
+                        enabled = false,
+                        primary = false,
+                        height = 34,
+                        contentPadding = 12,
+                    )
                     EnvAction.NONE -> PientButton(
                         text = "重新检测",
                         onClick = onRecheck,
