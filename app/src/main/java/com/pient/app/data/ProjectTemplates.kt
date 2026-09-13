@@ -115,10 +115,11 @@ object ProjectTemplates {
         )
 
         ProjectType.PYTHON -> mapOf(
+            // 注意：这里**不能用字符串拼接 + 单个 .trimIndent()** —— Kotlin 里 `a + b + c.trimIndent()`
+            // 只对最后一段生效，前几段保留原始缩进（实测生成的 main.py 文档字符串被缩进 16 空格 →
+            // 模块级缩进 = IndentationError，脚本根本跑不了）。所以整段用一条原始串 + 行注释。
             "main.py" to """
-                """ + "\"\"\"" + """
-                ${name}：入口脚本（python3 main.py [参数…]）
-                """ + "\"\"\"" + """
+                # ${name}：入口脚本（python3 main.py [参数…]）
 
                 import sys
 
