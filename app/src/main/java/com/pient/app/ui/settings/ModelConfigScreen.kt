@@ -405,9 +405,9 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                 }
             }
 
-            // ── ②b 模型能力（2026-09-14 参考 Operit 的能力开关）──
-            // 只保留 ToolCall：它决定「请求怎么发」——原生工具调用 vs 软件内标记调用。
-            // 媒体（图片/音频/视频）不做开关、也不直发：用户发这类附件时直接提示报错（见 ChatState）。
+            // ── ②b 模型能力（2026-09-14 照 Operit 全量对齐：ToolCall + 三个媒体 direct-processing 开关）──
+            // ToolCall = 请求怎么发（原生工具调用 / 软件内标记调用）；
+            // 媒体三开关 = 该类型媒体直发还是「摘链接换占位」（关掉不拦消息，模型可用工具去读）。
             if (provider != null && cfg != null) {
                 item {
                     Column {
@@ -419,6 +419,27 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                     "开启后，将会使用API的专用接口进行原生工具调用（需要模型支持）",
                                 enabled = cfg.toolCallEnabled,
                                 onToggle = { updateConfig { it.copy(toolCallEnabled = !it.toolCallEnabled) } },
+                            )
+                            DividerLine()
+                            ParamBlock(
+                                label = "模型支持识图",
+                                hint = "启用后，图片将直接发送给AI处理，而不是让AI用工具（read / bash）去读",
+                                enabled = cfg.imageDirectEnabled,
+                                onToggle = { updateConfig { it.copy(imageDirectEnabled = !it.imageDirectEnabled) } },
+                            )
+                            DividerLine()
+                            ParamBlock(
+                                label = "模型支持音频解析",
+                                hint = "启用后，音频将直接发送给AI处理，而不是让AI用工具自行转写 / 描述",
+                                enabled = cfg.audioDirectEnabled,
+                                onToggle = { updateConfig { it.copy(audioDirectEnabled = !it.audioDirectEnabled) } },
+                            )
+                            DividerLine()
+                            ParamBlock(
+                                label = "模型支持视频解析",
+                                hint = "启用后，视频将直接发送给AI处理，而不是让AI用工具（bash + ffmpeg）抽帧 / 分析",
+                                enabled = cfg.videoDirectEnabled,
+                                onToggle = { updateConfig { it.copy(videoDirectEnabled = !it.videoDirectEnabled) } },
                             )
                             Spacer(Modifier.height(12.dp))
                         }

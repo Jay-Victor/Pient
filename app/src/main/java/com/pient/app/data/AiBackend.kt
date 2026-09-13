@@ -40,14 +40,19 @@ sealed class ChatEvent {
 /**
  * 一次请求里的一个回合（比 `List<Pair<role, content>>` 更宽：工具调用与工具结果需要独立字段）。
  * - [Text]：普通文本回合（历史都是这种）；
+ * - [Rich]：带**直发附件**的回合（媒体能力开关开启时，[AppTools.mediaParts] 产出内容部件）；
  * - [AssistantCalls]：模型上一轮回的工具调用（原生协议要求原样带回历史）；
  * - [ToolOutput]：工具执行结果（OpenAI = role:"tool" + tool_call_id；Anthropic = user 里的 tool_result）。
  */
 sealed interface ChatTurn {
     data class Text(val role: String, val content: String) : ChatTurn
+    data class Rich(val role: String, val text: String, val parts: List<WirePart>) : ChatTurn
     data class AssistantCalls(val text: String, val calls: List<AppTools.Call>) : ChatTurn
     data class ToolOutput(val callId: String, val name: String, val content: String) : ChatTurn
 }
+
+/** 直发附件的一个部件（[type]：image / audio / video；[base64] 不含 data URL 前缀） */
+data class WirePart(val type: String, val mime: String, val base64: String)
 
 /**
  * AI 后端（2026-09-09 实现 AI 接入）：直连服务商 HTTP API 的对话能力。
@@ -414,6 +419,9 @@ object AiBackend {
         for (t in turns) {
             when (t) {
                 is ChatTurn.Text -> msgs.put(JSONObject().put("role", t.role).put("content", t.content))
+                is ChatTurn.Rich -> msgs.put(
+                    JSONObject().put("role", t.role).put("content", openAiContent(t)),
+                )
                 is ChatTurn.AssistantCalls -> {
                     val calls = JSONArray()
                     for (c in t.calls) {
@@ -440,12 +448,66 @@ object AiBackend {
         return msgs
     }
 
+    /**
+     * 直发附件的 OpenAI 兼容形态（与 Operit `OpenAIProvider.buildContentField` 逐形对齐）：
+     * 图片 `image_url`（data URL）、音频 `input_audio`（base64 + format）、视频 `video_url`（data URL）。
+     */
+    private fun openAiContent(turn: ChatTurn.Rich): Any {
+        if (turn.parts.isEmpty()) return turn.text
+        val arr = JSONArray()
+        for (p in turn.parts) {
+            when (p.type) {
+                "image" -> arr.put(
+                    JSONObject().put("type", "image_url")
+                        .put("image_url", JSONObject().put("url", "data:${p.mime};base64,${p.base64}")),
+                )
+                "audio" -> arr.put(
+                    JSONObject().put("type", "input_audio")
+                        .put(
+                            "input_audio",
+                            JSONObject().put("data", p.base64).put("format", audioFormat(p.mime)),
+                        ),
+                )
+                "video" -> arr.put(
+                    JSONObject().put("type", "video_url")
+                        .put("video_url", JSONObject().put("url", "data:${p.mime};base64,${p.base64}")),
+                )
+            }
+        }
+        if (turn.text.isNotBlank()) arr.put(JSONObject().put("type", "text").put("text", turn.text))
+        return arr
+    }
+
+    private fun audioFormat(mime: String): String = when (mime.lowercase()) {
+        "audio/wav", "audio/x-wav" -> "wav"
+        "audio/mpeg", "audio/mp3" -> "mp3"
+        "audio/ogg" -> "ogg"
+        "audio/webm" -> "webm"
+        else -> mime.substringAfter("/", "wav")
+    }
+
     /** Anthropic Messages：system 独立字段；工具结果放 user 消息的 `tool_result` 块（协议规定） */
     private fun anthropicMessages(turns: List<ChatTurn>): JSONArray {
         val msgs = JSONArray()
         for (t in turns) {
             when (t) {
                 is ChatTurn.Text -> msgs.put(JSONObject().put("role", t.role).put("content", t.content))
+                is ChatTurn.Rich -> {
+                    val blocks = JSONArray()
+                    for (p in t.parts) {
+                        // Anthropic Messages 只吃图片；音频/视频无对应块（Operit 同样只给 OpenAI 兼容端发）
+                        if (p.type != "image") continue
+                        blocks.put(
+                            JSONObject().put("type", "image").put(
+                                "source",
+                                JSONObject().put("type", "base64")
+                                    .put("media_type", p.mime).put("data", p.base64),
+                            ),
+                        )
+                    }
+                    if (t.text.isNotBlank()) blocks.put(JSONObject().put("type", "text").put("text", t.text))
+                    msgs.put(JSONObject().put("role", t.role).put("content", blocks))
+                }
                 is ChatTurn.AssistantCalls -> {
                     val blocks = JSONArray()
                     if (t.text.isNotBlank()) blocks.put(JSONObject().put("type", "text").put("text", t.text))

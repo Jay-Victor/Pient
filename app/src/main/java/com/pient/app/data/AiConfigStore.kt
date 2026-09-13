@@ -49,6 +49,22 @@ data class ProviderConfig(
      */
     val toolCallEnabled: Boolean = true,
 
+    // ── 媒体能力（照 Operit 的三个 direct-processing 开关；默认关 = 不直发）──
+    //
+    // 口径（2026-09-14 用户拍板「照 Operit 全量对齐」）：
+    // - **开** = 该类型媒体转成内容部件**直发**给模型（图片 `image_url` / 音频 `input_audio` /
+    //   视频 `video_url`，Operit `OpenAIProvider.buildContentField` 同形）；
+    // - **关** = 不直发，附件行后跟一行 Operit 原文占位「图片内容已省略，当前模型不支持图片处理」
+    //   （音视频同款文案），**消息照常发送**——不拦用户（Operit 从不因媒体阻断对话）；
+    //   与 Operit 的差别：Pient 的附件有真实路径，占位旁边仍保留「名称 · 路径」，模型可以自己用工具读。
+
+    /** 模型支持识图（Operit `enableDirectImageProcessing`，默认 false） */
+    val imageDirectEnabled: Boolean = false,
+    /** 模型支持音频解析（Operit `enableDirectAudioProcessing`，默认 false） */
+    val audioDirectEnabled: Boolean = false,
+    /** 模型支持视频解析（Operit `enableDirectVideoProcessing`，默认 false） */
+    val videoDirectEnabled: Boolean = false,
+
     // ── 上下文管理（2026-09-13 参考 Operit 的总结式上下文管理；默认值逐值对齐 Operit）──
 
     /** 自动总结上下文（Operit `ModelConfigDefaults.DEFAULT_ENABLE_SUMMARY`） */
@@ -183,8 +199,11 @@ object AiConfigStore {
                         // 已知服务商一律采用服务商目录里的预设写法，自定义服务商才留在 AUTO
                         ?: ProviderCatalog.byId[id]?.reasoningFormat
                         ?: ReasoningFormat.AUTO,
-                    // 模型能力（2026-09-14）：老配置缺字段 → Operit 默认值（ToolCall 开）
+                    // 模型能力（2026-09-14）：老配置缺字段 → Operit 默认值（ToolCall 开、媒体三关）
                     toolCallEnabled = o.optBoolean("toolCallEnabled", true),
+                    imageDirectEnabled = o.optBoolean("imageDirectEnabled", false),
+                    audioDirectEnabled = o.optBoolean("audioDirectEnabled", false),
+                    videoDirectEnabled = o.optBoolean("videoDirectEnabled", false),
                     // 上下文管理（2026-09-13）：缺字段 → Operit 默认值（老配置行为不变）
                     summaryEnabled = o.optBoolean("summaryEnabled", ContextPolicy.DEFAULT_ENABLE_SUMMARY),
                     summaryTokenThreshold = o.optString(
@@ -236,8 +255,11 @@ object AiConfigStore {
                         .put("topPEnabled", c.topPEnabled)
                         .put("topPValue", c.topPValue)
                         .put("reasoningFormat", c.reasoningFormat.name)
-                        // 模型能力（2026-09-14）：只落 ToolCall 一个开关（媒体不做开关）
+                        // 模型能力（2026-09-14）：ToolCall + 媒体三开关（Operit 同款四字段）
                         .put("toolCallEnabled", c.toolCallEnabled)
+                        .put("imageDirectEnabled", c.imageDirectEnabled)
+                        .put("audioDirectEnabled", c.audioDirectEnabled)
+                        .put("videoDirectEnabled", c.videoDirectEnabled)
                         .put("summaryEnabled", c.summaryEnabled)
                         .put("summaryTokenThreshold", c.summaryTokenThreshold)
                         .put("summaryByMessageCount", c.summaryByMessageCount)

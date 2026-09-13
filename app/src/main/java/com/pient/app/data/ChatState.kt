@@ -485,24 +485,6 @@ class ChatState {
         val effectiveModel = model.name.takeIf { cfg.models.contains(it) }
             ?: cfg.models.firstOrNull().orEmpty()
 
-        // 媒体附件（图片 / 音频 / 视频）**不发给模型**（2026-09-14 用户口径：不做直发开关，
-        // 模型不支持就直接提示报错）。这里拦住发送：用户能看到自己那条消息 + 一条明确报错，
-        // 要 AI 处理文件就改用「@ 引用文件」把路径交给它（有工具时它自己会读）。
-        val mediaAttachments = currentMsg.attachments.filter { isMediaAttachment(it) }
-        if (mediaAttachments.isNotEmpty()) {
-            appendEntry(
-                Msg.Assistant(
-                    "⚠️ 当前模型不支持${mediaKindsLabel(mediaAttachments)}输入：" +
-                        "请改用「@ 引用文件」引用该文件，让 AI 用工具读取。",
-                    error = true,
-                )
-            )
-            isStreaming = false
-            streamDraft = ""
-            markRunning(false)
-            return
-        }
-
         // 引用消息：正文以 markdown 块引用注入（Quote.toPrompt；UI 仍只显示用户正文）
         // 宿主在跑：先把宿主切到「当前 Pient 会话」对应的 pi 会话（映射见 PiSessions），
         // 否则换会话后宿主会接着用上一条会话的上下文
@@ -516,8 +498,25 @@ class ChatState {
             syncAutoCompaction(cfg)
         }
         // 本轮用户消息的请求文本：附件以「名称 · 路径」附在正文后（本条是最新回合，媒体恒保留）；
-        // 宿主路径只发这一条文本，直连路径的整段历史同样由它拼
-        val userTurnText = ContextPolicy.promptTextFor(currentMsg, true to true)
+        // 宿主路径只发这一条文本，直连路径的整段历史同样由它拼。
+        // 附件直发（2026-09-14 照 Operit 的三个媒体开关）：开启的类别把文件本体转成内容部件随请求发出，
+        // 已直发的附件不再重复列路径（Operit 的「移除链接」）；关闭的类别**不拦消息**，
+        // 只追加一行 Operit 原文占位（「图片内容已省略，当前模型不支持图片处理」）。
+        val appCtx = PiHost.appContextOrNull()
+        val inline = if (appCtx != null) {
+            AppTools.mediaParts(appCtx, currentMsg.attachments, cfg)
+        } else {
+            AppTools.InlineResult(emptyList(), emptySet(), emptyList())
+        }
+        val textMsg = if (inline.inlinedIndexes.isEmpty()) {
+            currentMsg
+        } else {
+            currentMsg.copy(
+                attachments = currentMsg.attachments.filterIndexed { i, _ -> i !in inline.inlinedIndexes },
+            )
+        }
+        val userTurnText = ContextPolicy.promptTextFor(textMsg, true to true) +
+            (if (inline.notes.isNotEmpty()) "\n\n" + inline.notes.joinToString("\n") else "")
         val history = historyBefore + ("user" to (quote?.toPrompt(userTurnText) ?: userTurnText))
         val trimmedHistory = trimToContextBudget(history, cfg.ctxLenK)
         try {
@@ -527,6 +526,7 @@ class ChatState {
                 onDelta = { draft -> streamDraft = draft },
                 onThinking = { noteThinkingDelta(it) },
                 onTool = ::handleToolEvent,
+                media = inline.parts,
             )
             // 思考先于回答落库：条目顺序 = [思考, 回答]，列表层把思考并入紧随其后的回答卡
             if (hostThinkingFlushed) hostThinkingFlushed = false else appendThinkingEntry(outcome)
@@ -645,6 +645,8 @@ class ChatState {
         onDelta: (String) -> Unit,
         onThinking: (String) -> Unit = {},
         onTool: (PiAgentEvent) -> Unit = {},
+        /** 本回合要直发的附件部件（媒体能力开关；只作用于最新一条用户消息） */
+        media: List<WirePart> = emptyList(),
     ): ChatOutcome {
         // 思考模式的总开关：null = 不给服务商发思考参数、且**服务商自带的推理内容一律不展示不落库**
         // （DeepSeek-R1 / GLM / Kimi 思考系列不靠 reasoning_effort 也会回 reasoning_content，
@@ -692,23 +694,7 @@ class ChatState {
         }
         // 直连路径：应用内工具循环（2026-09-14）——开关开 = 工具经服务商原生接口下发，
         // 开关关 = 工具说明写进系统提示、模型用文本标记调用；两条路都执行应用内工具（AppTools）
-        return runDirectChat(cfg, history, thinking, onDelta, onThinking, onTool)
-    }
-
-    /** 附件是否属于「模型不吃、应用也不直发」的媒体家族（图片 / 音频 / 视频） */
-    private fun isMediaAttachment(a: Attachment): Boolean {
-        val ext = extOf(a.path ?: a.name)
-        return ext in MEDIA_IMAGE_EXTS || ext in MEDIA_AV_EXTS
-    }
-
-    /** 报错文案里的媒体类型名（图片 / 视频 / 音频，可组合） */
-    private fun mediaKindsLabel(items: List<Attachment>): String {
-        val exts = items.map { extOf(it.path ?: it.name) }.toSet()
-        val kinds = ArrayList<String>(3)
-        if (exts.any { it in MEDIA_IMAGE_EXTS }) kinds.add("图片")
-        if (exts.any { it in MEDIA_VIDEO_EXTS }) kinds.add("视频")
-        if (exts.any { it in MEDIA_AUDIO_EXTS }) kinds.add("音频")
-        return kinds.joinToString(" / ")
+        return runDirectChat(cfg, history, thinking, onDelta, onThinking, onTool, media)
     }
 
     /**
@@ -730,6 +716,7 @@ class ChatState {
         onDelta: (String) -> Unit,
         onThinking: (String) -> Unit,
         onTool: (PiAgentEvent) -> Unit,
+        media: List<WirePart>,
     ): ChatOutcome {
         val ctx = PiHost.appContextOrNull()
         val nativeTools = cfg.toolCallEnabled && ctx != null
@@ -743,7 +730,13 @@ class ChatState {
             nativeTools = nativeTools,
         )
         val turns = ArrayList<ChatTurn>(history.size)
-        for ((role, content) in history) turns.add(ChatTurn.Text(role, content))
+        history.forEachIndexed { i, (role, content) ->
+            if (i == history.lastIndex && role == "user" && media.isNotEmpty()) {
+                turns.add(ChatTurn.Rich(role, content, media))
+            } else {
+                turns.add(ChatTurn.Text(role, content))
+            }
+        }
 
         var inTok = 0
         var outTok = 0
