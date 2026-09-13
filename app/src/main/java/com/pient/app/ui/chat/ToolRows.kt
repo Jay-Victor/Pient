@@ -9,6 +9,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -55,6 +56,8 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
+import com.pient.app.data.extOf
+import com.pient.app.ui.files.fileIcon
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -590,6 +593,45 @@ private fun ToolBody(call: Msg.ToolCall, output: String?, palette: ToolPalette) 
                 return
             }
         }
+        // read：pi 的输出是「行号|正文」逐行 → 行号槽 + 正文的代码块，
+        // 不再把 `1|xxx` 原样当文本贴出来（2026-09-14 重设计，适配 pi 的产出格式）
+        "read" -> {
+            val lines = parseReadLines(body)
+            if (lines.isNotEmpty()) {
+                ReadLinesBlock(lines = lines, palette = palette)
+                return
+            }
+        }
+        // find / ls：输出是纯路径/条目清单 → 文件清单（类型图标 + 名称），
+        // 图标走文件树同一函数 `fileIcon`（同一语义只有一份实现）
+        "find" -> {
+            val entries = body.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            if (entries.isNotEmpty()) {
+                PathEntryList(entries = entries, palette = palette)
+                return
+            }
+        }
+        "ls" -> {
+            val entries = body.lines().map { it.trim() }
+                .filter { it.isNotEmpty() && !it.startsWith("（") }
+            if (entries.isNotEmpty()) {
+                PathEntryList(entries = entries, palette = palette)
+                return
+            }
+        }
+        // write：把**写进去的内容**摊开给用户看（文件名已在标题里），结果确认留给标题 meta
+        "write" -> {
+            val content = firstArg(call.params, "content")
+            if (content.isNotEmpty()) {
+                ToolSectionBlock(
+                    label = "写入内容",
+                    text = clipPreview(content),
+                    palette = palette,
+                    error = call.status == ToolStatus.FAILED,
+                )
+                return
+            }
+        }
         // grep：Hermes 的 SearchResultsList（命中 → 文件:行 + 摘要），不是一坨原始文本
         "grep" -> {
             val hits = parseGrepHits(body)
@@ -615,6 +657,110 @@ private fun ToolBody(call: Msg.ToolCall, output: String?, palette: ToolPalette) 
         palette = palette,
         error = call.status == ToolStatus.FAILED,
     )
+}
+
+/**
+ * read 输出 → (行号?, 正文) 列表。两种形态都认：`N|正文`（宿主 pi 与应用内工具同形）与裸文本行
+ * （没带行号就按出现顺序补号），「[输出已截断]」这类提示行标成无行号。
+ * 渲染不依赖产出侧格式 —— 所以两条路径（宿主 / 直连）共用同一份视图。
+ */
+private fun parseReadLines(output: String): List<Pair<Int?, String>> {
+    if (output.isBlank()) return emptyList()
+    val numbered = Regex("^\\s*(\\d+)\\|(.*)$")
+    val out = ArrayList<Pair<Int?, String>>()
+    for ((i, raw) in output.lines().withIndex()) {
+        val m = numbered.find(raw)
+        when {
+            m != null -> out.add(m.groupValues[1].toIntOrNull() to m.groupValues[2])
+            raw.startsWith("[") -> out.add(null to raw)   // 截断提示等（无行号）
+            else -> out.add(i + 1 to raw)
+        }
+    }
+    return out.take(400)
+}
+
+/** 长内容预览上限（写入内容可能很大）：超过 200 行或 8KB 截断并标注 */
+private fun clipPreview(text: String, maxLines: Int = 200, maxBytes: Int = 8 * 1024): String {
+    val lines = text.lines()
+    var out = if (lines.size > maxLines) lines.take(maxLines).joinToString("\n") else text
+    if (out.toByteArray().size > maxBytes) {
+        out = out.toByteArray().copyOf(maxBytes).toString(Charsets.UTF_8)
+    }
+    return if (out.length < text.length) "$out\n…（内容过长，已截断）" else out
+}
+
+/**
+ * read 结果的行号块：左侧行号槽（右对齐、弱化）+ 正文（mono、横向滚动）。
+ * 行号口径与文件预览页一致（行号字号 = 正文 ×0.82）。
+ */
+@Composable
+private fun ReadLinesBlock(lines: List<Pair<Int?, String>>, palette: ToolPalette) {
+    val gutter = (lines.mapNotNull { it.first }.maxOrNull()?.toString()?.length ?: 2).coerceAtLeast(2)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 8.dp, end = 8.dp, bottom = 6.dp)
+            .heightIn(max = 192.dp)
+            .verticalScroll(rememberScrollState())
+            .horizontalScroll(rememberScrollState()),
+    ) {
+        for ((no, text) in lines) {
+            Row(Modifier.fillMaxWidth()) {
+                Text(
+                    no?.toString().orEmpty().padStart(gutter),
+                    style = toolStyle(ToolPreSize * 0.82f).copy(color = palette.meta),
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+                Text(
+                    text,
+                    style = toolStyle(ToolPreSize).copy(color = palette.secondary),
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 路径清单（find / ls）：类型图标 + 名称（目录带 `/` 后缀与文件夹图标）。
+ * 图标复用文件树的 [fileIcon]（同一语义只有一份实现）。
+ */
+@Composable
+private fun PathEntryList(entries: List<String>, palette: ToolPalette) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 8.dp, end = 8.dp, bottom = 6.dp)
+            .heightIn(max = 192.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        for (entry in entries.take(60)) {
+            val isDir = entry.endsWith("/")
+            val name = entry.trimEnd('/').substringAfterLast('/').ifEmpty { entry }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Icon(
+                    if (isDir) Icons.Outlined.Folder else fileIcon(extOf(name)),
+                    contentDescription = null,
+                    tint = palette.meta,
+                    modifier = Modifier.size(14.dp),
+                )
+                Text(
+                    entry,
+                    style = toolStyle(ToolPreSize).copy(color = palette.secondary),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 6.dp).weight(1f),
+                )
+            }
+        }
+        if (entries.size > 60) {
+            Text(
+                "另有 ${entries.size - 60} 项…",
+                style = toolStyle(ToolSectionLabelSize).copy(color = palette.meta),
+            )
+        }
+    }
 }
 
 /**
