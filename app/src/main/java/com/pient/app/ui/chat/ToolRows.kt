@@ -49,6 +49,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
@@ -247,6 +249,25 @@ private fun baseTitle(name: String, pending: Boolean): String = when (name) {
     else -> if (pending) "正在运行 $name" else "已运行 $name"
 }
 
+/**
+ * read 的行区间标签（Hermes `readFileLineLabel` / `readFileDisplayTarget`）：
+ * 优先从结果文本里的 `[Showing lines 120-200 of …]` 取真实区间，否则退回参数 offset/limit
+ * （pi 的 offset 是 **1-indexed**，所以直接把参数写进 `L120-200` 不需要换算）。
+ */
+private fun readLineLabel(call: Msg.ToolCall, output: String?): String {
+    Regex("Showing lines (\\d+)-(\\d+) of").find(output.orEmpty())?.let {
+        return "L${it.groupValues[1]}-${it.groupValues[2]}"
+    }
+    val o = argsOf(call.params) ?: return ""
+    val offset = o.optInt("offset", -1)
+    val limit = o.optInt("limit", -1)
+    if (offset <= 0 && limit <= 0) return ""
+    if (offset > 0) {
+        return if (limit <= 1) "L$offset" else "L$offset-${offset + limit - 1}"
+    }
+    return if (limit > 1) "共 $limit 行" else ""
+}
+
 /** 行标题：优先「动作 + 目标」（Hermes `dynamicTitle` → `actionTarget` / `actionCommand` / `actionQuoted`）。 */
 internal fun toolRowTitle(call: Msg.ToolCall): String {
     val pending = call.status == ToolStatus.RUNNING
@@ -265,7 +286,10 @@ internal fun toolRowTitle(call: Msg.ToolCall): String {
         "read" -> {
             val p = firstArg(call.params, "path", "file")
             if (p.isEmpty()) baseTitle(call.name, pending)
-            else "${verb("已读取", "正在读取")} ${basename(p)}"
+            else {
+                val label = readLineLabel(call, call.detail)
+                "${verb("已读取", "正在读取")} ${basename(p)}${if (label.isEmpty()) "" else " $label"}"
+            }
         }
         "write" -> {
             // Hermes：文件编辑类工具（write/edit/patch）的标题就是**文件名本身**（动作由
@@ -331,6 +355,9 @@ private fun countLabel(call: Msg.ToolCall, output: String): String? {
         "find" -> "$lines 个文件"
         "ls" -> "$lines 项"
         "read" -> "$lines 行"
+        // edit：pi 的结果文本 = "Successfully replaced N block(s) in <path>." → 「N 处替换」
+        "edit", "write" -> Regex("replaced (\\d+) block")
+            .find(output)?.groupValues?.get(1)?.let { "$it 处替换" }
         else -> null
     }
 }
@@ -434,16 +461,38 @@ private fun ToolRowHeader(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        val meta = if (isCardTool(call.name)) null
-        else listOfNotNull(formatDuration(call.durationMs), countLabel(call, call.detail ?: ""))
-            .firstOrNull()
-        if (meta != null) {
-            Text(
-                meta,
-                style = toolStyle(ToolMetaSize).copy(color = palette.meta),
-                modifier = Modifier.padding(start = ToolRowGap),
-                maxLines = 1,
-            )
+        // Hermes：文件编辑行在 meta 位显示 **diff 统计**（+N 绿 / −M 红，mono 0.625rem tabular），
+        // 其它行显示时长 / 结果计数
+        val stats = if (isCardTool(call.name)) diffStats(call.diff) else null
+        if (stats != null) {
+            Row(Modifier.padding(start = ToolRowGap)) {
+                if (stats.first > 0) {
+                    Text(
+                        "+${stats.first}",
+                        style = toolStyle(ToolMetaSize).copy(color = palette.ok),
+                    )
+                }
+                if (stats.second > 0) {
+                    Text(
+                        "−${stats.second}",
+                        style = toolStyle(ToolMetaSize).copy(color = palette.error),
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                }
+            }
+        } else {
+            val meta = if (isCardTool(call.name)) countLabel(call, call.detail ?: "")
+            // Hermes：非文件编辑行 meta = 计数 + 时长（countLabel 在前，durationLabel 在后）
+            else listOfNotNull(countLabel(call, call.detail ?: ""), formatDuration(call.durationMs))
+                .joinToString(" · ").ifEmpty { null }
+            if (meta != null) {
+                Text(
+                    meta,
+                    style = toolStyle(ToolMetaSize).copy(color = palette.meta),
+                    modifier = Modifier.padding(start = ToolRowGap),
+                    maxLines = 1,
+                )
+            }
         }
         if (onToggle != null) {
             Spacer(Modifier.weight(1f))
@@ -485,15 +534,72 @@ private fun toolIconOf(name: String) = when (name) {
 
 // ───────────────────────── 正文 ─────────────────────────
 
-/** 正文：先出命令块（有 command 参数时），再出一个带标签的输出段。 */
+/** grep 命中的一行：`path:line:text`。 */
+private data class GrepHit(val file: String, val line: String, val text: String)
+
+/** 解析 pi grep 的结果文本（`path:line:text`，逐行）。 */
+private fun parseGrepHits(output: String?): List<GrepHit> {
+    if (output.isNullOrBlank()) return emptyList()
+    return output.lines().mapNotNull { raw ->
+        val m = Regex("^(.+?):(\\d+):(.*)$").find(raw) ?: return@mapNotNull null
+        GrepHit(basename(m.groupValues[1]), m.groupValues[2], m.groupValues[3].trim())
+    }
+}
+
+/** diff 的 +/- 统计（Hermes 文件卡 `+N −M`）。 */
+private fun diffStats(diff: String?): Pair<Int, Int>? {
+    if (diff.isNullOrBlank()) return null
+    var add = 0
+    var del = 0
+    diff.lines().forEach { l ->
+        when {
+            l.startsWith("+++") || l.startsWith("---") -> Unit
+            l.startsWith("+") -> add++
+            l.startsWith("-") -> del++
+        }
+    }
+    return if (add == 0 && del == 0) null else add to del
+}
+
+/** android_shell 的通道标签（结果文本以 `[standard]`/`[shizuku]`/`[su]` 开头）。 */
+private fun shellChannelOf(output: String?): String? =
+    Regex("^\\[(standard|shizuku|su)\\]", RegexOption.MULTILINE).find(output.orEmpty())
+        ?.groupValues?.get(1)
+
+/** 正文：先出命令块（有 command 参数时），再按工具给对应的段（命中列表 / 文件列表 / diff / 输出）。 */
 @Composable
 private fun ToolBody(call: Msg.ToolCall, output: String?, palette: ToolPalette) {
     val command = firstArg(call.params, "command")
     if (command.isNotEmpty()) {
-        ToolCommandBlock(command = command, exitCode = exitCodeOf(output), palette = palette)
+        ToolCommandBlock(
+            command = command,
+            exitCode = exitCodeOf(output),
+            channel = if (call.name == "android_shell") shellChannelOf(output) else null,
+            palette = palette,
+        )
     }
     if (call.status == ToolStatus.RUNNING) return
-    val body = output?.trim().orEmpty()
+    val body = stripExitNote(output?.trim().orEmpty())
+
+    // 工具专属视图（适配 Pient 的 pi 工具产出形态，Hermes 的对应视图见注释）
+    when (call.name) {
+        // edit：Hermes 的文件卡 = diff 面板（`FileDiffPanel`，max-h 12rem、行左 2px 边框、+/- 语义色）
+        "edit" -> {
+            if (!call.diff.isNullOrBlank()) {
+                DiffPanel(diff = call.diff, palette = palette)
+                return
+            }
+        }
+        // grep：Hermes 的 SearchResultsList（命中 → 文件:行 + 摘要），不是一坨原始文本
+        "grep" -> {
+            val hits = parseGrepHits(body)
+            if (hits.isNotEmpty()) {
+                GrepHitsList(hits = hits, palette = palette)
+                return
+            }
+        }
+    }
+
     if (body.isEmpty()) {
         if (command.isEmpty()) {
             Text(
@@ -505,10 +611,90 @@ private fun ToolBody(call: Msg.ToolCall, output: String?, palette: ToolPalette) 
     }
     ToolSectionBlock(
         label = sectionLabelFor(call.name),
-        text = stripExitNote(body),
+        text = body,
         palette = palette,
         error = call.status == ToolStatus.FAILED,
     )
+}
+
+/**
+ * grep 命中列表（Hermes `SearchResultsList`）：每条 = `文件:行`（次亮）+ 摘要（弱化，最多 2 行）。
+ * pi 的 grep 输出就是 `path:line:text` 逐行，正好是这套结构。
+ */
+@Composable
+private fun GrepHitsList(hits: List<GrepHit>, palette: ToolPalette) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        hits.take(20).forEach { hit ->
+            Column(Modifier.fillMaxWidth()) {
+                Text(
+                    "${hit.file}:${hit.line}",
+                    style = toolStyle(ToolPreSize, weight = FontWeight.Medium).copy(color = palette.secondary),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (hit.text.isNotEmpty()) {
+                    Text(
+                        hit.text,
+                        style = toolStyle(ToolPreSize).copy(color = palette.meta),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        if (hits.size > 20) {
+            Text(
+                "另有 ${hits.size - 20} 处…",
+                style = toolStyle(ToolSectionLabelSize).copy(color = palette.meta),
+            )
+        }
+    }
+}
+
+/**
+ * diff 面板（Hermes `FileDiffPanel`：`max-h-[12rem]`(192dp) 滚动、mono 0.7rem、
+ * 每行 `border-l-2 px-2.5 py-px`、+/- 用 emerald/rose 语义色，hunk/文件头弱化）。
+ */
+@Composable
+private fun DiffPanel(diff: String, palette: ToolPalette) {
+    val lines = diff.lines().filter { it.isNotEmpty() }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 8.dp, end = 8.dp, bottom = 6.dp)
+            .heightIn(max = 192.dp)   // Hermes max-h-[12rem]
+            .verticalScroll(rememberScrollState())
+            .horizontalScroll(rememberScrollState()),
+    ) {
+        lines.take(400).forEach { line ->
+            val (bar, tint, textColor) = when {
+                line.startsWith("@@") -> Triple(palette.stroke, Color.Transparent, palette.meta)
+                line.startsWith("+++") || line.startsWith("---") -> Triple(palette.stroke, Color.Transparent, palette.meta)
+                line.startsWith("+") -> Triple(palette.ok, palette.ok.copy(alpha = 0.10f), palette.ok)
+                line.startsWith("-") -> Triple(palette.error, palette.error.copy(alpha = 0.10f), palette.error)
+                else -> Triple(Color.Transparent, Color.Transparent, palette.secondary)
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(tint)
+                    .drawBehind {
+                        // border-l-2：2dp 左边条
+                        drawRect(bar, size = Size(2.dp.toPx(), size.height))
+                    },
+            ) {
+                Text(
+                    line,
+                    style = toolStyle(ToolPreSize).copy(color = textColor),
+                    maxLines = 1,
+                    modifier = Modifier.padding(start = 10.dp, top = 1.dp, bottom = 1.dp),
+                )
+            }
+        }
+    }
 }
 
 private fun sectionLabelFor(name: String) = when (name) {
@@ -517,9 +703,9 @@ private fun sectionLabelFor(name: String) = when (name) {
     else -> "输出"
 }
 
-/** `$ 命令` + `exit N` 徽标（Hermes `TerminalTranscript` 同款几何/配色）。 */
+/** `$ 命令` + `exit N` 徽标 +（android_shell）通道徽标（Hermes `TerminalTranscript` 几何/配色）。 */
 @Composable
-private fun ToolCommandBlock(command: String, exitCode: Int?, palette: ToolPalette) {
+private fun ToolCommandBlock(command: String, exitCode: Int?, channel: String?, palette: ToolPalette) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -538,6 +724,17 @@ private fun ToolCommandBlock(command: String, exitCode: Int?, palette: ToolPalet
             modifier = Modifier.weight(1f),
         )
         CopyButton(text = command, label = "复制命令")
+        // android_shell 的通道徽标（Pient 专有工具：标准 / ADB(Shizuku) / Root 三档，Hermes 无此类工具）
+        if (channel != null) {
+            Text(
+                channel,
+                style = toolStyle(9.6.sp).copy(color = palette.accent),
+                modifier = Modifier
+                    .padding(start = ToolRowGap)
+                    .background(palette.accent.copy(alpha = 0.10f), RoundedCornerShape(3.dp))
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
+            )
+        }
         if (exitCode != null) {
             Text(
                 "exit $exitCode",

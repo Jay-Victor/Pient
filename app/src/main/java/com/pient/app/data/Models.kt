@@ -690,6 +690,8 @@ sealed class Msg {
         val durationMs: Long? = null,
         /** 开始时刻（仅内存：ToolEnd 用来算耗时，不落库） */
         val startedAtMs: Long? = null,
+        /** 文件编辑的 unified diff（pi `edit` 的 details.diff；Hermes 文件卡的 +N/−M 与 diff 面板靠它） */
+        val diff: String? = null,
     ) : Msg()
 
     data class ToolResult(

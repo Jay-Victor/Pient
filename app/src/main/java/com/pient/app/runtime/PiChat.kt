@@ -29,6 +29,12 @@ sealed class PiAgentEvent {
         val name: String,
         val output: String,
         val isError: Boolean,
+        /**
+         * 工具自带的 details（pi：`result.details`）——目前只取文件编辑的 unified diff
+         * （pi `edit` 工具返回 `details: { diff, patch, firstChangedLine }`）。
+         * null = 该工具没有 details（read/bash/grep/find/ls 都没有）。
+         */
+        val diff: String? = null,
     ) : PiAgentEvent()
 
     /** 本轮用量（pi 的 usage：input/output/cacheRead/cacheWrite/totalTokens/cost） */
@@ -135,12 +141,17 @@ object PiChat {
                     "tool_execution_end" -> {
                         val result = ev.optJSONObject("result")
                         val output = textOf(result?.optJSONArray("content"))
+                        // 文件编辑类工具的 unified diff（Hermes 文件卡 +N/−M 与 diff 面板的数据源）
+                        val diff = result?.optJSONObject("details")
+                            ?.optString("diff")
+                            ?.takeIf { it.isNotBlank() }
                         onEvent(
                             PiAgentEvent.ToolEnd(
                                 ev.optString("toolCallId"),
                                 ev.optString("toolName"),
                                 output,
                                 ev.optBoolean("isError", false),
+                                diff,
                             )
                         )
                     }

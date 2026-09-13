@@ -869,6 +869,7 @@ class ChatState {
                             status = if (ev.isError) ToolStatus.FAILED else ToolStatus.DONE,
                             detail = ev.output.take(400),
                             durationMs = elapsed,
+                            diff = ev.diff,
                         ),
                     )
                 }

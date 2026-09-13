@@ -257,6 +257,7 @@ object ChatStore {
             .put("status", m.status.name)
             .put("detail", m.detail ?: JSONObject.NULL)
             .put("durationMs", m.durationMs ?: JSONObject.NULL)
+            .put("diff", m.diff ?: JSONObject.NULL)
         is Msg.ToolResult -> JSONObject()
             .put("type", "toolresult")
             .put("toolName", m.toolName)
@@ -324,6 +325,7 @@ object ChatStore {
                 }.getOrDefault(ToolStatus.DONE),
                 detail = if (o.isNull("detail")) null else o.optString("detail"),
                 durationMs = if (o.isNull("durationMs")) null else o.optLong("durationMs"),
+                diff = if (o.isNull("diff")) null else o.optString("diff"),
             )
             "toolresult" -> Msg.ToolResult(
                 toolName = o.optString("toolName"),
