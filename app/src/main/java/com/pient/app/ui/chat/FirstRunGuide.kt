@@ -100,7 +100,7 @@ fun FirstRunGuide(
                 title = "创建项目",
                 desc = when {
                     projectDone -> "已绑定项目：${chatState.currentProject}"
-                    else -> "新建项目文件夹，或绑定设备上的现有文件夹"
+                    else -> "新建项目文件夹（应用私有目录 Projects/ 下）"
                 },
                 done = projectDone,
                 onClick = { createDialogOpen = true },
