@@ -110,6 +110,15 @@ object SettingsStore {
     //   首启引导页「系统权限选项页」选定、设置页「系统权限设置」页可改；语义见 data/SystemPermissions.kt
     var permissionTier by mutableStateOf(PermissionTier.STANDARD)
 
+    // ── 执行环境（2026-09-14）：AI 的工具（bash 与 ! 命令）跑在哪个环境 ──
+    //   三种落点见 data/ExecEnvs.kt；选择由 PiRuntime.prepareTerminal 写进 <pient-rt>/exec_env，
+    //   随包包装脚本每次被执行时现读。与权限档位相互独立（档位管系统能力，环境管命令落点）。
+    var execEnv by mutableStateOf(ExecEnv.UBUNTU)
+
+    // ── 环境内软件（Ubuntu）：apt 镜像源 + 待/已安装组件（勾选集合，id 见 data/ExecEnvs.kt）──
+    var aptMirror by mutableStateOf(APT_MIRRORS[0].name)
+    var selectedComponents by mutableStateOf(setOf("ca", "git", "curl"))
+
     // ── 开屏设置（2026-09-12）：启动时是否播放开屏加载动画 ──
     //   关 = 不显示开屏页（跳过动画与最短展示），数据仍在后台加载，直接进入主界面
     var startupAnimation by mutableStateOf(true)
@@ -186,6 +195,10 @@ object SettingsStore {
         permissionTier = runCatching {
             PermissionTier.valueOf(p.getString("permission_tier", "STANDARD") ?: "STANDARD")
         }.getOrDefault(PermissionTier.STANDARD)
+        execEnv = ExecEnv.fromId(p.getString("exec_env", ExecEnv.UBUNTU.id))
+        aptMirror = p.getString("apt_mirror", APT_MIRRORS[0].name) ?: APT_MIRRORS[0].name
+        selectedComponents = p.getStringSet("ubuntu_components", setOf("ca", "git", "curl"))
+            ?.toSet() ?: setOf("ca", "git", "curl")
         startupAnimation = p.getBoolean("startup_animation", true)
         filePreviewNoWrap = p.getBoolean("file_preview_no_wrap", false)
         customAccentEnabled = p.getBoolean("custom_accent_enabled", false)
@@ -271,6 +284,16 @@ object SettingsStore {
         androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
             .edit()
             .putString("permission_tier", permissionTier.name)
+            .apply()
+    }
+
+    /** 保存执行环境 + 环境内软件选择（环境配置页），重启后保持 */
+    fun saveEnvironment(androidCtx: android.content.Context) {
+        androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString("exec_env", execEnv.id)
+            .putString("apt_mirror", aptMirror)
+            .putStringSet("ubuntu_components", selectedComponents)
             .apply()
     }
 

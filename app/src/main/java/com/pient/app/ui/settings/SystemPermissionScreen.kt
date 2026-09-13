@@ -182,7 +182,8 @@ fun SystemPermissionScreen(nav: NavController) {
 
     fun setActiveTier(tier: PermissionTier) {
         SettingsStore.permissionTier = tier
-        // 档位要落到终端层的模式文件（包装脚本现读）——PRoot / su+chroot 由它决定
+        // 档位只管「能拿到什么系统能力」；命令跑在哪由「环境配置」页的执行环境决定，
+        // 这里仍调一次 prepareTerminal 让 DNS / 执行环境文件保持最新（幂等）。
         PiRuntime.prepareTerminal(context)
         val hint = when {
             tierReady(tier, status, shizukuInstalled, shizukuRunning, shizukuAuthorized, deviceRooted, rootGranted) -> null

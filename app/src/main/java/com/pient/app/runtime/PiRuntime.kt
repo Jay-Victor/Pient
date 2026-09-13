@@ -3,7 +3,6 @@ package com.pient.app.runtime
 import android.content.Context
 import android.net.ConnectivityManager
 import android.os.Build
-import com.pient.app.data.PermissionTier
 import com.pient.app.data.SettingsStore
 import android.system.Os
 import android.util.Log
@@ -131,8 +130,12 @@ object PiRuntime {
     /** root 侧启动器（assets 随包；运行时落到私有目录，由 `su -c "sh …"` 以 root 身份执行） */
     private const val ROOT_WRAPPER_ASSET = "pient-root-wrapper.sh"
 
-    /** 终端模式文件：`proot`（应用 uid + PRoot）或 `root`（su + chroot）；包装脚本每次现读 */
-    fun terminalModeFile(context: Context): File = File(root(context), "terminal_mode")
+    /**
+     * 执行环境文件：`android`（系统 shell）/ `ubuntu`（PRoot）/ `ubuntu-chroot`（su + chroot）。
+     * 包装脚本（pi 的 shellPath）**每次被执行时现读**它 —— 与 pi 的 bash 工具同一条链路，
+     * 所以改完下一个命令/新会话即生效（已在跑的会话进程不换环境）。
+     */
+    fun execEnvFile(context: Context): File = File(root(context), "exec_env")
 
     /** 工作区路径文件（应用写：bash 工具的 cwd 与 Ubuntu 里的 /workspace 都由它定） */
     fun workspaceFile(context: Context): File = File(root(context), "workspace")
@@ -162,12 +165,13 @@ object PiRuntime {
 
 
     /**
-     * 终端层准备（宿主启动、终端会话启动、切换权限档位时各调一次；幂等）：
+     * 终端层准备（宿主启动、终端会话启动、切换执行环境时各调一次；幂等）：
      * 1) guest 的 DNS —— ubuntu-base 自带的 `resolv.conf` 是空文件，不写就连 apt 都跑不动；
      * 2) root 侧启动器落盘；
-     * 3) 权限档位 → 终端模式文件（照 Operit：默认 PRoot，条件具备（Root）时用 chroot）。
-     * 只有 Root 档才用 root：Shizuku（调试档）是 Java/binder 侧能力（IShizukuService.newProcess），
-     * shell 链路到不了，Operit 自己也是 root 门控 shell、Shizuku 供其它系统能力。
+     * 3) **执行环境** → `exec_env` 文件（`android` / `ubuntu` / `ubuntu-chroot`，取当前选择）。
+     *
+     * 环境与权限档位是两件事：档位（标准 / 调试 / Root）管「能拿到什么系统能力」，
+     * 环境管「AI 的工具命令在哪跑」。chroot 环境需要 su（Root 档的通道），但选它不改档位。
      */
     fun prepareTerminal(context: Context) {
         syncResolvConf(context)
@@ -176,15 +180,15 @@ object PiRuntime {
                 File(root(context), ROOT_WRAPPER_ASSET).outputStream().use { input.copyTo(it) }
             }
         }.onFailure { Log.w(TAG, "root 侧启动器写入失败：${it.message}") }
-        val mode = if (SettingsStore.permissionTier == PermissionTier.ROOT) "root" else "proot"
-        val file = terminalModeFile(context)
+        val env = SettingsStore.execEnv.id
+        val file = execEnvFile(context)
         if (!file.parentFile.exists()) return
         runCatching {
-            if (!file.exists() || file.readText().trim() != mode) {
-                file.writeText(mode)
-                Log.i(TAG, "终端模式已写入：$mode（档位 ${SettingsStore.permissionTier}）")
+            if (!file.exists() || file.readText().trim() != env) {
+                file.writeText(env)
+                Log.i(TAG, "执行环境已写入：$env")
             }
-        }.onFailure { Log.w(TAG, "终端模式写入失败：${it.message}") }
+        }.onFailure { Log.w(TAG, "执行环境写入失败：${it.message}") }
     }
 
     /** 随包的 rootfs 归档（assets；构建期由 syncPientRootfsArchive 放进来） */
@@ -253,12 +257,12 @@ object PiRuntime {
         }
     }
 
-    /** 终端环境的检测清单（环境配置页用；纯文件系统判定，不起进程） */
-    fun terminalChecks(context: Context): List<Pair<String, Boolean>> {
+    /** Ubuntu 环境的组成件清单（环境配置页的就绪判定用；纯文件系统判定，不起进程） */
+    fun ubuntuChecks(context: Context): List<Pair<String, Boolean>> {
         val rootfs = rootfsDir(context)
         val bash = rootfsBash(context)
         return listOf(
-            "Ubuntu 24.04 rootfs（${abiLabel()}，已解包）" to (bash.isFile && File(rootfs, "etc/os-release").exists()),
+            "Ubuntu rootfs（${abiLabel()}，已解包）" to (bash.isFile && File(rootfs, "etc/os-release").exists()),
             "GNU bash + coreutils（minbase）" to (bash.isFile && File(rootfs, "usr/bin/env").isFile),
             "PRoot 运行时（proot + ELF loader）" to (prootBinary(context).isFile && prootLoader(context).isFile),
             "shell 包装脚本（随 APK 分发）" to shellPath(context).isFile,

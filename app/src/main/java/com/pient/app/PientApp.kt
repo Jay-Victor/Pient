@@ -36,6 +36,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.pient.app.data.AiConfigStore
+import com.pient.app.data.APT_MIRRORS
 import com.pient.app.data.ChatState
 import com.pient.app.data.ChatStore
 import com.pient.app.data.ModelPricingDefaults
@@ -44,6 +45,7 @@ import com.pient.app.data.SettingsStore
 import com.pient.app.data.ThemeMode
 import com.pient.app.data.UsageStore
 import com.pient.app.runtime.PiHostService
+import com.pient.app.runtime.EnvProvision
 import com.pient.app.runtime.PiRuntime
 import com.pient.app.runtime.PiHost
 import com.pient.app.ui.chat.ChatScreen
@@ -216,6 +218,22 @@ fun PientApp() {
     LaunchedEffect(Unit) {
         snapshotFlow { SettingsStore.permissionTier }
             .collect { SettingsStore.savePermissionTier(context) }
+    }
+
+    // 执行环境 + 环境内软件选择持久化（环境配置页），重启后保持
+    LaunchedEffect(Unit) {
+        snapshotFlow {
+            Triple(SettingsStore.execEnv, SettingsStore.aptMirror, SettingsStore.selectedComponents)
+        }.collect { SettingsStore.saveEnvironment(context) }
+    }
+
+    // apt 镜像源落到 rootfs（选定即生效；rootfs 未就绪时静默跳过，解包后靠下次启动对齐）
+    LaunchedEffect(Unit) {
+        snapshotFlow { SettingsStore.aptMirror }
+            .collect { name ->
+                val mirror = APT_MIRRORS.firstOrNull { it.name == name } ?: return@collect
+                withContext(Dispatchers.IO) { EnvProvision.applyMirror(context, mirror) }
+            }
     }
 
     // 开屏设置持久化（行为设置：是否播放开屏加载动画），重启后保持

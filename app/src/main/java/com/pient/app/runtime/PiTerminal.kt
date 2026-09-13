@@ -120,7 +120,8 @@ object PiTerminal {
 
     @Synchronized
     private fun start(context: Context, session: Session) {
-        PiRuntime.prepareTerminal(context)   // DNS / root 启动器 / 档位模式，会话启动时对齐
+        PiRuntime.prepareTerminal(context)   // DNS / root 启动器 / 执行环境，会话启动时对齐
+        // 终端页固定是 Ubuntu 环境（装工具链、跑脚本都在这）；缺 rootfs 时给出可执行的下一步
         if (!PiRuntime.rootfsReady(context)) {
             append(session, TerminalLine("rootfs 尚未初始化 —— 点上方「环境配置」→「一键配置」完成解包（约 28MB）", TerminalLineKind.OUTPUT))
             return
