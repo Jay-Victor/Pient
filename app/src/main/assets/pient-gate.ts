@@ -22,7 +22,9 @@ const OPT_ONCE = "仅本次允许";
 const OPT_ALWAYS = "始终允许";
 const OPT_DENY = "拒绝";
 
-/** 高危命令叠加拦截（即便策略是 ALLOW 也要二次确认）：破坏性/提权/刷机类 */
+/** 高危命令叠加拦截（即便策略是 ALLOW 也要二次确认）：破坏性/提权/刷机类。
+ *  `bash`（Ubuntu 侧）与 `android_shell`（ADB 级系统命令通道）都要过 —— 后者的权限更高，
+ *  更该拦；两处一份实现，别在 App 侧再抄一份清单。 */
 const HIGH_RISK = [
   /\brm\s+-[a-z]*r[a-z]*f/i,
   /\brm\s+-[a-z]*f[a-z]*r/i,
@@ -56,7 +58,7 @@ function policyFor(tool: string): string {
 }
 
 function isHighRisk(tool: string, input: any): boolean {
-  if (tool !== "bash") return false;
+  if (tool !== "bash" && tool !== "android_shell") return false;
   const cmd = String(input?.command ?? input?.cmd ?? "");
   return HIGH_RISK.some((re) => re.test(cmd));
 }

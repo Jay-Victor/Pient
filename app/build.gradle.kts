@@ -31,6 +31,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // Shizuku 用户服务通道（选型 B）：app/src/main/aidl 下的 IPientShellService.aidl
+        aidl = true
     }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"

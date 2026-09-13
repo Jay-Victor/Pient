@@ -54,6 +54,9 @@ object PiRuntime {
     /** 权限守门扩展（assets 里随包，同步到宿主 HOME 的 extensions/ 下） */
     private const val PIENT_GATE_ASSET = "pient-gate.ts"
 
+    /** 系统命令扩展（同上；提供 android_shell 工具，经宿主回桥执行 Shizuku / su 通道的系统命令） */
+    private const val PIENT_SYSTEM_ASSET = "pient-system.ts"
+
     /** 逻辑名 → native lib 文件名（jniLibs 打包规则：二进制改名成 lib*.so） */
     private val NATIVE_BINARIES = mapOf(
         "node" to "libpient_node.so",
@@ -314,10 +317,12 @@ object PiRuntime {
             return
         }
         runCatching {
-            context.assets.open(PIENT_GATE_ASSET).use { input ->
-                File(extDir, PIENT_GATE_ASSET).outputStream().use { input.copyTo(it) }
+            listOf(PIENT_GATE_ASSET, PIENT_SYSTEM_ASSET).forEach { asset ->
+                context.assets.open(asset).use { input ->
+                    File(extDir, asset).outputStream().use { input.copyTo(it) }
+                }
             }
-        }.onFailure { Log.w(TAG, "权限守门扩展写入失败：${it.message}") }
+        }.onFailure { Log.w(TAG, "扩展写入失败：${it.message}") }
         val policy = File(agentDir(context), "pient_gate.json")
         if (!policy.exists()) {
             runCatching { policy.writeText(DEFAULT_TOOL_POLICY) }
@@ -396,5 +401,7 @@ object PiRuntime {
             System.getenv("PATH").orEmpty().ifEmpty { "/system/bin:/system/xbin" },
         "HOME" to homeDir(context).absolutePath,
         "TMPDIR" to tmpDir(context).absolutePath,
+        // 宿主回桥端点：pient-system 扩展的系统命令工具经它回调 App（Java 侧才能用 Shizuku / su）
+        "PIENT_EXEC_ENDPOINT" to (PiExecServer.endpoint(context) ?: ""),
     )
 }

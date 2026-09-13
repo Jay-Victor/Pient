@@ -30,7 +30,7 @@ enum class ExecEnv(
     ANDROID(
         id = "android",
         title = "Android shell",
-        desc = "系统命令直通：am / pm / dumpsys / getprop / settings 等，以 ADB 级（Shizuku）或 Root 身份执行；需先用 Shizuku 或 Root 解锁",
+        desc = "系统命令直通：am / pm / dumpsys / getprop / settings 等，经 Shizuku（ADB 级）或 Root 执行；解锁后 AI 的 android_shell 工具与 bash 都可用系统命令",
         badge = "需 Shizuku / Root",
     ),
     UBUNTU(
@@ -75,11 +75,10 @@ object ExecEnvs {
         val shizukuAuthorized = ShizukuGateway.authorized()
         val shizukuInstalled = ShizukuGateway.installed(context)
         return when {
-            rooted -> EnvStatus(true, "设备已 Root：系统命令将以 root 身份执行")
+            rooted -> EnvStatus(true, "设备已 Root：bash 与系统命令都以 root 身份执行（su 通道）")
             shizukuAuthorized -> EnvStatus(
                 false,
-                "Shizuku 已授权；ADB 级（uid 2000）执行通道尚未接入（下一步：pient-system 扩展）",
-                EnvAction.GRANT_PRIVILEGE,
+                "Shizuku 已授权：系统命令可用（AI 的 android_shell 工具，uid 2000，已实测）；作为 bash 落点需要 Root",
             )
             shizukuInstalled -> EnvStatus(
                 false,

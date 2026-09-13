@@ -22,8 +22,8 @@ object ToolPolicy {
     const val ASK = "ASK"
     const val FORBID = "FORBID"
 
-    /** 七工具（顺序 = 将来权限中心列表的展示顺序） */
-    val TOOLS = listOf("read", "write", "edit", "bash", "grep", "find", "ls")
+    /** 七工具（顺序 = 将来权限中心列表的展示顺序）+ 扩展提供的系统命令工具 android_shell */
+    val TOOLS = listOf("read", "write", "edit", "bash", "grep", "find", "ls", "android_shell")
 
     /**
      * 弹窗三个选项的文案——**跨语言契约**：必须与 `assets/pient-gate.ts` 的 OPT_* 逐字一致，
