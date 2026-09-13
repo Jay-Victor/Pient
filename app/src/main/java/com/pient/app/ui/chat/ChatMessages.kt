@@ -107,6 +107,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -267,9 +268,12 @@ fun ChatMessages(
 
     // 渲染项（2026-09-14 Hermes 对齐的工具行）：连续 ≥2 个「活动型」工具调用折成一行摘要，
     // 文件编辑（write/edit）作为交付物单列；成对工具结果并入工具行、不再单渲染。
-    val renderItems = remember(messages, startIndex, isStreaming) {
-        buildChatRenderItems(messages, startIndex, isStreaming)
-    }
+    //
+    // ★ 这里**不能包 remember(messages, …)**：messages 是同一个 SnapshotStateList 实例，
+    //   流式期间 appendEntry 只是原地追加 → remember 的键不变、渲染项永远是旧的
+    //   （实测症状：RUNNING 的工具行一直不出现，直到回合结束 isStreaming 翻转才蹦出来）。
+    //   直接调用：函数体读列表 → 订阅列表变化 → 追加即重算（窗口内条目数有上限，够快）。
+    val renderItems = buildChatRenderItems(messages, startIndex, isStreaming)
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -282,7 +286,7 @@ fun ChatMessages(
                 end = 14.dp,
                 bottom = 10.dp + bottomInset,
             ),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             // 「显示更早的消息」（长会话防护，2026-09-12；Hermes showEarlier 同款胶囊按钮）：
             // 仅当更早消息被窗口挡住时出现，点击往前翻一页，并把新加载的一页推进视野。
@@ -331,12 +335,14 @@ fun ChatMessages(
                 val item = renderItems[i]
                 // 工具运行：一行灰色摘要（运行中 shimmer + 单行 ticker；点开铺开各行）
                 if (item is ChatRender.Run) {
-                    ToolRunGroup(
-                        calls = item.indices.map { messages[it] as Msg.ToolCall },
-                        results = item.indices.map { idx -> messages.getOrNull(idx + 1) as? Msg.ToolResult },
-                        live = item.live,
-                        onPermissionDemo = { call -> manualPolicyAsk = call.name to call.params },
-                    )
+                    Box(Modifier.padding(top = renderGap(renderItems, messages, i))) {
+                        ToolRunGroup(
+                            calls = item.indices.map { messages[it] as Msg.ToolCall },
+                            results = item.indices.map { idx -> messages.getOrNull(idx + 1) as? Msg.ToolResult },
+                            live = item.live,
+                            onPermissionDemo = { call -> manualPolicyAsk = call.name to call.params },
+                        )
+                    }
                     return@items
                 }
                 val idx = item.key
@@ -350,6 +356,7 @@ fun ChatMessages(
                 val longPressable = msg is Msg.User || msg is Msg.Assistant
                 Box(
                     Modifier
+                        .padding(top = renderGap(renderItems, messages, i))
                         .onGloballyPositioned { bubbleBounds[idx] = it.boundsInRoot() }
                         .then(
                             if (longPressable) Modifier.pointerInput(idx) {
@@ -1313,29 +1320,26 @@ private fun ThinkingDisclosure(
     var userOpen by remember { mutableStateOf<Boolean?>(null) }
     val open = userOpen ?: (live || expandedDefault)
 
-    Column(Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().alpha(if (open) 1f else ScaffoldFade)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(6.dp))
-                .clickable { userOpen = !open }
-                .padding(vertical = 4.dp),
+                .clickable { userOpen = !open },
         ) {
             ThinkingLabel(thoughtLabel(live, durationMs), live)
-            Icon(
-                if (open) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (open) 0.8f else 0.4f),
-                modifier = Modifier.padding(start = 4.dp).size(14.dp),
-            )
-            // 流式计时（Hermes：trailing 只在 pending 时出现；结束后时长已并入标题文案）
+            ScaffoldCaret(open = open)
+            // 流式计时（Hermes ActivityTimerText：0.56rem / tracking .02em / midground-55；
+            // 只在 pending 时出现，结束后时长已并入标题文案）
             if (live) {
                 Text(
                     formatElapsedSeconds(elapsedSeconds.toLong()),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = MonoFont,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 9.sp,
+                        letterSpacing = 0.18.sp,
+                    ),
+                    color = scaffoldMetaColor(),
                     modifier = Modifier.padding(start = 6.dp),
                 )
             }
@@ -1385,8 +1389,9 @@ private fun formatElapsedSeconds(seconds: Long): String =
  */
 @Composable
 private fun ThinkingLabel(label: String, live: Boolean) {
-    val base = MaterialTheme.colorScheme.onSurfaceVariant
-    val style = MaterialTheme.typography.labelSmall
+    // Hermes SCAFFOLD_LABEL_CLASS：11px / 18px 行高 / 前景 64%（与工具行、run 摘要同一支灰）
+    val style = scaffoldLabelStyle()
+    val base = scaffoldLabelColor()
     if (!live) {
         Text(label, style = style, color = base)
         return
@@ -1578,6 +1583,42 @@ private fun buildChatRenderItems(
         i++
     }
     return out
+}
+
+// ───────────────────────────── 会话块节奏（Hermes styles.css） ─────────────────────────────
+
+/**
+ * 会话块节奏（数值 = Hermes `styles.css`）：
+ * `--conversation-turn-gap` 6px（消息之间 / 用户消息与回复之间）、
+ * `--turn-block-gap` 12px（同一条回复内的块之间）、
+ * `--scaffold-block-gap` = turn/3 = 4px（脚手架彼此相邻，例如工具行/思考标题行背靠背）、
+ * `--paragraph-gap` 11.2px（正文↔正文：同一阅读栏的分段）。
+ */
+private enum class BlockKind { HUMAN, SCAFFOLD, PROSE }
+
+private fun blockKindOf(msg: Msg): BlockKind = when (msg) {
+    is Msg.User -> BlockKind.HUMAN
+    is Msg.Assistant -> BlockKind.PROSE
+    // 工具行/run 摘要/思考标题/压缩条：Hermes 里都是「脚手架」
+    is Msg.ToolCall, is Msg.ToolResult, is Msg.Thinking, is Msg.Compaction -> BlockKind.SCAFFOLD
+}
+
+private fun blockKindOf(item: ChatRender, messages: List<Msg>): BlockKind = when (item) {
+    is ChatRender.Run -> BlockKind.SCAFFOLD
+    is ChatRender.One -> blockKindOf(messages[item.key])
+}
+
+/** 该项与上一项之间应有的上边距（Hermes 的 adjacency 规则搬到一维列表上）。 */
+private fun renderGap(items: List<ChatRender>, messages: List<Msg>, i: Int): Dp {
+    if (i <= 0) return 0.dp
+    val prev = blockKindOf(items[i - 1], messages)
+    val cur = blockKindOf(items[i], messages)
+    return when {
+        prev == BlockKind.HUMAN || cur == BlockKind.HUMAN -> 6.dp
+        prev == BlockKind.SCAFFOLD && cur == BlockKind.SCAFFOLD -> 4.dp
+        prev == BlockKind.PROSE && cur == BlockKind.PROSE -> 11.dp
+        else -> 12.dp
+    }
 }
 
 /** 消息定位预览文案（换行折叠为空格，超长由列表行 Ellipsis 截断） */

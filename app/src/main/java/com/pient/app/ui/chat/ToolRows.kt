@@ -1,6 +1,9 @@
 package com.pient.app.ui.chat
 
+import android.widget.Toast
+
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -25,8 +28,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowRight
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -46,11 +50,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pient.app.data.Msg
@@ -98,12 +108,48 @@ private val ToolRowGap = 6.dp               // --tool-row-gap
 private val ToolLineHeightDp = 18.dp        // --conversation-line-height（布局用；文本用 18.sp）
 private val ToolShellRadius = 5.dp          // 0.3125rem
 private val ToolScaffoldGap = 4.dp          // --scaffold-block-gap = turn/3
-private const val ScaffoldRestAlpha = 0.67f
-private const val CaretRestAlpha = 0.4f
+internal const val ScaffoldFade = 0.67f // 脚手架静息透明度（styles.css data-conversation-scaffold）
+private const val ScaffoldRestAlpha = ScaffoldFade
+internal const val ScaffoldCaretRestAlpha = 0.4f
+private const val CaretRestAlpha = ScaffoldCaretRestAlpha
+
+/**
+ * 脚手架家族共用件（工具行、run 摘要行、思考标题行都是同一类「安静的一行」，
+ * Hermes 用 `scaffold-row.tsx` 统一，避免各处自己挑灰色/字号而漂移）。
+ */
+@Composable
+internal fun scaffoldLabelStyle(): TextStyle =
+    TextStyle(fontSize = ToolFontSize, lineHeight = ToolLineHeight)
+
+@Composable
+internal fun scaffoldLabelColor(): Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.64f)
+
+@Composable
+internal fun scaffoldMetaColor(): Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.44f)
+
+/** Hermes `DisclosureCaret`：chevron-right，展开时旋转 90°，150ms 过渡。 */
+@Composable
+internal fun ScaffoldCaret(open: Boolean, size: Dp = 12.dp) {
+    val rotated by animateFloatAsState(
+        targetValue = if (open) 90f else 0f,
+        animationSpec = tween(durationMillis = 150),
+        label = "scaffold-caret",
+    )
+    Icon(
+        Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+        contentDescription = if (open) "收起" else "展开",
+        tint = scaffoldLabelColor(),
+        modifier = Modifier
+            .size(size)
+            .rotate(rotated)
+            .alpha(if (open) 0.8f else CaretRestAlpha),
+    )
+}
 
 /** Hermes 会话令牌色（`--ui-base` = 主题前景，各档按百分比混到背景上）。 */
 private class ToolPalette(
     val scaffoldText: Color,
+    val quinary: Color,
     val meta: Color,
     val secondary: Color,
     val stroke: Color,
@@ -126,6 +172,7 @@ private fun toolPalette(): ToolPalette {
         // --ui-stroke-tertiary = accent 10% + base 5%
         stroke = accent.copy(alpha = 0.10f).compositeOver(base.copy(alpha = 0.05f)),
         fill = base.copy(alpha = 0.05f),
+        quinary = base.copy(alpha = 0.03f),
         ok = if (isDark) Color(0xFF3FB950) else Color(0xFF1A7F37),
         warn = if (isDark) Color(0xFFFFB224) else Color(0xFFB26A00),
         error = MaterialTheme.colorScheme.error,
@@ -135,7 +182,8 @@ private fun toolPalette(): ToolPalette {
 
 private fun TextStyle.tool(color: Color) = copy(color = color)
 
-private fun toolStyle(size: androidx.compose.ui.unit.TextUnit, mono: Boolean = true, weight: FontWeight? = null) =
+/** mono = true 用于正文/预格式段（Hermes 只给 TOOL_SECTION_PRE 加 font-mono）；标题行走界面字体。 */
+private fun toolStyle(size: TextUnit, mono: Boolean = true, weight: FontWeight? = null) =
     TextStyle(
         fontSize = size,
         lineHeight = ToolLineHeight,
@@ -247,6 +295,20 @@ internal fun toolRowTitle(call: Msg.ToolCall): String {
     }
 }
 
+/**
+ * 标题拆成（动作词, 其余）——Hermes 的 `titleAction`：进行中只给**动作词**加 shimmer
+ * （`{prefix}<span class="shimmer">{action}</span>{suffix}`），目标名是静态的。
+ */
+internal fun toolRowTitleParts(call: Msg.ToolCall): Pair<String, String> {
+    val full = toolRowTitle(call)
+    val verbs = listOf(
+        "正在运行", "正在读取", "正在编辑", "正在修补", "正在写入",
+        "正在搜索", "正在查找", "正在列出",
+    )
+    val verb = verbs.firstOrNull { full.startsWith(it) } ?: return full to ""
+    return verb to full.removePrefix(verb)
+}
+
 /** 停顿时长（Hermes `formatDurationSeconds`：<1s 用 ms、<10s 一位小数、<60s 秒、否则 分+秒）。 */
 internal fun formatDuration(ms: Long?): String? {
     if (ms == null || ms < 0) return null
@@ -349,15 +411,21 @@ private fun ToolRowHeader(
             .fillMaxWidth()
             .then(
                 if (padded) Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                else Modifier.padding(vertical = 1.dp),
+                else Modifier,
             )
             .then(if (onToggle != null) Modifier.clickable(onClick = onToggle) else Modifier),
     ) {
         ToolGlyph(call, palette)
         Spacer(Modifier.width(ToolRowGap))
-        val style = toolStyle(ToolFontSize, weight = FontWeight.Medium).copy(color = titleColor)
+        val style = scaffoldLabelStyle().copy(color = titleColor)
         if (pending) {
-            ShimmerText(toolRowTitle(call), style)
+            val (action, rest) = toolRowTitleParts(call)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f, fill = false)) {
+                ShimmerText(action, style)
+                if (rest.isNotEmpty()) {
+                    Text(rest, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
         } else {
             Text(
                 toolRowTitle(call),
@@ -379,14 +447,7 @@ private fun ToolRowHeader(
         }
         if (onToggle != null) {
             Spacer(Modifier.weight(1f))
-            Icon(
-                Icons.AutoMirrored.Outlined.ArrowRight,
-                contentDescription = if (open) "收起" else "展开",
-                tint = palette.scaffoldText,
-                modifier = Modifier
-                    .size(12.dp)
-                    .alpha(if (open) 0.8f else CaretRestAlpha),
-            )
+            ScaffoldCaret(open = open)
         }
     }
 }
@@ -464,7 +525,7 @@ private fun ToolCommandBlock(command: String, exitCode: Int?, palette: ToolPalet
         modifier = Modifier
             .fillMaxWidth()
             .border(1.dp, palette.stroke, RoundedCornerShape(4.dp))
-            .background(palette.fill, RoundedCornerShape(4.dp))
+            .background(palette.quinary, RoundedCornerShape(4.dp))
             .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
         Text("$", style = toolStyle(ToolPreSize).copy(color = palette.accent))
@@ -476,6 +537,7 @@ private fun ToolCommandBlock(command: String, exitCode: Int?, palette: ToolPalet
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        CopyButton(text = command, label = "复制命令")
         if (exitCode != null) {
             Text(
                 "exit $exitCode",
@@ -498,26 +560,52 @@ private fun ToolSectionBlock(
     error: Boolean = false,
 ) {
     Column(Modifier.fillMaxWidth()) {
-        Text(
-            label,
-            style = toolStyle(ToolSectionLabelSize).copy(
-                color = palette.meta,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = ToolSectionTracking,
-            ),
-        )
-        val scroll = rememberScrollState()
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                label,
+                style = toolStyle(ToolSectionLabelSize, mono = false).copy(
+                    color = palette.meta,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = ToolSectionTracking,
+                ),
+            )
+            Spacer(Modifier.weight(1f))
+            CopyButton(text = text, label = "复制输出")
+        }
         Text(
             text,
             style = toolStyle(ToolPreSize).copy(color = if (error) palette.error else palette.secondary),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 4.dp)
+                .padding(top = 4.dp, start = 8.dp, end = 8.dp, bottom = 6.dp)
                 .heightIn(max = 80.dp)
-                .verticalScroll(scroll)
+                .verticalScroll(rememberScrollState())
                 .horizontalScroll(rememberScrollState()),
         )
     }
+}
+
+/**
+ * 段内复制键（Hermes `CopyButton appearance="inline"`：正文右上角的小图标键、默认很淡）。
+ * 触摸端没有 hover → 常驻显示（静息 0.4 透明度，Hermes 的 `--disclosure-caret-rest` 同档）。
+ */
+@Composable
+private fun CopyButton(text: String, label: String) {
+    if (text.isBlank()) return
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
+    Icon(
+        Icons.Outlined.ContentCopy,
+        contentDescription = label,
+        tint = scaffoldMetaColor(),
+        modifier = Modifier
+            .size(16.dp)
+            .alpha(CaretRestAlpha)
+            .clickable {
+                clipboard.setText(AnnotatedString(text))
+                Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+            },
+    )
 }
 
 /** 「工具负载」折叠披露（Hermes `ToolPayloadDisclosure`：原始 args/result，默认收起）。 */
@@ -529,11 +617,7 @@ private fun ToolPayloadDisclosure(call: Msg.ToolCall, result: Msg.ToolResult?, p
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.clickable { open = !open },
         ) {
-            Icon(
-                Icons.AutoMirrored.Outlined.ArrowRight, contentDescription = null,
-                tint = palette.meta,
-                modifier = Modifier.size(10.dp).alpha(if (open) 0.8f else CaretRestAlpha),
-            )
+            ScaffoldCaret(open = open, size = 10.dp)
             Spacer(Modifier.width(ToolRowGap))
             Text(
                 "工具负载",
@@ -637,22 +721,17 @@ internal fun ToolRunGroup(
                 .clickable { expanded = !expanded },
         ) {
             if (live) {
-                ShimmerText(summary, toolStyle(ToolFontSize, mono = false).copy(color = p.scaffoldText))
+                ShimmerText(summary, scaffoldLabelStyle().copy(color = p.scaffoldText))
             } else {
                 Text(
                     summary,
-                    style = toolStyle(ToolFontSize, mono = false).copy(color = p.scaffoldText),
+                    style = scaffoldLabelStyle().copy(color = p.scaffoldText),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
             Spacer(Modifier.weight(1f))
-            Icon(
-                Icons.AutoMirrored.Outlined.ArrowRight,
-                contentDescription = if (expanded) "收起" else "展开",
-                tint = p.scaffoldText,
-                modifier = Modifier.size(12.dp).alpha(if (expanded) 0.8f else CaretRestAlpha),
-            )
+            ScaffoldCaret(open = expanded)
         }
 
         if (live && !expanded) {
