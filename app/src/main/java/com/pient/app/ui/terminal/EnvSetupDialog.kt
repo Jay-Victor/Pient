@@ -26,22 +26,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.pient.app.PientRuntime
+import com.pient.app.data.ComponentGroups
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.UBUNTU_COMPONENTS
 import com.pient.app.runtime.EnvProvision
+import com.pient.app.runtime.PiTerminal
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.pient.app.ui.components.PientDialog
 
 /**
- * 首启「环境安装」（对齐 Operit `OperitTerminalCore/SetupScreen.kt`）。
+ * 首启「环境安装」。
  *
  * 定位（用户 2026-09-13 拍板）：**首启进终端页弹一次、可跳过**；Ubuntu 本身随包就绪
  * （自动解包 PRoot rootfs），但工具链（Node / Python / Git …）不随包分发，需要时在这里装。
  *
- * 与「环境配置 → 环境内软件」是同一份清单（[UBUNTU_COMPONENTS]）与同一个安装器
- * （[EnvProvision]），这里只是首启的入口 + 分组勾选；装完/跳过后 `SettingsStore.envSetupDone`
- * 置位，不再自动弹。
+ * 与「环境配置 → 环境内软件」是同一份清单（[UBUNTU_COMPONENTS]）、同一个分类
+ * （[ComponentGroups]）与同一条安装通道（[EnvProvision.installInTerminal]）：点「安装所选」后
+ * 关闭本弹窗、切到专用会话「环境配置」，安装输出在**终端里**滚（不在弹窗里贴日志）。
  */
 @Composable
 fun EnvSetupDialog(onDone: () -> Unit) {
@@ -51,7 +54,6 @@ fun EnvSetupDialog(onDone: () -> Unit) {
     var selected by remember { mutableStateOf(DEFAULT_SETUP) }
     var detected by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
     val running = EnvProvision.running
-    val logs = EnvProvision.log
 
     LaunchedEffect(Unit) {
         detected = withContext(Dispatchers.IO) { EnvProvision.detect(context, UBUNTU_COMPONENTS) }
@@ -78,7 +80,10 @@ fun EnvSetupDialog(onDone: () -> Unit) {
             } else {
                 // 勾选集同步给「环境内软件」段（同一份状态，两处一致）
                 SettingsStore.selectedComponents = selected
-                EnvProvision.install(context, toInstall)
+                val session = EnvProvision.installInTerminal(context, toInstall)
+                val idx = PiTerminal.sessions.indexOf(session)
+                if (idx >= 0) PientRuntime.chatState?.terminalIndex = idx
+                onDone()
             }
         },
         extraActionText = if (running) null else "跳过",
@@ -93,12 +98,14 @@ fun EnvSetupDialog(onDone: () -> Unit) {
                 .padding(top = 6.dp),
         ) {
             Text(
-                "Ubuntu 环境已就绪。下面这些工具链不随包分发，勾选后在这里装（之后也能在「环境配置 → 环境内软件」里装）。",
+                "Ubuntu 环境已就绪。下面这些工具链不随包分发，勾选后装（之后也能在「环境配置 → 环境内软件」里装）；安装过程在终端页里跑。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 10.dp),
             )
-            UBUNTU_COMPONENTS.groupBy { it.group }.forEach { (group, list) ->
+            ComponentGroups.ORDER.forEach { group ->
+                val list = UBUNTU_COMPONENTS.filter { it.group == group }
+                if (list.isEmpty()) return@forEach
                 Text(
                     group,
                     style = MaterialTheme.typography.labelMedium,
@@ -136,17 +143,12 @@ fun EnvSetupDialog(onDone: () -> Unit) {
                     }
                 }
             }
-            if (running || logs.isNotEmpty()) {
+            if (running) {
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    EnvProvision.step.ifBlank { "安装中…" },
+                    "${EnvProvision.step.ifBlank { "安装中" }}——输出在终端页",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    logs.takeLast(6).joinToString("\n"),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

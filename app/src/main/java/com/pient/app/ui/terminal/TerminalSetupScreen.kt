@@ -3,6 +3,7 @@ package com.pient.app.ui.terminal
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,12 +13,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
@@ -43,23 +45,26 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import com.pient.app.PientRuntime
 import com.pient.app.data.APT_MIRRORS
+import com.pient.app.data.ComponentGroups
 import com.pient.app.data.EnvAction
 import com.pient.app.data.ExecEnv
 import com.pient.app.data.ExecEnvs
 import com.pient.app.data.EnvStatus
+import com.pient.app.data.Panel
 import com.pient.app.data.RootGateway
 import com.pient.app.data.SettingsStore
-import com.pient.app.data.ShizukuGateway
 import com.pient.app.data.UBUNTU_COMPONENTS
+import com.pient.app.data.UbuntuComponent
 import com.pient.app.runtime.EnvProvision
 import com.pient.app.runtime.PiRuntime
+import com.pient.app.runtime.PiTerminal
 import com.pient.app.ui.components.ArcSpinner
 import com.pient.app.ui.components.DividerLine
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.components.PientDialog
 import com.pient.app.ui.components.SectionHeader
-import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -67,7 +72,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 环境配置页（2026-09-14 重做）。
+ * 环境配置页（2026-09-14 重做第二版）。
  *
  * **语义**：这里配置的不是「Ubuntu 内部组件清单」，而是 **AI 的工具命令的执行落点**——
  * 移植进来的 pi 工具里，`bash`（与输入栏 `!` 命令）是唯一经 shell 执行的一个，
@@ -77,7 +82,9 @@ import kotlinx.coroutines.withContext
  *
  * 页面两段：
  * 1. **执行环境**——三选一 + 各自就绪状态 + 初始化入口（Ubuntu 缺 rootfs → 一键解包；chroot 缺 su → 请求 Root 授权）；
- * 2. **环境内软件（Ubuntu）**——apt 镜像源 + 常用组件勾选安装，命令真在 Ubuntu 里跑、输出流式回显。
+ * 2. **环境内软件（Ubuntu）**——apt 镜像源 + **按用途分类**的组件多选（命令行基础 / 语言运行时 /
+ *    开发与构建 / 网络与远程），点「安装所选」**跳进终端页**由专用会话「环境配置」实跑
+ *    （apt 输出实时滚在终端里；本页只留一条「正在安装 · 去终端」的状态，见 [EnvProvision.installInTerminal]）。
  */
 @Composable
 fun TerminalSetupScreen(nav: NavController) {
@@ -104,7 +111,7 @@ fun TerminalSetupScreen(nav: NavController) {
     }
 
     LaunchedEffect(Unit) { refresh() }
-    // 安装任务结束后刷新组件状态（流程：安装 → 重新检测 → 勾选行转「已安装」）
+    // 安装任务结束后重新检测（流程：安装 → 回本页 → 勾选行转「已安装」）
     LaunchedEffect(EnvProvision.running) {
         if (!EnvProvision.running) detected = withContext(Dispatchers.IO) {
             EnvProvision.detect(context, UBUNTU_COMPONENTS)
@@ -120,6 +127,20 @@ fun TerminalSetupScreen(nav: NavController) {
     }
 
     fun toast(text: String) = Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+
+    /**
+     * 切到终端页并选中承载安装的会话（「安装所选」的落点）：
+     * 环境配置页是独立路由 → 先 popBackStack 回聊天页，再把面板换成终端。
+     */
+    fun openTerminal(session: PiTerminal.Session) {
+        val cs = PientRuntime.chatState
+        if (cs != null) {
+            val idx = PiTerminal.sessions.indexOf(session)
+            if (idx >= 0) cs.terminalIndex = idx
+            cs.activePanel = Panel.TERMINAL
+        }
+        nav.popBackStack()
+    }
 
     /** 选定执行环境：未就绪的环境不允许选中（先给解锁入口，避免 AI 命令静默失败） */
     fun selectEnv(env: ExecEnv) {
@@ -175,6 +196,36 @@ fun TerminalSetupScreen(nav: NavController) {
         }
     }
 
+    /** 「安装所选」：勾选集减去已装的 → 交给终端会话执行 → 跳到终端页 */
+    fun installSelected() {
+        val picked = UBUNTU_COMPONENTS.filter {
+            it.id in SettingsStore.selectedComponents && detected[it.id] != true
+        }
+        if (picked.isEmpty()) {
+            toast("先勾选要装的组件（已安装的不用再选）")
+            return
+        }
+        val st = statuses[ExecEnv.UBUNTU]
+        if (st?.ready != true) {
+            // 不再把用户支到「一键配置」的死路上（2026-09-14 真机反馈）：rootfs 缺失时
+            // 直接开始自动解包，并跳到终端页看解包进度（终端会话自己会解包）
+            if (st?.action == EnvAction.UNPACK_ROOTFS) {
+                PiRuntime.ensureRootfsAsync(context)
+                toast("rootfs 未就绪：已开始自动解包（约 30MB / 1–2 分钟），完成后回来再点「安装所选」")
+                openTerminal(PiTerminal.sessionNamed(PiTerminal.CONFIG_SESSION) ?: PiTerminal.newSession(context))
+                scope.launch {
+                    delay(1500)
+                    refresh()
+                }
+            } else {
+                toast("Ubuntu 环境未就绪：${st?.detail ?: "先解包 rootfs"}")
+            }
+            return
+        }
+        val session = EnvProvision.installInTerminal(context, picked)
+        openTerminal(session)
+    }
+
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             // ── 顶栏：返回 + 标题 ──
@@ -202,9 +253,10 @@ fun TerminalSetupScreen(nav: NavController) {
             Column(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
+                    .weight(1f)
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .padding(bottom = 24.dp),
+                    .padding(bottom = 16.dp),
             ) {
                 // ═══════════ 执行环境 ═══════════
                 SectionHeader("执行环境", icon = Icons.Outlined.Terminal)
@@ -238,12 +290,37 @@ fun TerminalSetupScreen(nav: NavController) {
                 SectionHeader("环境内软件（Ubuntu）", icon = Icons.Outlined.Download)
                 PientPanel(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     Column(Modifier.padding(vertical = 4.dp)) {
-                        Text(
-                            "在这里给 Ubuntu 装工具链（Node / Python / Git …）：装完 AI 的 bash 工具与终端页立刻能用",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                        )
+                        // 说明 + 刷新状态（检测要跑真命令，手动触发，别每次重组都问一遍）
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                        ) {
+                            Text(
+                                "装进 Ubuntu 的工具链：勾选后点底部「安装所选」，安装过程在**终端页**里跑（专用会话「环境配置」）",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.clickable { scope.launch { refresh() } },
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Refresh, null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                                Text(
+                                    "刷新",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(start = 4.dp),
+                                )
+                            }
+                        }
+                        DividerLine(Modifier.padding(horizontal = 14.dp))
+
                         // apt 镜像源（整行可点 → 选择弹窗）
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -266,111 +343,69 @@ fun TerminalSetupScreen(nav: NavController) {
                                 color = MaterialTheme.colorScheme.primary,
                             )
                         }
-                        DividerLine(Modifier.padding(horizontal = 14.dp))
 
-                        // 组件勾选
-                        UBUNTU_COMPONENTS.forEach { c ->
-                            ComponentRow(
-                                name = c.name,
-                                desc = c.desc,
-                                installed = detected[c.id] == true,
-                                checked = c.id in SettingsStore.selectedComponents,
-                                onToggle = {
-                                    SettingsStore.selectedComponents =
-                                        if (c.id in SettingsStore.selectedComponents)
-                                            SettingsStore.selectedComponents - c.id
-                                        else SettingsStore.selectedComponents + c.id
-                                    scope.launch {
-                                        withContext(Dispatchers.IO) { SettingsStore.saveEnvironment(context) }
-                                    }
-                                },
-                            )
-                        }
+                        // ── 分类分节：每类一个标题行（含计数与全选）+ 该类组件 ──
+                        ComponentGroups.ORDER.forEach { group ->
+                            val list = UBUNTU_COMPONENTS.filter { it.group == group }
+                            if (list.isEmpty()) return@forEach
+                            val installedCount = list.count { detected[it.id] == true }
+                            val pickedCount = list.count { it.id in SettingsStore.selectedComponents && detected[it.id] != true }
 
-                        // 动作：刷新状态 / 安装所选
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                        ) {
-                            PientButton(
-                                text = "刷新状态",
-                                onClick = { scope.launch { refresh() } },
-                                primary = false,
-                                enabled = !EnvProvision.running,
-                                modifier = Modifier.weight(1f),
-                            )
-                            PientButton(
-                                text = "安装所选（${SettingsStore.selectedComponents.size}）",
-                                onClick = {
-                                    val picked = UBUNTU_COMPONENTS.filter { it.id in SettingsStore.selectedComponents }
-                                    if (picked.isEmpty()) {
-                                        toast("先勾选组件")
-                                    } else if (statuses[ExecEnv.UBUNTU]?.ready != true) {
-                                        // 不再把用户支到「一键配置」的死路上（2026-09-14 真机反馈）：
-                                        // rootfs 缺失时这里**直接开始自动解包**（Operit 口径：环境缺失自动补齐），
-                                        // 其余未就绪原因（缺组件 / 解包中）如实回显 detail。
-                                        val st = statuses[ExecEnv.UBUNTU]
-                                        if (st?.action == EnvAction.UNPACK_ROOTFS) {
-                                            PiRuntime.ensureRootfsAsync(context)
-                                            toast("rootfs 未就绪：已开始自动解包（约 30MB / 1–2 分钟），完成后回来再点「安装所选」")
-                                            scope.launch {
-                                                delay(1500)
-                                                refresh()
-                                            }
-                                        } else {
-                                            toast("Ubuntu 环境未就绪：${st?.detail ?: "先解包 rootfs"}")
-                                        }
-                                    } else {
-                                        EnvProvision.install(context, picked)
-                                    }
-                                },
-                                enabled = !EnvProvision.running,
-                                loading = EnvProvision.running,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-
-                        // 运行 / 日志区（有输出或有任务在跑时才出现）
-                        if (EnvProvision.running || EnvProvision.log.isNotEmpty()) {
                             DividerLine(Modifier.padding(horizontal = 14.dp))
-                            Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (EnvProvision.running) {
-                                        ArcSpinner(size = 14.dp, color = MaterialTheme.colorScheme.primary)
-                                        Spacer(Modifier.width(8.dp))
-                                    }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                            ) {
+                                Column(Modifier.weight(1f)) {
                                     Text(
-                                        EnvProvision.step.ifBlank { "执行日志" },
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.weight(1f),
+                                        group,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold,
                                     )
-                                    if (!EnvProvision.running) {
-                                        Text(
-                                            "清空",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.clickable { EnvProvision.clearLog() },
-                                        )
-                                    } else {
-                                        Text(
-                                            "取消",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.error,
-                                            modifier = Modifier.clickable { EnvProvision.cancel() },
-                                        )
-                                    }
+                                    Text(
+                                        ComponentGroups.DESCS[group].orEmpty(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                 }
-                                Spacer(Modifier.height(6.dp))
                                 Text(
-                                    EnvProvision.log.takeLast(8).joinToString("\n"),
+                                    "$installedCount/${list.size} 已装",
                                     style = MaterialTheme.typography.labelSmall,
-                                    fontFamily = MonoFont,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                // 全选 / 取消全选：整块可点（交互红线：小图标不做点击目标）
+                                Text(
+                                    if (pickedCount == list.count { detected[it.id] != true }) "取消全选" else "全选",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(max = 180.dp)
-                                        .verticalScroll(rememberScrollState()),
+                                        .padding(start = 10.dp)
+                                        .clickable {
+                                            val pending = list.filter { detected[it.id] != true }.map { it.id }.toSet()
+                                            val allPicked = pending.isNotEmpty() && pending.all { it in SettingsStore.selectedComponents }
+                                            SettingsStore.selectedComponents =
+                                                if (allPicked) SettingsStore.selectedComponents - pending
+                                                else SettingsStore.selectedComponents + pending
+                                            scope.launch {
+                                                withContext(Dispatchers.IO) { SettingsStore.saveEnvironment(context) }
+                                            }
+                                        },
+                                )
+                            }
+                            list.forEach { c ->
+                                ComponentRow(
+                                    component = c,
+                                    installed = detected[c.id] == true,
+                                    checked = SettingsStore.selectedComponents.contains(c.id),
+                                    onToggle = {
+                                        SettingsStore.selectedComponents =
+                                            if (c.id in SettingsStore.selectedComponents)
+                                                SettingsStore.selectedComponents - c.id
+                                            else SettingsStore.selectedComponents + c.id
+                                        scope.launch {
+                                            withContext(Dispatchers.IO) { SettingsStore.saveEnvironment(context) }
+                                        }
+                                    },
                                 )
                             }
                         }
@@ -384,6 +419,23 @@ fun TerminalSetupScreen(nav: NavController) {
                     modifier = Modifier.padding(horizontal = 16.dp),
                 )
             }
+
+            // ── 底部固定操作条（滚动区之外：勾到哪一类都点得到「安装所选」）──
+            InstallBar(
+                running = EnvProvision.running,
+                runningLabel = EnvProvision.step,
+                pickedCount = UBUNTU_COMPONENTS.count {
+                    it.id in SettingsStore.selectedComponents && detected[it.id] != true
+                },
+                onInstall = ::installSelected,
+                onClear = {
+                    SettingsStore.selectedComponents = emptySet()
+                    scope.launch { withContext(Dispatchers.IO) { SettingsStore.saveEnvironment(context) } }
+                },
+                onOpenTerminal = {
+                    openTerminal(PiTerminal.sessionNamed(PiTerminal.CONFIG_SESSION) ?: PiTerminal.newSession(context))
+                },
+            )
         }
 
         // 镜像源选择弹窗（页面根层，不做在滚动区内——全屏浮层不能在滚动容器里）
@@ -434,6 +486,81 @@ fun TerminalSetupScreen(nav: NavController) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/** 底部操作条：未在安装时给「安装所选（N）/清空」，安装中给「去终端」 */
+@Composable
+private fun InstallBar(
+    running: Boolean,
+    runningLabel: String,
+    pickedCount: Int,
+    onInstall: () -> Unit,
+    onClear: () -> Unit,
+    onOpenTerminal: () -> Unit,
+) {
+    PientPanel(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+        ) {
+            if (running) {
+                ArcSpinner(size = 14.dp, color = MaterialTheme.colorScheme.primary)
+                Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                    Text(
+                        "正在安装…",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        "${runningLabel.ifBlank { "安装中" }}(输出在终端页)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                PientButton(
+                    text = "去终端",
+                    onClick = onOpenTerminal,
+                    height = 36,
+                    contentPadding = 12,
+                )
+            } else {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (pickedCount > 0) "已选 $pickedCount 个待安装组件" else "还没勾选组件",
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    Text(
+                        "点「安装所选」后跳到终端页执行",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (pickedCount > 0) {
+                    Text(
+                        "清空",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .padding(end = 12.dp)
+                            .clickable(onClick = onClear),
+                    )
+                }
+                PientButton(
+                    text = if (pickedCount > 0) "安装所选（$pickedCount）" else "安装所选",
+                    onClick = onInstall,
+                    enabled = pickedCount > 0,
+                    height = 36,
+                    contentPadding = 12,
+                )
             }
         }
     }
@@ -539,27 +666,50 @@ private fun EnvRow(
     }
 }
 
-/** 组件行：勾选 + 名称/说明 + 安装状态（整行可点） */
+/**
+ * 组件行：勾选 + 名称（含「大」标记）/说明 + 安装状态；整行可点。
+ * 已安装的行不可勾（勾了也没意义，反而会让「安装所选」装上重复包）。
+ */
 @Composable
 private fun ComponentRow(
-    name: String,
-    desc: String,
+    component: UbuntuComponent,
     installed: Boolean,
     checked: Boolean,
     onToggle: () -> Unit,
 ) {
+    val enabled = !installed && !EnvProvision.running
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onToggle)
-            .padding(horizontal = 14.dp, vertical = 4.dp),
+            .clickable(enabled = enabled, onClick = onToggle)
+            .padding(horizontal = 10.dp, vertical = 2.dp),
     ) {
-        Checkbox(checked = checked, onCheckedChange = { onToggle() })
-        Column(Modifier.weight(1f)) {
-            Text(name, style = MaterialTheme.typography.bodyMedium)
+        Checkbox(
+            checked = installed || checked,
+            enabled = enabled,
+            onCheckedChange = { onToggle() },
+        )
+        Column(Modifier.weight(1f).padding(vertical = 2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(component.name, style = MaterialTheme.typography.bodyMedium)
+                if (component.heavy) {
+                    Text(
+                        "大",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier
+                            .padding(start = 6.dp)
+                            .background(
+                                MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f),
+                                RoundedCornerShape(4.dp),
+                            )
+                            .padding(horizontal = 4.dp, vertical = 1.dp),
+                    )
+                }
+            }
             Text(
-                desc,
+                component.desc,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -568,6 +718,7 @@ private fun ComponentRow(
             if (installed) "已安装" else "未安装",
             style = MaterialTheme.typography.labelSmall,
             color = if (installed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 6.dp),
         )
     }
 }

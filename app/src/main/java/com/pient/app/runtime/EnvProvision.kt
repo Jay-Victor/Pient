@@ -1,11 +1,8 @@
 package com.pient.app.runtime
 
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.pient.app.data.AptMirror
@@ -16,34 +13,27 @@ import java.util.concurrent.TimeUnit
 /**
  * 环境内软件（Ubuntu）的**真实**配置：apt 镜像源写入 + 组件检测 + 组件安装。
  *
- * 两条硬口径：
- * 1. 这些命令**永远在 Ubuntu 环境里跑**，与「AI 工具当前用的执行环境」无关——所以进程带上
- *    `PIENT_EXEC_ENV=ubuntu` 覆盖包装脚本的路由（选着 Android shell 时也能装组件）；
- * 2. 输出**流式回显**到页面（apt 装包动辄几十秒到几分钟，没有反馈就是「点了没反应」）。
+ * 三条硬口径：
+ * 1. 这些命令**永远在 Ubuntu 环境里跑**，与「AI 工具当前用的执行环境」无关；
+ * 2. **安装过程显示在终端页**（2026-09-14 用户口径）：点「安装所选」→ 跳到终端页，
+ *    脚本在专用会话「环境配置」里跑，apt 输出实时滚 —— 本页不再自建日志区；
+ * 3. 检测（`command -v` / `dpkg -s`）仍是短命令直查，不进终端（否则每次进页面都刷一屏）。
  */
 object EnvProvision {
 
     private const val TAG = "PiHost"
-    private const val MAX_LOG = 400
 
-    /** 页面日志（最新在尾；跨页面进出保留，清空走 [clearLog]） */
-    val log = mutableStateListOf<String>()
-
-    /** 是否有安装任务在跑（页面据此禁用按钮 + 显示进度） */
+    /** 有安装任务在跑（页面据此把「安装所选」换成「去终端」） */
     var running by mutableStateOf(false)
         private set
 
-    /** 当前步骤说明（「更新索引…」这类） */
+    /** 当前步骤说明（「安装 3 个组件」这类） */
     var step by mutableStateOf("")
         private set
 
-    private var process: Process? = null
-    private val main = Handler(Looper.getMainLooper())
-
-    fun clearLog() {
-        log.clear()
-        step = ""
-    }
+    /** 上一次安装的退出码（null = 本轮还没跑完） */
+    var lastExitCode by mutableStateOf<Int?>(null)
+        private set
 
     // ─────────────────────────── 镜像源 ───────────────────────────
 
@@ -103,99 +93,56 @@ object EnvProvision {
         }
     }
 
-    // ─────────────────────────── 组件安装 ───────────────────────────
+    // ─────────────────────────── 组件安装（在终端页的会话里跑） ───────────────────────────
 
-    /** 安装选中组件（先自愈 dpkg 半配置状态，再 `apt-get update` 刷新索引；自定义命令按清单顺序跟在后面） */
-    fun install(context: Context, components: List<UbuntuComponent>) {
-        if (running || components.isEmpty()) return
+    /**
+     * 安装脚本：**一条命令一个元素**，执行时用 `&&` 串行（任一步失败即停，不会带着半成品继续）。
+     *
+     * 顺序与自愈口径是实测结论，别改：
+     * ① 非交互（`DEBIAN_FRONTEND`）；② `dpkg --configure -a` 自愈上一次被中断的半配置状态
+     * （App 被杀 / 用户取消后 apt 会一律 `E: dpkg was interrupted`）；③ 刷新索引；
+     * ④ apt 单包一次装完；⑤ 自定义命令（NodeSource / npm 全局 / rustup）按清单顺序跟在后面。
+     */
+    fun commandsFor(components: List<UbuntuComponent>): List<String> {
         val aptComponents = components.filter { it.installCmd == null }
         val custom = components.filter { it.installCmd != null }
-        val script = buildString {
-            appendLine("export DEBIAN_FRONTEND=noninteractive")
-            // 上一次安装被中断（App 被杀 / 用户取消）会留下 dpkg 半配置状态，
-            // 之后 apt 一律 `E: dpkg was interrupted`（实测踩过）→ 先自愈再装。
-            appendLine("dpkg --configure -a >/dev/null 2>&1 || true")
-            appendLine("apt-get update")
-            if (aptComponents.isNotEmpty()) {
-                appendLine("apt-get install -y --no-install-recommends ${aptComponents.joinToString(" ") { it.pkg }}")
-            }
-            // 自定义安装（NodeSource / npm 全局包 / rustup…）—— 顺序即清单顺序：
-            // node 在 pnpm/typescript 之前、pip 在 uv 之前，别重排。
-            custom.forEach { c ->
-                appendLine("echo '--- ${c.name} ---'")
-                appendLine(c.installCmd)
-            }
+        val cmds = ArrayList<String>()
+        cmds += "export DEBIAN_FRONTEND=noninteractive"
+        cmds += "dpkg --configure -a >/dev/null 2>&1 || true"
+        cmds += "apt-get update"
+        if (aptComponents.isNotEmpty()) {
+            cmds += "apt-get install -y --no-install-recommends " +
+                aptComponents.joinToString(" ") { it.pkg }
         }
-        run(context, script, "安装 ${components.size} 个组件")
+        // 自定义安装的顺序即清单顺序：node 在 pnpm/typescript 之前、pip 在 uv 之前
+        custom.forEach { cmds += it.installCmd!! }
+        return cmds
     }
 
-    /** 只刷新索引（换镜像源后用）；同样先自愈 dpkg，否则索引刷新也会被半配置状态挡住 */
-    fun updateIndex(context: Context) {
-        if (running) return
-        run(
-            context,
-            "export DEBIAN_FRONTEND=noninteractive\ndpkg --configure -a >/dev/null 2>&1 || true\napt-get update",
-            "刷新软件索引",
-        )
-    }
+    /** 终端里那行「这是干什么」的标题（命令行的样子，读起来像用户在终端里敲的） */
+    fun labelFor(components: List<UbuntuComponent>): String =
+        "环境配置 · 安装 ${components.size} 个组件（${components.joinToString(" · ") { it.name }}）"
 
-    fun cancel() {
-        runCatching { process?.destroy() }
-    }
-
-    private fun run(context: Context, script: String, label: String) {
-        val shell = PiRuntime.shellPath(context)
-        if (!shell.isFile) {
-            appendLog("终端运行时缺失：${shell.absolutePath}")
-            return
-        }
-        step = "$label：准备中…"
+    /**
+     * 把选中组件交给**终端页的专用会话**去装：会话不存在就新建（`环境配置`），
+     * 输出实时滚在终端里；本页只留一条「正在安装 · 去终端」的状态。
+     *
+     * @return 承载安装的会话（调用方据此切到终端页并选中这个会话）
+     */
+    fun installInTerminal(context: Context, components: List<UbuntuComponent>): PiTerminal.Session {
+        val session = PiTerminal.sessionNamed(PiTerminal.CONFIG_SESSION)
+            ?: PiTerminal.newSession(context, PiTerminal.CONFIG_SESSION)
+        if (components.isEmpty() || running) return session
         running = true
-        val proc = runCatching {
-            ProcessBuilder(shell.absolutePath, "-c", script)
-                .redirectErrorStream(true)
-                .also { pb ->
-                    pb.environment().putAll(PiRuntime.environment(context))
-                    // 强制 Ubuntu 环境：安装/检测与「AI 工具当前用哪个环境」无关
-                    pb.environment()["PIENT_EXEC_ENV"] = "ubuntu"
-                }
-                .start()
-        }.getOrElse {
-            appendLog("启动失败：${it.message}")
+        step = "安装 ${components.size} 个组件"
+        lastExitCode = null
+        PiTerminal.runScript(session, labelFor(components), commandsFor(components)) { code ->
             running = false
             step = ""
-            return
+            lastExitCode = code
+            Log.i(TAG, "环境配置脚本结束，退出码 $code")
         }
-        process = proc
-        appendLog("$ $label")
-        Thread({
-            val sb = StringBuilder()
-            runCatching {
-                val buf = ByteArray(4096)
-                val input = proc.inputStream
-                while (true) {
-                    val n = input.read(buf)
-                    if (n < 0) break
-                    if (n == 0) continue
-                    sb.append(String(buf, 0, n, Charsets.UTF_8))
-                    // apt 的进度用 \r 刷新：两种换行都要切
-                    while (true) {
-                        val i = indexOfAny(sb, '\n', '\r') ?: break
-                        val line = sb.substring(0, i)
-                        sb.delete(0, i + 1)
-                        if (line.isNotBlank()) main.post { appendLog(line) }
-                    }
-                }
-            }.onFailure { Log.w(TAG, "读取安装输出失败：${it.message}") }
-            if (sb.isNotEmpty()) main.post { appendLog(sb.toString()) }
-            val code = runCatching { proc.waitFor() }.getOrDefault(-1)
-            main.post {
-                appendLog(if (code == 0) "[完成] 退出码 0" else "[失败] 退出码 $code")
-                running = false
-                step = ""
-                process = null
-            }
-        }, "pient-env-provision").apply { isDaemon = true }.start()
+        return session
     }
 
     // ─────────────────────────── 内部工具 ───────────────────────────
@@ -234,10 +181,5 @@ object EnvProvision {
             if (i >= 0 && (best == null || i < best!!)) best = i
         }
         return best
-    }
-
-    private fun appendLog(line: String) {
-        log += line
-        while (log.size > MAX_LOG) log.removeAt(0)
     }
 }

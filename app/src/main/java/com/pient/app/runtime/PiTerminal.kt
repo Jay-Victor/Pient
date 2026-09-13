@@ -25,12 +25,20 @@ object PiTerminal {
     private const val MAX_LINES = 2000
     private const val INIT_CMD = """cd ~; . /etc/os-release; echo "${'$'}PRETTY_NAME · ${'$'}(uname -sr)""""
 
+    /** 「环境配置」页的专用会话名（安装脚本固定跑在这个会话里，不污染用户自己的会话） */
+    const val CONFIG_SESSION = "环境配置"
+
+    /** 脚本结束哨兵：只有 `echo` 出来的这一行会被拦下（不显示），用来判定安装结束与退出码 */
+    private const val SENTINEL = "__PIENT_DONE__"
+
     class Session(val id: Int, val name: String) {
         val lines = mutableStateListOf<TerminalLine>()
         @Volatile var process: Process? = null
         @Volatile var alive: Boolean = false
         /** 跨 read 的半行缓冲（管道 read 会把行截断） */
         val pending = StringBuilder()
+        /** 脚本模式：结束哨兵到达时的回调（参数 = 退出码）；null = 当前没有脚本在跑 */
+        var scriptCallback: ((Int) -> Unit)? = null
     }
 
     val sessions = mutableStateListOf<Session>()
@@ -44,18 +52,38 @@ object PiTerminal {
         synchronized(this) { if (sessions.isEmpty()) newSession(context) }
     }
 
+    /** 按名字找会话（「环境配置」复用同一个，不重复建） */
+    fun sessionNamed(name: String): Session? = sessions.firstOrNull { it.name == name }
+
     /** 新建会话：横幅 + 一条真实的环境自检命令（首屏输出即证明连到了 rootfs） */
     @Synchronized
-    fun newSession(context: Context): Session {
+    fun newSession(context: Context, name: String? = null): Session {
         appContext = context.applicationContext
         counter += 1
-        val s = Session(counter, "会话$counter")
+        val s = Session(counter, name ?: "会话$counter")
         s.lines.addAll(MockTerminal.banner)
         sessions += s
         start(context, s)
         write(s, INIT_CMD)
         return s
     }
+
+    /**
+     * 在会话里跑一段脚本（「环境配置 → 安装所选」走这条）：
+     * 命令用 `&&` 串成一条（**任一步失败即停**），末尾发一条哨兵行判定结束与退出码；
+     * 输出照常流进终端（[onFinish] 在主线程回调）。
+     */
+    fun runScript(session: Session, label: String, commands: List<String>, onFinish: (Int) -> Unit) {
+        if (commands.isEmpty()) {
+            onFinish(0)
+            return
+        }
+        session.scriptCallback = onFinish
+        append(session, TerminalLine("~ \$$label", TerminalLineKind.COMMAND))
+        val body = commands.joinToString(" && ") { "{ $it; }" } + "\necho $SENTINEL\$?"
+        write(session, body)
+    }
+
 
     /** 关闭会话（结束进程并移除） */
     @Synchronized
@@ -210,16 +238,38 @@ object PiTerminal {
         while (idx >= 0) {
             val line = session.pending.substring(0, idx).trimEnd('\r')
             session.pending.delete(0, idx + 1)
-            appendDirect(session, TerminalLine(line, TerminalLineKind.OUTPUT))
+            onOutputLine(session, line)
             idx = session.pending.indexOf("\n")
         }
     }
 
     private fun flushPending(session: Session) {
         if (session.pending.isNotEmpty()) {
-            appendDirect(session, TerminalLine(session.pending.toString().trimEnd('\r'), TerminalLineKind.OUTPUT))
+            onOutputLine(session, session.pending.toString().trimEnd('\r'))
             session.pending.setLength(0)
         }
+    }
+
+    /**
+     * 一行输出的落点：**脚本哨兵行被吃掉**（不显示，用来收尾安装脚本），其余原样进界面。
+     * 收尾行由这里补一条「完成/失败」，让终端里读得懂这次安装的结果。
+     */
+    private fun onOutputLine(session: Session, line: String) {
+        if (line.startsWith(SENTINEL)) {
+            val code = line.removePrefix(SENTINEL).trim().toIntOrNull() ?: -1
+            val cb = session.scriptCallback
+            session.scriptCallback = null
+            appendDirect(
+                session,
+                TerminalLine(
+                    if (code == 0) "[环境配置] 安装完成（退出码 0）" else "[环境配置] 安装失败（退出码 $code）",
+                    TerminalLineKind.OUTPUT,
+                ),
+            )
+            cb?.invoke(code)
+            return
+        }
+        appendDirect(session, TerminalLine(line, TerminalLineKind.OUTPUT))
     }
 
     private fun append(session: Session, line: TerminalLine) {
