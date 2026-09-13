@@ -96,6 +96,14 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import io.github.fletchmckee.liquid.liquefiable
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import androidx.compose.material.icons.outlined.WarningAmber
+import androidx.compose.runtime.collectAsState
+import com.pient.app.runtime.PiHost
+import com.pient.app.runtime.PiHostService
+import com.pient.app.runtime.PiHostState
+import com.pient.app.ui.components.PientButton
+import androidx.compose.foundation.border
+import com.pient.app.PientRuntime
 
 /**
  * 聊天主页（P1）：顶栏常驻，下方区域在 消息区 / 文件内容预览区（P3）/ 终端页（P4）
@@ -407,6 +415,18 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                     attachSheetOpen = false // 切页时收起附件卡片
                 },
             )
+            // pi 宿主未就绪 → **显式降级提示**（2026-09-14）：宿主不在跑时聊天走 Kotlin 直连，
+            // AI 只会回文字、不会调用任何工具。不写清楚的话，用户看到的就是「AI 不调工具」（真机踩过）。
+            val hostState by PiHost.state.collectAsState()
+            if (chatState.aiConfigured && chatState.currentProject != null && hostState !is PiHostState.Running) {
+                HostNotReadyStrip(
+                    state = hostState,
+                    onRetry = {
+                        PientRuntime.hostStarted = false   // 复位标记，强制走一次 ensureStarted
+                        PiHostService.start(context.applicationContext)
+                    },
+                )
+            }
             // 面板内容 + 覆盖其上的输入栏（2026-09-12：输入栏 dock 改为浮层，
             // 面板内容伸到屏幕底部、可从玻璃里透出 —— Operit 输入栏 align(BottomCenter) 同款）
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -794,6 +814,60 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                 )
             }
         }
+    }
+}
+
+// ─────────────────────────── pi 宿主未就绪提示条 ───────────────────────────
+
+/**
+ * 宿主没在跑时的显式降级提示（2026-09-14）。为什么必须显式：
+ * `ChatState.runChat` 在 `PiHost.state !is Running` 时会**静默退回 Kotlin 直连**（无工具），
+ * 用户视角就是「AI 只回文字、不调工具」——这条提示把「为什么」与「怎么办」摆在会话页顶部。
+ */
+@Composable
+private fun HostNotReadyStrip(state: PiHostState, onRetry: () -> Unit) {
+    val (title, detail) = when (state) {
+        is PiHostState.MissingRuntime -> "pi 运行时未部署" to state.summary
+        PiHostState.MissingModel -> "没有可用的服务商 / 模型" to
+            "去「模型配置」填好服务商与模型，宿主才有模型可跑 agent 循环"
+        PiHostState.Starting -> "pi 宿主启动中…" to "正在拉起 node 宿主（首次约数秒），完成后工具即可用"
+        else -> "pi 宿主未运行 —— 当前是直连模式" to
+            "直连模式只把消息发给模型，不会调用任何工具（read / write / edit / bash / grep / find / ls）"
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(10.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        Icon(
+            Icons.Outlined.WarningAmber, contentDescription = null,
+            tint = MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier.size(16.dp),
+        )
+        Column(Modifier.weight(1f).padding(start = 8.dp)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                detail,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        PientButton(
+            text = if (state is PiHostState.Starting) "检测中" else "重试启动",
+            onClick = onRetry,
+            primary = false,
+            height = 30,
+            modifier = Modifier.padding(start = 8.dp),
+        )
     }
 }
 

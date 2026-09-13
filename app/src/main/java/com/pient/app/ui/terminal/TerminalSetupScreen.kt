@@ -306,7 +306,20 @@ fun TerminalSetupScreen(nav: NavController) {
                                     if (picked.isEmpty()) {
                                         toast("先勾选组件")
                                     } else if (statuses[ExecEnv.UBUNTU]?.ready != true) {
-                                        toast("Ubuntu rootfs 未就绪：先「一键配置」解包")
+                                        // 不再把用户支到「一键配置」的死路上（2026-09-14 真机反馈）：
+                                        // rootfs 缺失时这里**直接开始自动解包**（Operit 口径：环境缺失自动补齐），
+                                        // 其余未就绪原因（缺组件 / 解包中）如实回显 detail。
+                                        val st = statuses[ExecEnv.UBUNTU]
+                                        if (st?.action == EnvAction.UNPACK_ROOTFS) {
+                                            PiRuntime.ensureRootfsAsync(context)
+                                            toast("rootfs 未就绪：已开始自动解包（约 30MB / 1–2 分钟），完成后回来再点「安装所选」")
+                                            scope.launch {
+                                                delay(1500)
+                                                refresh()
+                                            }
+                                        } else {
+                                            toast("Ubuntu 环境未就绪：${st?.detail ?: "先解包 rootfs"}")
+                                        }
                                     } else {
                                         EnvProvision.install(context, picked)
                                     }
