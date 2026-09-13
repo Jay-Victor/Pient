@@ -74,7 +74,8 @@ enum class ShellTier(val id: String, val title: String, val desc: String) {
     STANDARD(
         "standard",
         "标准权限（普通用户）",
-        "以应用身份（u0_aXXX）跑 /system/bin/sh：无需任何授权，shell/toybox 基础命令可用；am / pm / dumpsys 等系统命令多数会被系统拒绝（报错原样回给模型）",
+        "以应用身份（u0_aXXX）跑 /system/bin/sh：无需任何授权。实测 getprop / pm list packages 可用，dumpsys 这类被拒" +
+            "（`Can't find service: battery`），报错原样回给模型",
     ),
     ADB(
         "adb",
@@ -104,7 +105,7 @@ object AndroidShell {
             ShellTierStatus(
                 ShellTier.STANDARD,
                 true,
-                "可用（无需授权）：应用身份 u0_a229 这类；能跑 sh/toybox 基础命令，系统命令会被拒",
+                "可用（无需授权）：应用身份 u0_a229 这类；实测 getprop / pm list packages 可用，dumpsys 被拒（报错原样回传）",
             ),
             ShellTierStatus(
                 ShellTier.ADB,
