@@ -35,9 +35,49 @@ data class ProviderConfig(
      * 老配置缺该字段 → AUTO（按模型名推断，识别不出则维持「不发参数」的老行为）。
      */
     val reasoningFormat: ReasoningFormat = ReasoningFormat.AUTO,
+
+    // ── 上下文管理（2026-09-13 参考 Operit 的总结式上下文管理；默认值逐值对齐 Operit）──
+
+    /** 自动总结上下文（Operit `ModelConfigDefaults.DEFAULT_ENABLE_SUMMARY`） */
+    val summaryEnabled: Boolean = ContextPolicy.DEFAULT_ENABLE_SUMMARY,
+    /** 按用量触发总结的阈值（0~1 占比；Operit `DEFAULT_SUMMARY_TOKEN_THRESHOLD = 0.70`） */
+    val summaryTokenThreshold: String = "0.70",
+    /** 按消息条数触发总结（Operit `DEFAULT_ENABLE_SUMMARY_BY_MESSAGE_COUNT`） */
+    val summaryByMessageCount: Boolean = ContextPolicy.DEFAULT_ENABLE_SUMMARY_BY_MESSAGE_COUNT,
+    /** 自上次总结后的用户消息数阈值（Operit `DEFAULT_SUMMARY_MESSAGE_COUNT_THRESHOLD = 16`） */
+    val summaryMessageCount: String = "16",
+    /**
+     * 自定义总结规则（Operit `summaryCustomRules`）：追加到摘要 system prompt 末尾；
+     * 宿主路径下作为 pi `compact` 命令的 `customInstructions`。
+     */
+    val summaryCustomRules: String = "",
+    /** 历史中保留图片附件的最近用户回合数（Operit `DEFAULT_MAX_IMAGE_HISTORY_USER_TURNS = 2`） */
+    val maxImageHistoryTurns: String = "2",
+    /** 历史中保留音视频附件的最近用户回合数（Operit `DEFAULT_MAX_MEDIA_HISTORY_USER_TURNS = 1`） */
+    val maxMediaHistoryTurns: String = "1",
 ) {
     val models: List<String>
         get() = modelList.split(";").map { it.trim() }.filter { it.isNotEmpty() }
+
+    /** 生效的用量阈值（非法输入回退 Operit 默认 0.70） */
+    val summaryTokenThresholdValue: Float
+        get() = summaryTokenThreshold.trim().toFloatOrNull()?.coerceIn(0f, 1f)
+            ?: ContextPolicy.DEFAULT_SUMMARY_TOKEN_THRESHOLD
+
+    /** 生效的消息数阈值（非法输入回退 Operit 默认 16） */
+    val summaryMessageCountValue: Int
+        get() = summaryMessageCount.trim().toIntOrNull()?.coerceAtLeast(1)
+            ?: ContextPolicy.DEFAULT_SUMMARY_MESSAGE_COUNT_THRESHOLD
+
+    /** 生效的图片保留回合数（非法输入回退 Operit 默认 2） */
+    val maxImageHistoryTurnsValue: Int
+        get() = maxImageHistoryTurns.trim().toIntOrNull()?.coerceIn(0, 50)
+            ?: ContextPolicy.DEFAULT_MAX_IMAGE_HISTORY_TURNS
+
+    /** 生效的音视频保留回合数（非法输入回退 Operit 默认 1） */
+    val maxMediaHistoryTurnsValue: Int
+        get() = maxMediaHistoryTurns.trim().toIntOrNull()?.coerceIn(0, 50)
+            ?: ContextPolicy.DEFAULT_MAX_MEDIA_HISTORY_TURNS
 }
 
 object AiConfigStore {
@@ -130,6 +170,29 @@ object AiConfigStore {
                         // 已知服务商一律采用服务商目录里的预设写法，自定义服务商才留在 AUTO
                         ?: ProviderCatalog.byId[id]?.reasoningFormat
                         ?: ReasoningFormat.AUTO,
+                    // 上下文管理（2026-09-13）：缺字段 → Operit 默认值（老配置行为不变）
+                    summaryEnabled = o.optBoolean("summaryEnabled", ContextPolicy.DEFAULT_ENABLE_SUMMARY),
+                    summaryTokenThreshold = o.optString(
+                        "summaryTokenThreshold",
+                        "0.70",
+                    ),
+                    summaryByMessageCount = o.optBoolean(
+                        "summaryByMessageCount",
+                        ContextPolicy.DEFAULT_ENABLE_SUMMARY_BY_MESSAGE_COUNT,
+                    ),
+                    summaryMessageCount = o.optString(
+                        "summaryMessageCount",
+                        ContextPolicy.DEFAULT_SUMMARY_MESSAGE_COUNT_THRESHOLD.toString(),
+                    ),
+                    summaryCustomRules = o.optString("summaryCustomRules", ""),
+                    maxImageHistoryTurns = o.optString(
+                        "maxImageHistoryTurns",
+                        ContextPolicy.DEFAULT_MAX_IMAGE_HISTORY_TURNS.toString(),
+                    ),
+                    maxMediaHistoryTurns = o.optString(
+                        "maxMediaHistoryTurns",
+                        ContextPolicy.DEFAULT_MAX_MEDIA_HISTORY_TURNS.toString(),
+                    ),
                 )
             }
         } catch (e: Exception) {
@@ -157,7 +220,14 @@ object AiConfigStore {
                         .put("topKValue", c.topKValue)
                         .put("topPEnabled", c.topPEnabled)
                         .put("topPValue", c.topPValue)
-                        .put("reasoningFormat", c.reasoningFormat.name),
+                        .put("reasoningFormat", c.reasoningFormat.name)
+                        .put("summaryEnabled", c.summaryEnabled)
+                        .put("summaryTokenThreshold", c.summaryTokenThreshold)
+                        .put("summaryByMessageCount", c.summaryByMessageCount)
+                        .put("summaryMessageCount", c.summaryMessageCount)
+                        .put("summaryCustomRules", c.summaryCustomRules)
+                        .put("maxImageHistoryTurns", c.maxImageHistoryTurns)
+                        .put("maxMediaHistoryTurns", c.maxMediaHistoryTurns),
                 )
             }
             root.put("providers", arr)

@@ -1,6 +1,7 @@
 package com.pient.app.data
 
 import android.content.Context
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -83,6 +84,11 @@ fun estimatedMessageHeightDp(msg: Msg): Float = when (msg) {
  * get_state / get_available_models 等官方机制驱动。
  */
 class ChatState {
+
+    private companion object {
+        /** 日志 tag（上下文总结/压缩的取证日志与运行时同用 PiHost，便于 logcat 一条命令过滤） */
+        const val TAG = "PiHost"
+    }
 
     // ── 会话 ──────────────────────────────────────────────
     // 2026-09-08：移除全部 mock 项目/会话/消息——初次进入无项目（聊天页显示引导），
@@ -305,6 +311,7 @@ class ChatState {
         messagesBySession.remove(id)
         entriesBySession.remove(id)
         leafBySession.remove(id)
+        forgetPiSession(id)
         if (currentSessionId == id) currentSessionId = sessionsFor(proj).firstOrNull()?.id
         // 删除最后一个会话后自动新建（2026-09-09 用户定：侧边栏会话列表恒有会话）
         if (sessionsFor(proj).isEmpty()) newSession()
@@ -318,9 +325,19 @@ class ChatState {
         messagesBySession.remove(id)
         entriesBySession.remove(id)
         leafBySession.remove(id)
+        forgetPiSession(id)
         if (currentSessionId == id) {
             currentSessionId = sessionsFor(currentProject ?: "").firstOrNull()?.id
         }
+    }
+
+    /**
+     * 会话删除时的 pi 侧清理（2026-09-13 补缺）：映射项 + pi 会话文件（见 [PiSessions.forget]）。
+     * 走 IO 线程、失败只记日志 —— 删除动作本身不等宿主回答（UI 立即反馈）。
+     */
+    private fun forgetPiSession(id: String) {
+        val ctx = PiHost.appContextOrNull() ?: return
+        bgScope.launch { withContext(Dispatchers.IO) { PiSessions.forget(ctx, id) } }
     }
 
     /** 置顶/取消置顶会话 */
@@ -392,6 +409,7 @@ class ChatState {
             messagesBySession.remove(s.id)
             entriesBySession.remove(s.id)
             leafBySession.remove(s.id)
+            forgetPiSession(s.id)   // 项目连带的会话一并清理 pi 侧（2026-09-13）
         }
         if (currentProject == name) {
             currentProject = projects.firstOrNull()?.name
@@ -441,7 +459,9 @@ class ChatState {
         // ★ 历史快照必须先于消息上屏：buildApiHistory 读 currentMessages，
         //   上屏后再取会把本条用户消息算进历史、又被末尾显式追加一次 = 重复（2026-09-09 修复）
         val historyBefore = buildApiHistory()
-        appendEntry(Msg.User(userText, attachments.toList(), quote))
+        // 当前这条用户消息（附件随文本进请求用；attachments 列表马上会被清空，先取快照）
+        val currentMsg = Msg.User(userText, attachments.toList(), quote)
+        appendEntry(currentMsg)
         attachments.clear()
         touchSession(userText)
         markRunning(true)
@@ -473,8 +493,13 @@ class ChatState {
                     ctx, currentSessionId.orEmpty(), historyBefore, cfg.providerId, effectiveModel,
                 )
             }
+            // 宿主的自动压缩开关跟随配置页（只在值变化时下发）
+            syncAutoCompaction(cfg)
         }
-        val history = historyBefore + ("user" to (quote?.toPrompt(userText) ?: userText))
+        // 本轮用户消息的请求文本：附件以「名称 · 路径」附在正文后（本条是最新回合，媒体恒保留）；
+        // 宿主路径只发这一条文本，直连路径的整段历史同样由它拼
+        val userTurnText = ContextPolicy.promptTextFor(currentMsg, true to true)
+        val history = historyBefore + ("user" to (quote?.toPrompt(userTurnText) ?: userTurnText))
         val trimmedHistory = trimToContextBudget(history, cfg.ctxLenK)
         try {
             val outcome = runChat(
@@ -489,6 +514,10 @@ class ChatState {
             appendEntry(Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
             // 用量台账（用量页数据源）：完成即记一笔（usage 为空 = 服务商未返回用量，不记）
             UsageStore.record(cfg.providerId, effectiveModel, outcome.usage)
+            // 触发式上下文总结（2026-09-13 参考 Operit：一轮回答**结束后**判定；
+            // 命中才总结，失败静默降级、不影响本轮对话）
+            runCatching { maybeSummarize(cfg) }
+                .onFailure { Log.w(TAG, "上下文总结异常：${it.message}") }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e // abort：保留 abort() 对 draft 的处理
         } catch (e: Exception) {
@@ -567,6 +596,9 @@ class ChatState {
             replaceMessageAt(target, Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
             // 重新生成同样计入用量台账（一次真实请求 = 一笔用量）
             UsageStore.record(cfg.providerId, effectiveModel, outcome.usage)
+            // 与发送路径同口径：重新生成结束后同样做触发式总结判定
+            runCatching { maybeSummarize(cfg) }
+                .onFailure { Log.w(TAG, "上下文总结异常：${it.message}") }
             null
         } catch (e: kotlinx.coroutines.CancellationException) {
             replaceMessageAt(runInsertAt ?: index, original)   // 中止：恢复原内容
@@ -635,6 +667,8 @@ class ChatState {
             val result = AiBackend.chat(cfg, systemPrompt, history, thinking)
             val th = result.thinking.orEmpty().takeIf { thinking != null }.orEmpty()
             if (th.isNotEmpty()) onThinking(th)
+            // 直连路径同样记上下文占用（触发式总结的用量阈值要用；宿主路径由 usage 事件更新）
+            result.usage?.let { updateContextPercent(it, cfg) }
             return ChatOutcome(result.text, result.usage, th)
         }
         val sb = StringBuilder()
@@ -650,7 +684,10 @@ class ChatState {
                     th.append(ev.text)
                     onThinking(th.toString())
                 }
-                is ChatEvent.UsageEvent -> usage = ev.usage
+                is ChatEvent.UsageEvent -> {
+                    usage = ev.usage
+                    updateContextPercent(ev.usage, cfg)
+                }
                 is ChatEvent.Failed -> throw AiException(ev.message)
                 ChatEvent.Done -> Unit
             }
@@ -670,7 +707,111 @@ class ChatState {
         if (limitK <= 0) return
         val used = usage.inTokens + usage.cacheTokens + usage.cacheWriteTokens + usage.outTokens
         if (used <= 0) return
+        contextUsedTokens = used
         contextPercent = (used * 100f / (limitK * 1000f)).coerceIn(0f, 100f)
+    }
+
+    // ─────────────────── 触发式上下文总结（2026-09-13 参考 Operit） ───────────────────
+
+    /**
+     * 触发式上下文总结 —— Operit `maybeSummarizeAfterGroupRound` 同口径：
+     * **一轮回答结束后**判定（token 占比 ≥ 阈值 或 自上次总结后的用户消息数 ≥ 阈值），
+     * 下一轮请求的上下文才从新摘要起（切片规则见 [ContextPolicy.sliceFromLastCompaction]）。
+     *
+     * 执行通道分两条：
+     * - 宿主在跑 → **pi 原生** `compact` 命令（自定义总结规则进 `customInstructions`；
+     *   摘要由 pi 生成并写进 pi 会话文件，条目回执里带 tokensBefore / estimatedTokensAfter）；
+     * - 宿主不可用 → App 用当前模型按 Operit 的摘要提示词自己生成摘要（Operit 的原路径）。
+     *
+     * 失败一律静默降级（摘要失败不该影响正常对话）；命中与结果都打日志便于取证。
+     */
+    private suspend fun maybeSummarize(cfg: ProviderConfig) {
+        val limitK = cfg.ctxLenK.trim().toIntOrNull()?.times(1000) ?: 0
+        val trigger = ContextPolicy.shouldSummarize(
+            currentMessages, contextUsedTokens, limitK, cfg,
+        ) ?: return
+        Log.i(TAG, "上下文总结触发：$trigger（used=$contextUsedTokens / limit=$limitK）")
+
+        if (PiHost.state.value is PiHostState.Running) {
+            val data = PiChat.compact(cfg.summaryCustomRules) ?: run {
+                Log.w(TAG, "宿主 compact 失败（超时/被取消），本轮不总结")
+                return
+            }
+            appendCompactionEntry(
+                summary = data.optString("summary"),
+                tokensBefore = data.optInt("tokensBefore", contextUsedTokens),
+                estimatedAfter = data.optInt("estimatedTokensAfter", 0),
+            )
+            return
+        }
+
+        // 直连路径：按 Operit 的摘要请求形态自己生成（system = 摘要提示词 + 自定义规则；
+        // 历史 = 距今的切片（含上一条摘要）；最后一条 user = 「请按照要求总结对话内容」）
+        val slice = ContextPolicy.sliceFromLastCompaction(currentMessages)
+        val previous = (slice.firstOrNull() as? Msg.Compaction)?.summary
+        val windows = ContextPolicy.attachmentWindows(
+            slice, cfg.maxImageHistoryTurnsValue, cfg.maxMediaHistoryTurnsValue,
+        )
+        val turns = mutableListOf<Pair<String, String>>()
+        slice.forEachIndexed { i, m ->
+            when (m) {
+                is Msg.User -> turns += "user" to ContextPolicy.promptTextFor(m, windows[i])
+                is Msg.Assistant -> if (!m.error) turns += "assistant" to m.markdown
+                is Msg.Compaction -> turns += "user" to m.summary
+                else -> Unit
+            }
+        }
+        turns += "user" to ContextPolicy.SUMMARY_USER_MESSAGE
+        val before = ContextPolicy.estimateTokens(turns)
+        val raw = runCatching {
+            AiBackend.chat(
+                cfg,
+                ContextPolicy.buildSummarySystemPrompt(previous, cfg.summaryCustomRules),
+                turns,
+                null,
+            ).text
+        }.getOrElse {
+            Log.w(TAG, "摘要生成失败：${it.message}")
+            return
+        }
+        if (raw.isBlank()) return
+        appendCompactionEntry(
+            summary = ContextPolicy.formatSummary(raw),
+            tokensBefore = before,
+            estimatedAfter = ContextPolicy.estimateTokens(raw),
+        )
+    }
+
+    /**
+     * 压缩条目落库（宿主 RPC 回执与 `compaction_end` 事件是同一次压缩的两个信号 →
+     * 按「摘要文本 + tokensBefore」去重，避免重复落卡）。
+     */
+    private fun appendCompactionEntry(summary: String, tokensBefore: Int, estimatedAfter: Int) {
+        if (summary.isBlank()) return
+        val last = currentMessages.lastOrNull()
+        if (last is Msg.Compaction && last.tokensBefore == tokensBefore && last.summary == summary) return
+        appendEntry(
+            Msg.Compaction(
+                tokensBefore = tokensBefore,
+                saved = (tokensBefore - estimatedAfter).coerceAtLeast(0),
+                summary = summary,
+            )
+        )
+        Log.i(TAG, "上下文已压缩：前 $tokensBefore → 估 ${estimatedAfter}（摘要 ${summary.length} 字）")
+    }
+
+    /**
+     * 宿主的自动压缩开关跟随配置页（Operit 的 `enableSummary` 语义 = 彻底不自动总结）；
+     * 只在值变化时下发一次 RPC，不打扰宿主。
+     */
+    private suspend fun syncAutoCompaction(cfg: ProviderConfig) {
+        if (lastAutoCompactionSent == cfg.summaryEnabled) return
+        if (PiChat.setAutoCompaction(cfg.summaryEnabled)) {
+            lastAutoCompactionSent = cfg.summaryEnabled
+            Log.i(TAG, "宿主自动压缩开关已下发：enabled=${cfg.summaryEnabled}")
+        } else {
+            Log.w(TAG, "宿主自动压缩开关下发失败：enabled=${cfg.summaryEnabled}")
+        }
     }
 
     /**
@@ -727,6 +868,19 @@ class ChatState {
                     )
                 }
                 appendEntry(Msg.ToolResult(ev.name, ev.output.take(200), ev.output))
+            }
+
+            // ── 宿主压缩（2026-09-13）──
+            // 宿主自己触发的压缩（阈值/溢出）与 RPC compact 的事件侧信号都走这里；
+            // 与 RPC 回执按「摘要 + tokensBefore」去重（见 appendCompactionEntry）
+            is PiAgentEvent.CompactionStart -> Log.i(TAG, "宿主压缩开始：${ev.reason}")
+
+            is PiAgentEvent.CompactionEnd -> {
+                ev.errorMessage?.let { Log.w(TAG, "宿主压缩失败：$it") }
+                if (ev.aborted) Log.w(TAG, "宿主压缩被中止：${ev.reason}")
+                if (ev.summary != null) {
+                    appendCompactionEntry(ev.summary, ev.tokensBefore, ev.estimatedAfter)
+                }
             }
             else -> Unit
         }
@@ -829,25 +983,49 @@ class ChatState {
         if (i >= 0) entries[i] = entries[i].copy(msg = msg)
     }
 
-    /** API 上下文重建：仅 User/Assistant 且跳过 error 消息（上限 40 条防过长） */
+    /**
+     * API 上下文重建（2026-09-13：**参考 Operit 的上下文管线**重做）。
+     *
+     * ① **切片**：从最后一条压缩摘要（含）起 —— Operit `getMemoryFromMessages` 同款；
+     *    取代原先的 `takeLast(40)`（Operit 没有条数上限，长度由「总结」控制，见 ContextPolicy）；
+     * ② **附件进请求**：附件以「名称 · 路径」文本随该条用户消息发出（pi 的 read 工具据此打开文件），
+     *    历史回合里的图片/音视频按「保留最近 N 个用户回合」裁剪、更早的写占位文案
+     *    —— Operit `limitImageLinksInChatHistory` / `limitMediaLinksInChatHistory` 同款；
+     * ③ 压缩摘要本身以一条 user 消息进请求（Operit 把 summary 作为 USER 角色发送）；
+     * ④ 思考 / 工具 / 结果条目不进上下文（沿用原口径）。
+     */
     private fun buildApiHistory(): List<Pair<String, String>> = apiHistoryOf(currentMessages)
 
     private fun apiHistoryOf(msgs: List<Msg>): List<Pair<String, String>> {
+        val cfg = selectedModel?.provider?.let { AiConfigStore.configs[it] }
+        val slice = ContextPolicy.sliceFromLastCompaction(msgs)
+        val windows = ContextPolicy.attachmentWindows(
+            slice,
+            cfg?.maxImageHistoryTurnsValue ?: ContextPolicy.DEFAULT_MAX_IMAGE_HISTORY_TURNS,
+            cfg?.maxMediaHistoryTurnsValue ?: ContextPolicy.DEFAULT_MAX_MEDIA_HISTORY_TURNS,
+        )
         val out = mutableListOf<Pair<String, String>>()
-        msgs.forEach { m ->
+        slice.forEachIndexed { i, m ->
             when (m) {
-                is Msg.User -> out += "user" to (m.quote?.toPrompt(m.text) ?: m.text)
+                is Msg.User -> {
+                    val text = ContextPolicy.promptTextFor(m, windows[i])
+                    out += "user" to (m.quote?.toPrompt(text) ?: text)
+                }
                 is Msg.Assistant -> if (!m.error) out += "assistant" to m.markdown
-                else -> Unit // 思考/工具/结果/压缩不参与基本对话上下文
+                is Msg.Compaction -> out += "user" to m.summary
+                else -> Unit // 思考/工具/结果不参与对话上下文
             }
         }
-        return out.takeLast(40)
+        return out
     }
 
     /**
      * 上下文长度预算裁剪（配置页「上下文长度」K Tokens 生效）：
      * 粗略估算 token ≈ 字符数/2（中英混排折中），超预算丢最旧条目；
      * 但永远保留最新一条用户消息（本轮提问不可丢）。
+     *
+     * 2026-09-13：这条退化为**兜底**（触发总结失败/宿主不可用时仍不发超长请求）——
+     * Operit 的常规路径是「先总结、再发送」（见 [maybeSummarize]），没有这种硬裁剪。
      */
     private fun trimToContextBudget(
         history: List<Pair<String, String>>,
@@ -1044,8 +1222,17 @@ class ChatState {
     // ── 输入栏：上下文指示器（数据源 = get_state 同源口径） ──
     var contextPercent by mutableStateOf(0f)
 
+    /**
+     * 最近一次请求的实际上下文占用（token；输入+缓存读写+输出 —— Operit 的
+     * `getLastCurrentWindowSize` 等价物）：触发式总结的用量阈值判定用它。
+     */
+    var contextUsedTokens by mutableStateOf(0)
+
     /** 宿主路径下思考条目是否已在工具条目之前落库（避免回答落地时重复落一份） */
     private var hostThinkingFlushed = false
+
+    /** 已下发给宿主的自动压缩开关值（null = 尚未下发过；只在变化时发 RPC） */
+    private var lastAutoCompactionSent: Boolean? = null
 
     /**
      * 本轮运行条目的插入游标（null = 追加到 leaf，发送路径语义）。

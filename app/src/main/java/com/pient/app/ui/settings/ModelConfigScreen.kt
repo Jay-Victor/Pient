@@ -89,6 +89,7 @@ import com.pient.app.ui.components.DividerLine
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.components.PientDialog
 import com.pient.app.ui.components.PientInputBox
+import com.pient.app.ui.components.PientTextArea
 import com.pient.app.ui.components.SectionHeader
 import com.pient.app.ui.theme.LocalPientIsDark
 import com.pient.app.ui.theme.MonoFont
@@ -430,6 +431,97 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 },
                                 placeholder = "64",
                             )
+                            DividerLine()
+                            // ── 3.3~3.6 上下文管理（2026-09-13 参考 Operit 的总结式上下文管理）──
+                            // 触发判定与默认值逐值对齐 Operit（见 data/ContextPolicy.kt）；
+                            // 执行走 pi 原生 compact（宿主在跑）/ App 侧摘要（直连路径）。
+                            ParamBlock(
+                                label = "自动总结上下文",
+                                hint = "对话变长时自动生成摘要，之后的对话从摘要继续（关闭 = 不自动总结）",
+                                enabled = cfg.summaryEnabled,
+                                onToggle = { updateConfig { it.copy(summaryEnabled = !it.summaryEnabled) } },
+                            )
+                            if (cfg.summaryEnabled) {
+                                ConfigFieldLabel("按用量触发")
+                                FieldHint("上下文占用达到该比例时生成摘要（Operit 默认 0.70）")
+                                ContextNumberField(
+                                    value = cfg.summaryTokenThreshold,
+                                    onValueChange = { v ->
+                                        updateConfig {
+                                            it.copy(
+                                                summaryTokenThreshold = v.filter { c ->
+                                                    c.isDigit() || c == '.'
+                                                }.take(4),
+                                            )
+                                        }
+                                    },
+                                    placeholder = "0.70",
+                                    suffix = "占比",
+                                    decimal = true,
+                                )
+                                ConfigFieldLabel("按消息条数触发")
+                                FieldHint("自上次总结后的用户消息数达到该值时生成摘要（Operit 默认 16）")
+                                ContextNumberField(
+                                    value = cfg.summaryMessageCount,
+                                    onValueChange = { v ->
+                                        updateConfig {
+                                            it.copy(
+                                                summaryMessageCount = v.filter { c -> c.isDigit() }.take(3),
+                                            )
+                                        }
+                                    },
+                                    placeholder = "16",
+                                    suffix = "条",
+                                )
+                                ConfigFieldLabel("自定义总结规则")
+                                FieldHint("追加到摘要提示词末尾；宿主路径下作为 pi compact 的 customInstructions")
+                                PientTextArea(
+                                    value = cfg.summaryCustomRules,
+                                    onValueChange = { v -> updateConfig { it.copy(summaryCustomRules = v) } },
+                                    placeholder = "例如：重点保留文件路径与命令；忽略寒暄",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+                                )
+                                ConfigFieldLabel("历史媒体保留")
+                                FieldHint("更早回合的图片/音视频在请求里替换为「已省略」（Operit 默认 2 / 1）")
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+                                ) {
+                                    PientInputBox(
+                                        value = cfg.maxImageHistoryTurns,
+                                        onValueChange = { v ->
+                                            updateConfig {
+                                                it.copy(
+                                                    maxImageHistoryTurns = v.filter { c -> c.isDigit() }.take(2),
+                                                )
+                                            }
+                                        },
+                                        placeholder = "2",
+                                        number = true,
+                                        suffix = "图片 · 回合",
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    PientInputBox(
+                                        value = cfg.maxMediaHistoryTurns,
+                                        onValueChange = { v ->
+                                            updateConfig {
+                                                it.copy(
+                                                    maxMediaHistoryTurns = v.filter { c -> c.isDigit() }.take(2),
+                                                )
+                                            }
+                                        },
+                                        placeholder = "1",
+                                        number = true,
+                                        suffix = "音视频 · 回合",
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -764,7 +856,11 @@ private fun ActionChipButton(
     }
 }
 
-/** 参数区块头：左列标签+辅助说明，右侧开关（M3 默认尺寸，勿 size 压缩） */
+/**
+ * 参数区块头：左列标签+辅助说明，右侧开关（M3 默认尺寸，勿 size 压缩）
+ *
+ * 2026-09-13：同一视觉被上下文设置的「自动总结上下文」等区块复用 —— 不再另写一份开关行。
+ */
 @Composable
 private fun ParamBlock(
     label: String,
@@ -1087,8 +1183,33 @@ private fun TokenInputField(
     )
 }
 
-// ───────────────────────────── ④ 模型参数设置 ─────────────────────────────
+/**
+ * 上下文管理数值行（2026-09-13 新增）：比例阈值 / 条数阈值共用一行式输入框。
+ *
+ * `decimal = true` 时用文本键盘：`KeyboardType.Number` 在部分输入法上没有小数点键，
+ * 而「0.70」这类占比必须要小数点（条数阈值仍走数字键盘）。
+ */
+@Composable
+private fun ContextNumberField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    suffix: String,
+    decimal: Boolean = false,
+) {
+    PientInputBox(
+        value = value,
+        onValueChange = onValueChange,
+        placeholder = placeholder,
+        number = !decimal,
+        suffix = suffix,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+    )
+}
 
+// ───────────────────────────── ④ 模型参数设置 ─────────────────────────────
 // ───────────────────────────── 弹窗 ─────────────────────────────
 
 /**

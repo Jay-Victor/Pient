@@ -35,6 +35,25 @@ sealed class PiAgentEvent {
     data class UsageEvent(val usage: Usage) : PiAgentEvent()
 
     /**
+     * 压缩开始（pi `compaction_start`，2026-09-13 接：之前宿主压缩过程对 App 完全不可见）。
+     * reason = manual / threshold / overflow（见 pi packages/coding-agent/docs/rpc.md）。
+     */
+    data class CompactionStart(val reason: String) : PiAgentEvent()
+
+    /**
+     * 压缩完成（pi `compaction_end`）：`result` 里是摘要与前后 token 估值；
+     * aborted/errorMessage 分别对应「被中止」与「摘要失败（如配额）」两种失败态。
+     */
+    data class CompactionEnd(
+        val reason: String,
+        val summary: String?,
+        val tokensBefore: Int,
+        val estimatedAfter: Int,
+        val aborted: Boolean,
+        val errorMessage: String?,
+    ) : PiAgentEvent()
+
+    /**
      * 扩展的 UI 请求（`extension_ui_request`）：权限守门扩展的授权询问即走这里。
      * 载荷在 title：`PientGate|<工具名>|<参数 JSON>|<高危 0|1>`（见 assets/pient-gate.ts）。
      */
@@ -126,6 +145,24 @@ object PiChat {
                         )
                     }
 
+                    // 压缩事件（2026-09-13）：宿主自己触发的压缩（阈值/溢出）也走这里，
+                    // 跟 RPC compact 的结果同一条落库路径（见 ChatState.handleToolEvent 去重）
+                    "compaction_start" -> onEvent(PiAgentEvent.CompactionStart(ev.optString("reason")))
+
+                    "compaction_end" -> {
+                        val result = ev.optJSONObject("result")
+                        onEvent(
+                            PiAgentEvent.CompactionEnd(
+                                reason = ev.optString("reason"),
+                                summary = result?.optString("summary")?.takeIf { it.isNotBlank() },
+                                tokensBefore = result?.optInt("tokensBefore", 0) ?: 0,
+                                estimatedAfter = result?.optInt("estimatedTokensAfter", 0) ?: 0,
+                                aborted = ev.optBoolean("aborted", false),
+                                errorMessage = ev.optString("errorMessage").takeIf { it.isNotBlank() },
+                            )
+                        )
+                    }
+
                     "extension_ui_request" -> {
                         val title = ev.optString("title")
                         val head = title.split('|')
@@ -171,6 +208,33 @@ object PiChat {
         val result = text.toString()
         onEvent(PiAgentEvent.Done(result))
         result
+    }
+
+    // ───────────────────── 上下文压缩（2026-09-13：pi 原生 compact） ─────────────────────
+
+    /**
+     * 让宿主压缩上下文（pi 官方 RPC `compact`；`customInstructions` = 配置页的「自定义总结规则」）。
+     *
+     * 这是 Pient 侧「总结式上下文管理」的**执行通道**（触发判定在 [com.pient.app.data.ContextPolicy]，
+     * 对齐 Operit；执行走 pi 原生机制，不自己造摘要协议）。摘要由 pi 生成、条目写进 pi 会话文件，
+     * 返回的 data 里有 summary / tokensBefore / estimatedTokensAfter / usage。
+     *
+     * @return data 对象；失败（含超时、被钩子取消）返回 null
+     */
+    suspend fun compact(customInstructions: String? = null, timeoutMs: Long = 300_000): JSONObject? {
+        val payload = JSONObject()
+        if (!customInstructions.isNullOrBlank()) payload.put("customInstructions", customInstructions)
+        val resp = PiHost.request("compact", payload, timeoutMs) ?: return null
+        return if (resp.optBoolean("success") == true) resp.optJSONObject("data") else null
+    }
+
+    /**
+     * 开关宿主的自动压缩（pi 官方 RPC `set_auto_compaction`）：配置页「自动总结上下文」关掉时，
+     * 宿主的阈值压缩也一并关掉 —— 与 Operit 的 `enableSummary = false`（彻底不自动总结）同语义。
+     */
+    suspend fun setAutoCompaction(enabled: Boolean): Boolean {
+        val resp = PiHost.request("set_auto_compaction", JSONObject().put("enabled", enabled)) ?: return false
+        return resp.optBoolean("success") == true
     }
 
     /**

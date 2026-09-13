@@ -89,6 +89,9 @@ import com.pient.app.data.DocxConverter
 import com.pient.app.data.FileNode
 import com.pient.app.data.HTML_EXTS
 import com.pient.app.data.MARKDOWN_EXTS
+import com.pient.app.data.MEDIA_AUDIO_EXTS
+import com.pient.app.data.MEDIA_IMAGE_EXTS
+import com.pient.app.data.MEDIA_VIDEO_EXTS
 import com.pient.app.data.ProjectFiles
 import com.pient.app.data.SettingsStore
 import com.pient.app.ui.components.MarkdownText
@@ -567,14 +570,17 @@ private fun doubleTapOffset(tapOffset: Offset, viewportSize: IntSize, scale: Flo
 private val CodeFontSize = 12.sp
 private val CodeLineHeight = 20.sp
 
+// 媒体扩展名的**定义**已上移到 data/FileKinds.kt（上下文裁剪层要共用同一份判定）：
+// 这里保留 PREVIEW_* 名字给本页与 FilesPanel / MentionFileCard 的既有调用点，值来自单一出处。
+
 /** 真实解码预览的图片扩展名（Operit workspaceMimeTypeForPath 的 image 分支口径） */
-internal val PREVIEW_IMAGE_EXTS = setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "heic", "heif")
+internal val PREVIEW_IMAGE_EXTS = MEDIA_IMAGE_EXTS
 
 /** 视频扩展名（Operit workspaceMimeTypeForPath 的 video 分支） */
-internal val PREVIEW_VIDEO_EXTS = setOf("webm", "mp4", "m4v", "mov", "mkv", "avi", "3gp")
+internal val PREVIEW_VIDEO_EXTS = MEDIA_VIDEO_EXTS
 
 /** 音频扩展名（Operit workspaceMimeTypeForPath 的 audio 分支） */
-internal val PREVIEW_AUDIO_EXTS = setOf("mp3", "wav", "m4a", "aac", "ogg", "opus", "flac")
+internal val PREVIEW_AUDIO_EXTS = MEDIA_AUDIO_EXTS
 
 /** 无行号的纯文本（用户 2026-09-10 定：txt 侧边不加行号） */
 private val PLAIN_TEXT_EXTS = setOf("txt", "text")

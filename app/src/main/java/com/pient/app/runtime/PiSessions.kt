@@ -209,4 +209,41 @@ object PiSessions {
         Log.i(TAG, "会话映射建立：Pient=$key → pi=$piId")
         return piId
     }
+
+    // ───────────────────── 会话删除时的 pi 侧清理（2026-09-13） ─────────────────────
+
+    /**
+     * 删除 Pient 会话时清理 pi 侧：**映射项 + 会话文件**。
+     *
+     * 背景（原缺口）：`ChatState.deleteSession` 只清 App 侧记录，映射表与
+     * `~/.pi/agent/sessions/<…>.jsonl` 会留成孤儿 —— 用户在 App 里删了会话，
+     * 磁盘上却还躺着一份 pi 会话（体积与隐私都不该留）。从 App 文件树看不到，
+     * 只能靠 `run-as` 才发现。
+     *
+     * 安全性：只有当该 pi 会话**不是宿主当前活跃会话**（或宿主压根没在跑）时才删文件。
+     * 若删的正是活跃会话，先 `new_session` 把宿主换开再删 —— Node 已打开的文件被 unlink 后，
+     * 后续写入会落到不可见的 inode（磁盘上留幽灵占用），先换开更干净。
+     *
+     * 全流程只记日志、不抛：删会话是用户操作，不能因宿主状态卡住（清理失败也只是留下孤儿文件）。
+     */
+    suspend fun forget(context: Context, pientSessionId: String) {
+        val key = pientSessionId.ifBlank { "unsaved" }
+        val map = load(context)
+        val piId = map.optString(key).takeIf { it.isNotBlank() } ?: return
+
+        val hostRunning = PiHost.state.value is PiHostState.Running
+        val active = if (hostRunning) PiHost.lastState.value?.optString("sessionId").orEmpty() else ""
+        var safeToDelete = !hostRunning || piId != active
+        if (!safeToDelete) {
+            val resp = PiHost.request("new_session")
+            safeToDelete = resp?.optBoolean("success") == true
+            if (safeToDelete) PiHost.refresh()   // 宿主换开会话：刷新状态，让 lastState 与新会话对齐
+        }
+
+        val file = sessionFile(context, piId)
+        val deleted = if (safeToDelete) file?.delete() == true else false
+        map.remove(key)
+        save(context, map)
+        Log.i(TAG, "会话清理：Pient=$key → pi=$piId（换开=$safeToDelete，删文件=$deleted）")
+    }
 }
