@@ -193,6 +193,10 @@ object PiRuntime {
             }
         }.onFailure { Log.w(TAG, "执行环境写入失败：${it.message}") }
         ensureRootfsAsync(context)   // 环境按需自补：Operit 口径，无需用户手动点解包（见函数注释）
+        // 宿主回桥尽早起来：系统命令通道（android_shell）与 SAF 文件桥都挂在它上面，
+        // 早于 pi 宿主启动也没关系（幂等）；此前只在宿主 spawn 时才初次创建端点。
+        runCatching { PiExecServer.ensureStarted(context) }
+            .onFailure { Log.w(TAG, "宿主回桥启动失败：${it.message}") }
     }
 
     /** 解包进度/原因的公开快照（页面与终端页都要显示「正在解包 …%」） */
@@ -287,6 +291,10 @@ object PiRuntime {
             return false
         }
         val tar = File(tmpDir(context), "pient-rootfs.tgz")
+        // **全新安装必踩**：tmp 目录此前只由 PiRpcClient（宿主启动时）创建 —— 首启自动解包跑在宿主之前，
+        // 归档拷贝直接 `open failed: ENOENT (No such file or directory)`（模拟器快照回退后实测复现）。
+        // 解包自己保证 tmp 存在，别依赖别的组件。
+        tar.parentFile?.mkdirs()
         try {
             onProgress(0.02f, "释放归档…")
             context.assets.open(ROOTFS_ARCHIVE_ASSET).use { input ->
