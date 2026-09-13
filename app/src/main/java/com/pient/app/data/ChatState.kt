@@ -849,7 +849,9 @@ class ChatState {
         when (ev) {
             is PiAgentEvent.ToolStart -> {
                 flushStreamingThinking()
-                appendEntry(Msg.ToolCall(ev.name, ev.args, ToolStatus.RUNNING))
+                appendEntry(
+                    Msg.ToolCall(ev.name, ev.args, ToolStatus.RUNNING, startedAtMs = System.currentTimeMillis()),
+                )
             }
             is PiAgentEvent.UiRequest -> pendingPermission =
                 PendingPermission(ev.id, ev.toolName, ev.argsSummary, ev.dangerous)
@@ -859,11 +861,14 @@ class ChatState {
                 val idx = list.indexOfLast { it is Msg.ToolCall && it.status == ToolStatus.RUNNING }
                 if (idx >= 0) {
                     val call = list[idx] as Msg.ToolCall
+                    // 耗时（Hermes 工具行 meta 的 1.2s 口径）：ToolStart 起点 → 现在
+                    val elapsed = call.startedAtMs?.let { maxOf(0L, System.currentTimeMillis() - it) }
                     replaceMessageAt(
                         idx,
                         call.copy(
                             status = if (ev.isError) ToolStatus.FAILED else ToolStatus.DONE,
                             detail = ev.output.take(400),
+                            durationMs = elapsed,
                         ),
                     )
                 }

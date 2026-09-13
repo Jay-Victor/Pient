@@ -265,6 +265,12 @@ fun ChatMessages(
         }
     }
 
+    // 渲染项（2026-09-14 Hermes 对齐的工具行）：连续 ≥2 个「活动型」工具调用折成一行摘要，
+    // 文件编辑（write/edit）作为交付物单列；成对工具结果并入工具行、不再单渲染。
+    val renderItems = remember(messages, startIndex, isStreaming) {
+        buildChatRenderItems(messages, startIndex, isStreaming)
+    }
+
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
@@ -321,11 +327,20 @@ fun ChatMessages(
                     }
                 }
             }
-            items(messages.size - startIndex, key = { startIndex + it }) { i ->
-                val idx = startIndex + i
+            items(renderItems.size, key = { renderItems[it].key }) { i ->
+                val item = renderItems[i]
+                // 工具运行：一行灰色摘要（运行中 shimmer + 单行 ticker；点开铺开各行）
+                if (item is ChatRender.Run) {
+                    ToolRunGroup(
+                        calls = item.indices.map { messages[it] as Msg.ToolCall },
+                        results = item.indices.map { idx -> messages.getOrNull(idx + 1) as? Msg.ToolResult },
+                        live = item.live,
+                        onPermissionDemo = { call -> manualPolicyAsk = call.name to call.params },
+                    )
+                    return@items
+                }
+                val idx = item.key
                 val msg = messages[idx]
-                // 成对工具结果（ToolCall 紧跟 ToolResult）已并入工具卡渲染，此处跳过
-                if (msg is Msg.ToolResult && idx > 0 && messages[idx - 1] is Msg.ToolCall) return@items
                 // 思考块并入 AI 回答块（其后存在助手回答、且两者之间没隔着会渲染的条目时才跳过独立渲染，
                 // 由助手卡内折叠行承载）；与回答之间隔着工具卡时在自己的位置就地成块——视觉顺序对齐 pi：
                 // 思考 → 工具 → 回答（流式时思考本就先于工具卡出现，落库后不该改序）
@@ -805,8 +820,12 @@ private fun MessageCard(
         is Msg.User -> UserBubble(msg)
         is Msg.Assistant -> AssistantCard(msg, thinking, thinkingExpandedDefault)
         is Msg.Thinking -> ThinkingCard(msg, thinkingExpandedDefault, boxed = !standaloneThinking)
-        is Msg.ToolCall -> ToolCallCard(msg, toolResult, onRequestPermission)
-        is Msg.ToolResult -> ToolResultCard(msg)   // 仅未成对的结果走独立卡
+        is Msg.ToolCall -> ToolRow(msg, toolResult, onPermissionDemo = onRequestPermission)
+        // 未成对的结果（理论上不该出现）：合成一行同款工具行，不再另设结果卡
+        is Msg.ToolResult -> ToolRow(
+            call = Msg.ToolCall(msg.toolName, "", ToolStatus.DONE, detail = msg.full ?: msg.preview),
+            result = msg,
+        )
         is Msg.Compaction -> CompactionCard(msg)
     }
 }
@@ -1442,223 +1461,6 @@ private fun userTextStyle(): TextStyle {
     )
 }
 
-// ───────────────────────────── 工具调用 ─────────────────────────────
-
-/**
- * 工具调用卡（2026-09-08 对齐 pi-web ToolCallBlock）：
- * - 成功绿 / 失败红语义：边框 25%/45%、底 4%/5%（pi-web rgba(34,197,94,…)/rgba(248,113,113,…)）
- *   映射到 Pient GitHub 绿 #3FB950/#1A7F37 与 error 令牌；RUNNING 中性；
- * - 7dp 圆角（pi-web 7）、头部内边距 6×10、工具名 mono 11sp 600、参数 mono 11sp、间距 7dp；
- * - 展开详情 12sp/18sp（pi-web pre 12px/1.5）。
- * 多级折叠（2026-09-08 用户定：最终回答之外全部可折叠）：
- * 一级 = 工具卡头部；二级 = 卡内嵌的成对结果区（默认收起 4 行预览，可再展开全量）。
- * 保留 Pient 特有：RUNNING/完成/失败状态图标与权限演示入口。
- */
-@Composable
-private fun ToolCallCard(
-    msg: Msg.ToolCall,
-    result: Msg.ToolResult?,
-    onRequestPermission: () -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    var resultExpanded by remember { mutableStateOf(false) }
-    val isDark = LocalPientIsDark.current
-    val toolGreen = if (isDark) Color(0xFF3FB950) else Color(0xFF1A7F37)
-    val (borderColor, bgColor, nameColor) = when (msg.status) {
-        ToolStatus.DONE -> Triple(
-            toolGreen.copy(alpha = 0.25f),
-            toolGreen.copy(alpha = 0.04f),
-            toolGreen,
-        )
-        ToolStatus.FAILED -> Triple(
-            MaterialTheme.colorScheme.error.copy(alpha = 0.45f),
-            MaterialTheme.colorScheme.error.copy(alpha = 0.05f),
-            MaterialTheme.colorScheme.error,
-        )
-        ToolStatus.RUNNING -> Triple(
-            MaterialTheme.colorScheme.outlineVariant,
-            MaterialTheme.colorScheme.surfaceContainerLow,
-            MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(bgColor, RoundedCornerShape(7.dp))
-            .border(1.dp, borderColor, RoundedCornerShape(7.dp)),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = { expanded = !expanded })
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-        ) {
-            Icon(
-                Icons.Outlined.Build, null,
-                tint = nameColor,
-                modifier = Modifier.size(14.dp),
-            )
-            Text(
-                msg.name,
-                style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
-                fontFamily = MonoFont,
-                fontWeight = FontWeight.SemiBold,
-                color = nameColor,
-                modifier = Modifier.padding(start = 6.dp),
-            )
-            Text(
-                msg.params,
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                fontFamily = MonoFont,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).padding(start = 7.dp),
-            )
-            when (msg.status) {
-                ToolStatus.RUNNING -> CircularProgressIndicator(
-                    modifier = Modifier.size(14.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                ToolStatus.DONE -> Icon(
-                    Icons.Outlined.Check, null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp),
-                )
-                ToolStatus.FAILED -> Icon(
-                    Icons.Outlined.Close, null,
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-        }
-        // 展开态（2026-09-08：任何工具调用都可展开——无 detail 时展示完整参数）
-        if (expanded) {
-            Column(
-                modifier = Modifier
-                    .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
-            ) {
-                Text(
-                    msg.detail ?: msg.params,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = MonoFont,
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp,
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (msg.detail != null) {
-                    Text(
-                        "演示：权限请求弹窗 →",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier
-                            .padding(top = 8.dp)
-                            .clickable(onClick = onRequestPermission),
-                    )
-                }
-            }
-        }
-        // 二级折叠：成对结果嵌在工具卡内（默认收起 4 行预览；仅在工具卡展开时可见）
-        if (expanded && result != null) {
-            val shown = if (resultExpanded) result.full ?: result.preview
-            else result.preview.lines().take(4).joinToString("\n")
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.55f))
-                    .border(
-                        BorderStroke(1.dp, borderColor.copy(alpha = 0.5f)),
-                        RoundedCornerShape(bottomStart = 7.dp, bottomEnd = 7.dp),
-                    ),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = { resultExpanded = !resultExpanded })
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                ) {
-                    Text(
-                        "↳ 结果",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Icon(
-                        if (resultExpanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                        null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Text(
-                        if (resultExpanded) "收起" else "展开",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-                Text(
-                    shown,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = MonoFont,
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp,
-                    ),
-                    modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
-                )
-            }
-        }
-    }
-}
-
-// ───────────────────────────── 工具结果 ─────────────────────────────
-
-@Composable
-private fun ToolResultCard(msg: Msg.ToolResult) {
-    var expanded by remember { mutableStateOf(false) }
-    val shown = if (expanded) msg.full ?: msg.preview else msg.preview.lines().take(4).joinToString("\n")
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.55f), RoundedCornerShape(7.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(7.dp))
-            .padding(12.dp),
-    ) {
-        // 整行可点切换展开/收起（2026-09-08：任何结果都可折叠；无 full 时展开显示完整预览）
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = { expanded = !expanded }),
-        ) {
-            Text(
-                "↳ 结果",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.weight(1f))
-            Icon(
-                if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp),
-            )
-            Text(
-                if (expanded) "收起" else "展开",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-        Text(
-            shown,
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFont, fontSize = 12.sp, lineHeight = 18.sp),
-            modifier = Modifier.padding(top = 6.dp),
-        )
-    }
-}
-
 // ───────────────────────────── 压缩条目 ─────────────────────────────
 
 @Composable
@@ -1718,6 +1520,65 @@ private fun CompactionCard(msg: Msg.Compaction) {
 // 聊天流内不再出现分支卡片。
 
 // ───────────────────────────── 流式输出卡 ─────────────────────────────
+
+// ───────────────────────────── 渲染项（Hermes 工具运行分组） ─────────────────────────────
+
+/** 渲染项：单条消息，或一次「工具运行」（≥2 个连续活动型工具调用折成一行摘要）。 */
+private sealed interface ChatRender {
+    /** 列表 key（同批消息里唯一、滚动时稳定）= 该组第一条消息的下标 */
+    val key: Int
+
+    data class One(override val key: Int) : ChatRender
+    data class Run(override val key: Int, val indices: List<Int>, val live: Boolean) : ChatRender
+}
+
+/**
+ * 把消息切成渲染项（Hermes `ToolGroupSlot` + `splitRunItems` 的口径）：
+ * - 成对工具结果（ToolCall 紧跟 ToolResult）并入工具行，不单列；
+ * - 「活动型」工具调用（read/grep/find/ls/bash/其他）连续 ≥2 个 → 一次 Run（一行摘要）；
+ * - 文件编辑/写入（[isCardTool]）是交付物，打断 run、各自成行（Hermes 同款切分）；
+ * - 运行中的判定 = 正在流式 **且该 run 一直延伸到列表末尾**（Hermes 的尾部约束：
+ *   回合结束或后面又来了别的条目 → 视为已结束、可折叠）。
+ */
+private fun buildChatRenderItems(
+    messages: List<Msg>,
+    startIndex: Int,
+    isStreaming: Boolean,
+): List<ChatRender> {
+    val out = ArrayList<ChatRender>()
+    var i = startIndex
+    while (i < messages.size) {
+        val msg = messages[i]
+        // 成对结果：已并进前一条工具行
+        if (msg is Msg.ToolResult && i > 0 && messages[i - 1] is Msg.ToolCall) {
+            i++
+            continue
+        }
+        if (msg is Msg.ToolCall && isActivityTool(msg.name)) {
+            val indices = ArrayList<Int>()
+            var j = i
+            while (j < messages.size) {
+                val m = messages[j]
+                if (m is Msg.ToolCall && isActivityTool(m.name)) {
+                    indices.add(j)
+                    j += if (messages.getOrNull(j + 1) is Msg.ToolResult) 2 else 1
+                } else {
+                    break
+                }
+            }
+            if (indices.size >= 2) {
+                val last = indices.last()
+                val end = if (messages.getOrNull(last + 1) is Msg.ToolResult) last + 1 else last
+                out.add(ChatRender.Run(i, indices, isStreaming && end >= messages.size - 1))
+                i = last + 1
+                continue
+            }
+        }
+        out.add(ChatRender.One(i))
+        i++
+    }
+    return out
+}
 
 /** 消息定位预览文案（换行折叠为空格，超长由列表行 Ellipsis 截断） */
 private fun locatorPreview(msg: Msg): String = when (msg) {

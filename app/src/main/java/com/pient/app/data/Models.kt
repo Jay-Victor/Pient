@@ -686,6 +686,10 @@ sealed class Msg {
         val params: String,
         val status: ToolStatus = ToolStatus.DONE,
         val detail: String? = null,
+        /** 工具耗时（毫秒；Hermes 工具行 meta 的 1.2s 口径）。null = 历史记录/未计时 */
+        val durationMs: Long? = null,
+        /** 开始时刻（仅内存：ToolEnd 用来算耗时，不落库） */
+        val startedAtMs: Long? = null,
     ) : Msg()
 
     data class ToolResult(
