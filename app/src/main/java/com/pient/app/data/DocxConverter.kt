@@ -45,6 +45,33 @@ object DocxConverter {
         return HTML_HEAD.format(title) + paragraphs.joinToString("") + "</body></html>"
     }
 
+    /**
+     * docx → 纯文本（2026-09-14）。**给 agent 的 read 工具用**：用户用「+」上传的 docx 附件落在
+     * `files/attachments/`，模型需要能读到里面的字（UI 侧的富文本渲染仍走 [toHtml]）。
+     * 解析路径与 [toHtml] 完全同一份（`word/document.xml` 的 `<w:p>`），只是把标签剥成纯文本。
+     *
+     * @return null = 不是 docx / 解析失败（调用方据此回退到「二进制不可读」）
+     */
+    fun toPlainText(context: Context, path: String): String? {
+        val paragraphs = try {
+            openStream(context, path)?.use { readParagraphs(it) } ?: return null
+        } catch (e: Exception) {
+            return null
+        }
+        if (paragraphs.isEmpty()) return null
+        return paragraphs.joinToString("\n") { p ->
+            unescapeXml(p.replace(Regex("<[^>]*>"), ""))
+        }
+    }
+
+    /** HTML 实体还原（`toHtml` 的 escape 的逆运算，够用即可） */
+    private fun unescapeXml(text: String): String = text
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
+
     private fun openStream(context: Context, src: String): InputStream? =
         if (src.startsWith("content://")) {
             context.contentResolver.openInputStream(android.net.Uri.parse(src))

@@ -224,10 +224,15 @@ object AppTools {
             }
         }
 
-    /** 可访问根：工作区 + 应用私有目录（附件、SAF 物化副本都在这两处） */
+    /**
+     * 可访问根：**应用私有目录整棵 + 工作区**。附件就落在 `filesDir/attachments/`（用户「+」上传的
+     * 图片/文件都复制到这里），2026-09-14 用户实测报「上传了附件但 AI 读不了」= 这里少放了 filesDir，
+     * 模型只能看到工作区与 `pient-rt`，附件目录被拒。应用私有目录本来就是 App 自己的沙箱，
+     * 全放行不会越界；外部存储的 SAF 项目另有物化副本（也在私有目录内）。
+     */
     private fun allowedRoots(context: Context): List<File> = listOfNotNull(
         PiRuntime.workspaceDir(context),
-        PiRuntime.root(context),
+        context.filesDir,            // 含 attachments/、Projects/、pient-rt/
         context.cacheDir,
         context.getExternalFilesDir(null),
     )
@@ -246,7 +251,8 @@ object AppTools {
             canon.path == r || canon.path.startsWith(r + File.separator)
         }
         return if (ok) canon to null else null to
-            "路径不可访问：$p（只在工作区与应用目录内可用；当前工作区：${ws.absolutePath}）"
+            "路径不可访问：$p（可访问范围 = 工作区 ${ws.absolutePath} 与应用私有目录 " +
+            "${context.filesDir.absolutePath}，含其中的 attachments/ 附件目录）"
     }
 
     /** 目录树遍历：跳过 `.git`（与 pi 的 .gitignore 口径同为「不给 agent 翻版本库」） */
@@ -309,7 +315,19 @@ object AppTools {
         if (ext in MEDIA_IMAGE_EXTS) {
             return Outcome("（图片文件，${f.length()} 字节：${f.path}）", false)
         }
-        if (isBinary(f)) return Outcome("二进制文件，无法按文本读取：${f.path}", true)
+        // 文档类附件（docx）：用户「+」上传的文档要让 AI 读得出内容，复用 UI 侧同一个解析器
+        if (ext == "docx") {
+            val text = DocxConverter.toPlainText(context, f.path)
+            if (!text.isNullOrBlank()) {
+                return Outcome("（docx 已抽取为文本）\n" + truncate(text, "read"), false)
+            }
+        }
+        if (isBinary(f)) {
+            return Outcome(
+                "二进制文件，无法按文本读取：${f.path}（docx 可读；doc/xlsx/pdf 等暂不支持）",
+                true,
+            )
+        }
         val all = f.readLines()
         val offset = args.optInt("offset", 1).coerceAtLeast(1)
         val limit = args.optInt("limit", 0).takeIf { it > 0 } ?: Int.MAX_VALUE
