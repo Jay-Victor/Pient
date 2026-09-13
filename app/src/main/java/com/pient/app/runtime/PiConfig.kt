@@ -68,25 +68,31 @@ object PiConfig {
 
         writeJson(modelsFile(context), JSONObject().put("providers", providers))
         writeJson(authFile(context), auth)
-        syncShellPath(context)
+        syncSettings(context)
         Log.i(TAG, "pi 配置已写入：$count 个服务商 → ${modelsFile(context).absolutePath}")
         return count
     }
 
+    /** 项目要求的七工具（pi 内置工具名的全会话） */
+    private val PIENT_TOOLS = listOf("read", "write", "edit", "bash", "grep", "find", "ls")
+
     /**
-     * 终端层接线：把 pi 的 `shellPath` 指向随包分发的包装脚本（→ rootfs 里的 GNU bash）。
-     *
-     * **合并写**：settings.json 里可能已经有 pi 自己落的键（思考档位、信任策略等），整体覆盖会抹掉它们。
+     * 设置接线（settings.json，**合并写**——文件里可能已经有 pi 自己落的键）：
+     * 1. `shellPath` → 随包包装脚本（bash 工具的执行环境入口）；
+     * 2. `defaultTools` → **七工具全集**：pi 默认只激活 `read/bash/edit/write` 四个
+     *    （pi `core/sdk.ts:256` 的 `defaultActiveToolNames`），不写这个键的话
+     *    **grep / find / ls 根本不会出现在模型看到的工具表里**（实测 tools=4）。
      * pi 只在启动时读一次设置，所以必须在本进程拉起宿主**之前**写好（[sync] 的调用点在宿主启动前）。
      */
-    private fun syncShellPath(context: Context) {
+    private fun syncSettings(context: Context) {
         val file = settingsFile(context)
         val json = runCatching {
             if (file.exists()) JSONObject(file.readText()) else JSONObject()
         }.getOrDefault(JSONObject())
         json.put("shellPath", PiRuntime.shellPath(context).absolutePath)
+        json.put("defaultTools", JSONArray(PIENT_TOOLS))
         writeJson(file, json)
-        Log.i(TAG, "pi shellPath 已写入：${PiRuntime.shellPath(context).absolutePath}")
+        Log.i(TAG, "pi 设置已写入：shellPath=${PiRuntime.shellPath(context).absolutePath} defaultTools=${PIENT_TOOLS.size} 个")
     }
 
     /** pi 的服务商 id：允许字母数字与 `-._`，其余归一为 `-`（pi 侧 id 会出现在模型 id 里） */
