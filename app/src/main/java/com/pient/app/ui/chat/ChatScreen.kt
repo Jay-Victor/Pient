@@ -832,7 +832,8 @@ private fun HostNotReadyStrip(state: PiHostState, onRetry: () -> Unit) {
             "去「模型配置」填好服务商与模型，宿主才有模型可跑 agent 循环"
         PiHostState.Starting -> "pi 宿主启动中…" to "正在拉起 node 宿主（首次约数秒），完成后工具即可用"
         else -> "pi 宿主未运行 —— 当前是直连模式" to
-            "直连模式只把消息发给模型，不会调用任何工具（read / write / edit / bash / grep / find / ls）"
+            "直连模式由应用内工具执行（read / write / edit / bash / grep / find / ls）：" +
+            "工具调用、文件读写与命令都能跑；pi 宿主独有的能力（插件 / Skill / 原生压缩）不可用"
     }
     Row(
         verticalAlignment = Alignment.CenterVertically,

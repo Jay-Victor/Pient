@@ -39,6 +39,7 @@ import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.MenuBook
@@ -399,6 +400,27 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 onValueChange = { v -> updateConfig { it.copy(modelList = v) } },
                                 onOpenPicker = { modelPickerOpen = true },
                             )
+                        }
+                    }
+                }
+            }
+
+            // ── ②b 模型能力（2026-09-14 参考 Operit 的能力开关）──
+            // 只保留 ToolCall：它决定「请求怎么发」——原生工具调用 vs 软件内标记调用。
+            // 媒体（图片/音频/视频）不做开关、也不直发：用户发这类附件时直接提示报错（见 ChatState）。
+            if (provider != null && cfg != null) {
+                item {
+                    Column {
+                        SectionHeader("模型能力", icon = Icons.Outlined.Extension)
+                        ConfigCard {
+                            ParamBlock(
+                                label = "模型支持ToolCall",
+                                hint = "关闭时，会使用软件内工具调用机制，也可以完成工具调用。" +
+                                    "开启后，将会使用API的专用接口进行原生工具调用（需要模型支持）",
+                                enabled = cfg.toolCallEnabled,
+                                onToggle = { updateConfig { it.copy(toolCallEnabled = !it.toolCallEnabled) } },
+                            )
+                            Spacer(Modifier.height(12.dp))
                         }
                     }
                 }

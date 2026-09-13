@@ -15,6 +15,7 @@ import com.pient.app.runtime.PiAgentEvent
 import com.pient.app.runtime.PiChat
 import com.pient.app.runtime.PiHost
 import com.pient.app.runtime.PiHostState
+import com.pient.app.runtime.PiRuntime
 import com.pient.app.runtime.PiSessions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -484,6 +485,24 @@ class ChatState {
         val effectiveModel = model.name.takeIf { cfg.models.contains(it) }
             ?: cfg.models.firstOrNull().orEmpty()
 
+        // 媒体附件（图片 / 音频 / 视频）**不发给模型**（2026-09-14 用户口径：不做直发开关，
+        // 模型不支持就直接提示报错）。这里拦住发送：用户能看到自己那条消息 + 一条明确报错，
+        // 要 AI 处理文件就改用「@ 引用文件」把路径交给它（有工具时它自己会读）。
+        val mediaAttachments = currentMsg.attachments.filter { isMediaAttachment(it) }
+        if (mediaAttachments.isNotEmpty()) {
+            appendEntry(
+                Msg.Assistant(
+                    "⚠️ 当前模型不支持${mediaKindsLabel(mediaAttachments)}输入：" +
+                        "请改用「@ 引用文件」引用该文件，让 AI 用工具读取。",
+                    error = true,
+                )
+            )
+            isStreaming = false
+            streamDraft = ""
+            markRunning(false)
+            return
+        }
+
         // 引用消息：正文以 markdown 块引用注入（Quote.toPrompt；UI 仍只显示用户正文）
         // 宿主在跑：先把宿主切到「当前 Pient 会话」对应的 pi 会话（映射见 PiSessions），
         // 否则换会话后宿主会接着用上一条会话的上下文
@@ -641,7 +660,8 @@ class ChatState {
                 when (ev) {
                     is PiAgentEvent.TextDelta -> {
                         sb.append(ev.text)
-                        onDelta(sb.toString())
+                        // 与直连路径同一道闸：漏出来的工具标记不许在流式期间显示（2026-09-14）
+                        onDelta(AppTools.safeStreamText(sb.toString()))
                     }
                     is PiAgentEvent.ThinkingDelta -> if (thinking != null) {
                         th.append(ev.text)
@@ -661,38 +681,161 @@ class ChatState {
                     else -> onTool(ev)
                 }
             }
-            return ChatOutcome(finalText, usage, th.toString())
-        }
-        if (!streamingOutputEnabled) {
-            val result = AiBackend.chat(cfg, systemPrompt, history, thinking)
-            val th = result.thinking.orEmpty().takeIf { thinking != null }.orEmpty()
-            if (th.isNotEmpty()) onThinking(th)
-            // 直连路径同样记上下文占用（触发式总结的用量阈值要用；宿主路径由 usage 事件更新）
-            result.usage?.let { updateContextPercent(it, cfg) }
-            return ChatOutcome(result.text, result.usage, th)
-        }
-        val sb = StringBuilder()
-        val th = StringBuilder()
-        var usage: Usage? = null
-        AiBackend.chatStream(cfg, systemPrompt, history, thinking).collect { ev ->
-            when (ev) {
-                is ChatEvent.TextDelta -> {
-                    sb.append(ev.text)
-                    onDelta(sb.toString())
-                }
-                is ChatEvent.ThinkingDelta -> if (thinking != null) {
-                    th.append(ev.text)
-                    onThinking(th.toString())
-                }
-                is ChatEvent.UsageEvent -> {
-                    usage = ev.usage
-                    updateContextPercent(ev.usage, cfg)
-                }
-                is ChatEvent.Failed -> throw AiException(ev.message)
-                ChatEvent.Done -> Unit
+            // 宿主路径的最终文本同样过一道闸：模型把标记漏进正文时，不许它落库/渲染成正文
+            val clean = if (AppTools.hasToolMarkup(finalText)) {
+                Log.w(TAG, "宿主回答里含工具标记（模型未按协议调用工具），已从正文剔除")
+                AppTools.extractTextCalls(finalText).first
+            } else {
+                finalText
             }
+            return ChatOutcome(clean, usage, th.toString())
         }
-        return ChatOutcome(sb.toString(), usage, th.toString())
+        // 直连路径：应用内工具循环（2026-09-14）——开关开 = 工具经服务商原生接口下发，
+        // 开关关 = 工具说明写进系统提示、模型用文本标记调用；两条路都执行应用内工具（AppTools）
+        return runDirectChat(cfg, history, thinking, onDelta, onThinking, onTool)
+    }
+
+    /** 附件是否属于「模型不吃、应用也不直发」的媒体家族（图片 / 音频 / 视频） */
+    private fun isMediaAttachment(a: Attachment): Boolean {
+        val ext = extOf(a.path ?: a.name)
+        return ext in MEDIA_IMAGE_EXTS || ext in MEDIA_AV_EXTS
+    }
+
+    /** 报错文案里的媒体类型名（图片 / 视频 / 音频，可组合） */
+    private fun mediaKindsLabel(items: List<Attachment>): String {
+        val exts = items.map { extOf(it.path ?: it.name) }.toSet()
+        val kinds = ArrayList<String>(3)
+        if (exts.any { it in MEDIA_IMAGE_EXTS }) kinds.add("图片")
+        if (exts.any { it in MEDIA_VIDEO_EXTS }) kinds.add("视频")
+        if (exts.any { it in MEDIA_AUDIO_EXTS }) kinds.add("音频")
+        return kinds.joinToString(" / ")
+    }
+
+    /**
+     * 直连路径的一轮对话（**含工具循环**）：请求 → 解析工具调用（原生 `tool_calls` / 文本标记）→
+     * 应用内执行（[AppTools]）→ 结果回灌 → 再请求，直到模型给出最终回答（上限 [AppTools.MAX_ROUNDS] 轮）。
+     *
+     * 工具卡与思考块走**与宿主路径同一套事件**（[PiAgentEvent.ToolStart]/[ToolEnd] → [handleToolEvent]），
+     * 所以直连与宿主在聊天页的渲染完全一致（同一张工具卡、同一段 diff）。
+     *
+     * 两个兜底（都在文本标记这一路）：
+     * - 开关关：Operit 口径的「软件内工具调用机制」——工具说明进系统提示，模型用 `<tool_call>` 调用；
+     * - 开关开：DeepSeek 系模型可能把 DSML 标记漏进正文（上游已知问题），照样认回来执行，
+     *   正文只留模型真正说的话（用户不再看到「回答里直接输出命令」）。
+     */
+    private suspend fun runDirectChat(
+        cfg: ProviderConfig,
+        history: List<Pair<String, String>>,
+        thinking: ThinkingLevel?,
+        onDelta: (String) -> Unit,
+        onThinking: (String) -> Unit,
+        onTool: (PiAgentEvent) -> Unit,
+    ): ChatOutcome {
+        val ctx = PiHost.appContextOrNull()
+        val nativeTools = cfg.toolCallEnabled && ctx != null
+        val toolsJson = when {
+            !nativeTools -> null
+            AiBackend.isAnthropicProtocol(cfg.endpoint) -> AppTools.anthropicDefinitions()
+            else -> AppTools.definitions()
+        }
+        val prompt = AppTools.systemPrompt(
+            workspace = ctx?.let { PiRuntime.workspaceDir(it).absolutePath }.orEmpty(),
+            nativeTools = nativeTools,
+        )
+        val turns = ArrayList<ChatTurn>(history.size)
+        for ((role, content) in history) turns.add(ChatTurn.Text(role, content))
+
+        var inTok = 0
+        var outTok = 0
+        var cacheTok = 0
+        var cacheWriteTok = 0
+        var lastText = ""
+        for (round in 0 until AppTools.MAX_ROUNDS) {
+            val roundText = StringBuilder()
+            val roundThinking = StringBuilder()
+            val nativeCalls = ArrayList<AppTools.Call>()
+            var usage: Usage? = null
+            if (!streamingOutputEnabled) {
+                val res = AiBackend.chat(cfg, prompt, turns, thinking, toolsJson)
+                roundText.append(res.text)
+                nativeCalls.addAll(res.toolCalls)
+                usage = res.usage
+                if (thinking != null) {
+                    res.thinking?.takeIf { it.isNotBlank() }?.let { onThinking(it) }
+                }
+            } else {
+                AiBackend.chatStream(cfg, prompt, turns, thinking, toolsJson).collect { ev ->
+                    when (ev) {
+                        is ChatEvent.TextDelta -> {
+                            roundText.append(ev.text)
+                            // 标记可能正在流进来 —— 只把标记之前的正文交给界面（整轮结束再定性）
+                            onDelta(AppTools.safeStreamText(roundText.toString()))
+                        }
+                        is ChatEvent.ThinkingDelta -> if (thinking != null) {
+                            roundThinking.append(ev.text)
+                            onThinking(roundThinking.toString())
+                        }
+                        is ChatEvent.UsageEvent -> usage = ev.usage
+                        is ChatEvent.ToolCallsEvent -> nativeCalls.addAll(ev.calls)
+                        is ChatEvent.Failed -> throw AiException(ev.message)
+                        ChatEvent.Done -> Unit
+                    }
+                }
+            }
+            usage?.let {
+                inTok += it.inTokens
+                outTok += it.outTokens
+                cacheTok += it.cacheTokens
+                cacheWriteTok += it.cacheWriteTokens
+                // 上下文占用取**本轮**用量（最后一轮即当前上下文实际占用）
+                updateContextPercent(it, cfg)
+            }
+
+            // 文本形态的工具调用：原生调用优先；没有原生调用时看正文里有没有标记（DSML 泄漏兜底）
+            val (cleanText, textCalls) = AppTools.extractTextCalls(roundText.toString())
+            val markupMode = nativeCalls.isEmpty() && textCalls.isNotEmpty()
+            val calls = if (nativeCalls.isNotEmpty()) nativeCalls else textCalls
+            val answer = if (nativeCalls.isNotEmpty()) roundText.toString() else cleanText
+            if (calls.isEmpty()) {
+                lastText = answer.trim()
+                if (answer.isNotEmpty()) onDelta(answer)
+                break
+            }
+
+            // 有工具调用：思考块先落库（顺序 = 思考 → 前置说明 → 工具卡 → 结果），
+            // 模型在调用工具前说的话（pi 同形态）单独落一条助手消息
+            flushStreamingThinking()
+            if (answer.isNotBlank()) appendEntry(Msg.Assistant(answer.trim()))
+            val results = ArrayList<String>()
+            for (c in calls) {
+                onTool(PiAgentEvent.ToolStart(c.id, c.name, c.arguments))
+                val outcome = if (ctx != null) {
+                    AppTools.run(ctx, c.name, c.arguments)
+                } else {
+                    AppTools.Outcome("工具不可用：应用上下文缺失", true)
+                }
+                onTool(
+                    PiAgentEvent.ToolEnd(c.id, c.name, outcome.output, outcome.isError, outcome.diff),
+                )
+                results.add("[${c.name}] ${outcome.output.take(6000)}")
+            }
+            // 结果回灌：原生调用带回协议消息；文本标记调用用「助手原文 + 用户侧结果」继续
+            if (markupMode) {
+                turns.add(ChatTurn.Text("assistant", roundText.toString()))
+                turns.add(ChatTurn.Text("user", "工具执行结果：\n\n" + results.joinToString("\n\n")))
+            } else {
+                turns.add(ChatTurn.AssistantCalls(roundText.toString().trim(), calls))
+                for ((i, c) in calls.withIndex()) {
+                    turns.add(ChatTurn.ToolOutput(c.id, c.name, results.getOrElse(i) { "" }))
+                }
+            }
+            onDelta("")   // 前置说明已落库，清掉流式草稿（下一轮的正文重新积累）
+            streamDraft = ""
+        }
+        // 轮数用尽（模型一直在调工具）时把已有内容交出去，不当失败
+        val usageTotal = Usage(inTok, outTok, cacheTok, 0.0, cacheWriteTok)
+        val text = if (lastText.isNotBlank()) lastText else streamDraft.trim().ifBlank { "（已达单轮工具调用上限 ${AppTools.MAX_ROUNDS} 轮）" }
+        return ChatOutcome(text, usageTotal.takeIf { it.inTokens + it.outTokens > 0 }, streamThinking)
     }
 
     /** 单次请求结果：正文 + usage + 思考文本（思考模式关闭时为空串） */
@@ -767,7 +910,7 @@ class ChatState {
             AiBackend.chat(
                 cfg,
                 ContextPolicy.buildSummarySystemPrompt(previous, cfg.summaryCustomRules),
-                turns,
+                turns.map { ChatTurn.Text(it.first, it.second) },
                 null,
             ).text
         }.getOrElse {

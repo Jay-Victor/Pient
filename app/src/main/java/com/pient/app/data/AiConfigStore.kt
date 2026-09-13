@@ -36,6 +36,19 @@ data class ProviderConfig(
      */
     val reasoningFormat: ReasoningFormat = ReasoningFormat.AUTO,
 
+    // ── 模型能力（2026-09-14 参考 Operit 的能力开关；默认值逐值对齐）──
+
+    /**
+     * 模型支持 ToolCall（Operit `DEFAULT_ENABLE_TOOL_CALL = true`）：
+     * 开启 = 用服务商 API 的专用接口做**原生工具调用**（请求带 `tools`，回包解析 `tool_calls`）；
+     * 关闭 = 走**软件内工具调用机制**（工具说明写进系统提示，模型用标记调用，App 解析执行）。
+     * 两条路都落到同一套应用内工具执行器（[AppTools]），关掉不等于没有工具。
+     *
+     * 媒体（图片 / 音频 / 视频）**不做开关、也不直发给模型**：用户发这类附件时直接提示报错
+     * （用户 2026-09-14 口径），要 AI 处理文件就用「@ 引用文件」把路径交给它（有工具时它会自己读）。
+     */
+    val toolCallEnabled: Boolean = true,
+
     // ── 上下文管理（2026-09-13 参考 Operit 的总结式上下文管理；默认值逐值对齐 Operit）──
 
     /** 自动总结上下文（Operit `ModelConfigDefaults.DEFAULT_ENABLE_SUMMARY`） */
@@ -170,6 +183,8 @@ object AiConfigStore {
                         // 已知服务商一律采用服务商目录里的预设写法，自定义服务商才留在 AUTO
                         ?: ProviderCatalog.byId[id]?.reasoningFormat
                         ?: ReasoningFormat.AUTO,
+                    // 模型能力（2026-09-14）：老配置缺字段 → Operit 默认值（ToolCall 开）
+                    toolCallEnabled = o.optBoolean("toolCallEnabled", true),
                     // 上下文管理（2026-09-13）：缺字段 → Operit 默认值（老配置行为不变）
                     summaryEnabled = o.optBoolean("summaryEnabled", ContextPolicy.DEFAULT_ENABLE_SUMMARY),
                     summaryTokenThreshold = o.optString(
@@ -221,6 +236,8 @@ object AiConfigStore {
                         .put("topPEnabled", c.topPEnabled)
                         .put("topPValue", c.topPValue)
                         .put("reasoningFormat", c.reasoningFormat.name)
+                        // 模型能力（2026-09-14）：只落 ToolCall 一个开关（媒体不做开关）
+                        .put("toolCallEnabled", c.toolCallEnabled)
                         .put("summaryEnabled", c.summaryEnabled)
                         .put("summaryTokenThreshold", c.summaryTokenThreshold)
                         .put("summaryByMessageCount", c.summaryByMessageCount)
