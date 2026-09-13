@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.pient.app.data.ChatState
+import com.pient.app.data.SettingsStore
 import androidx.compose.ui.platform.LocalContext
 import com.pient.app.data.TerminalLine
 import com.pient.app.data.TerminalLineKind
@@ -60,6 +61,7 @@ import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
 import com.pient.app.ui.theme.TerminalDark
 import com.pient.app.ui.theme.TerminalLight
+import com.pient.app.runtime.PiRuntime
 import com.pient.app.runtime.PiTerminal
 import kotlinx.coroutines.launch
 
@@ -90,6 +92,21 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
     val context = LocalContext.current
     LaunchedEffect(Unit) { PiTerminal.ensure(context) }
     val session = PiTerminal.sessions.getOrNull(chatState.terminalIndex) ?: PiTerminal.sessions.firstOrNull()
+
+    // 首启「环境安装」（对齐 Operit 的 SetupScreen：首启弹一次、可跳过）——rootfs 就绪后弹，
+    // 首启那 1–2 分钟先在后台自动解包，别让用户在还没就绪的界面上做选择。
+    var showEnvSetup by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (SettingsStore.envSetupDone) return@LaunchedEffect
+        repeat(240) {
+            if (PiRuntime.rootfsReady(context)) {
+                showEnvSetup = true
+                return@LaunchedEffect
+            }
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+
     if (session == null) return Box(Modifier.fillMaxSize())
 
     // 吸底：新输出自动跟随（用户上滚后可暂停）
@@ -373,6 +390,18 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                     )
                 }
             }
+        }
+
+        // 首启「环境安装」（可跳过；装完/跳过后写 SettingsStore.envSetupDone，永久生效）。
+        // 注意别塞进上面 closeConfirmIndex?.let 里——那样只在"删除会话确认"时才渲染（已踩过）。
+        if (showEnvSetup) {
+            EnvSetupDialog(
+                onDone = {
+                    showEnvSetup = false
+                    SettingsStore.envSetupDone = true
+                    SettingsStore.saveEnvironment(context)
+                },
+            )
         }
     }
 }

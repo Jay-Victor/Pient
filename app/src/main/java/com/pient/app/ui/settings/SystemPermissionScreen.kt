@@ -38,6 +38,7 @@ import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -59,9 +60,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
+import com.pient.app.data.AndroidShell
 import com.pient.app.data.PermissionTier
 import com.pient.app.data.RootGateway
 import com.pient.app.data.SettingsStore
+import com.pient.app.data.ShellTier
 import com.pient.app.data.ShizukuGateway
 import com.pient.app.data.SystemPermissions
 import com.pient.app.data.ToolPolicy
@@ -364,6 +367,41 @@ fun SystemPermissionScreen(nav: NavController) {
                 }
             }
 
+            // ═══════════ Android shell（系统命令通道，三档边界） ═══════════
+            // 归位说明（2026-09-13 用户拍板）：这一块**不再放在终端页**——终端页是 Ubuntu 的地盘；
+            // 系统命令通道属于"权限能力"，按 Operit 的口径只在权限页管（Operit 的 AndroidPermissionLevel
+            // 也只出现在权限引导页/抽屉/权限卡里）。bash 的执行落点与这里无关（只有 Ubuntu 两档）。
+            SectionHeader("Android shell（系统命令通道）", icon = Icons.Outlined.Terminal)
+            PermissionCardBox {
+                Column(Modifier.padding(14.dp)) {
+                    Text(
+                        "AI 的 android_shell 工具（am / pm / dumpsys / getprop / settings …）走哪条通道。" +
+                            "bash 工具只在 Ubuntu 里跑，与这里无关。三档按权限从高到低自动选：有 Root 走 su，" +
+                            "有 Shizuku 走 ADB 级（uid 2000），都没有就在标准档以应用身份执行——**标准档永远可用**，" +
+                            "只是系统命令多数会被拒（报错原样回给模型）。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    CardDivider()
+                    val tiers = remember(shizukuAuthorized, deviceRooted) { AndroidShell.tiers(context) }
+                    val effective = AndroidShell.effectiveTier(context)
+                    tiers.forEach { t ->
+                        AndroidShellTierRow(
+                            title = t.tier.title,
+                            desc = t.detail.ifBlank { t.tier.desc },
+                            ready = t.ready,
+                            current = t.tier == effective,
+                            onAction = when (t.tier) {
+                                ShellTier.ADB -> if (!t.ready) ({ grantShizuku() }) else null
+                                ShellTier.ROOT -> if (!t.ready) ({ requestRoot() }) else null
+                                ShellTier.STANDARD -> null
+                            },
+                        )
+                    }
+                }
+            }
+
             // ═══════════ 工具级授权（开发计划 §6.3：全局默认 + 单工具例外） ═══════════
             SectionHeader("工具级授权", icon = Icons.Outlined.Shield)
             PermissionCardBox {
@@ -583,6 +621,59 @@ private fun PermissionStatusRow(
                     color = MaterialTheme.colorScheme.error,
                 )
             }
+        }
+    }
+}
+
+// ─────────────────────────── Android shell 三档行 ───────────────────────────
+
+/** 一档 Android shell：标题 + 当前生效标记 + 状态/说明；未就绪时给授权入口 */
+@Composable
+private fun AndroidShellTierRow(
+    title: String,
+    desc: String,
+    ready: Boolean,
+    current: Boolean,
+    onAction: (() -> Unit)?,
+) {
+    Row(
+        verticalAlignment = Alignment.Top,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 9.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, style = MaterialTheme.typography.bodyMedium)
+                if (current) {
+                    Text(
+                        "  当前生效",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            Text(
+                desc,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        if (ready) {
+            Text(
+                "可用 ✓",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        } else if (onAction != null) {
+            PientButton(
+                text = "去授权",
+                onClick = onAction,
+                primary = false,
+                height = 32,
+            )
         }
     }
 }

@@ -135,30 +135,8 @@ fun TerminalSetupScreen(nav: NavController) {
         scope.launch { refresh() }
     }
 
-    /** 解锁 Android shell（Shizuku / Root）：按设备现状给下一步 */
-    fun grantPrivilege() {
-        when {
-            ShizukuGateway.authorized() -> toast("Shizuku 已授权；ADB 级执行通道接入中")
-            ShizukuGateway.installed(context) -> {
-                // 已装未授权 / 服务未运行：先请求授权，失败则拉起 Shizuku 应用
-                if (!ShizukuGateway.requestPermission() && !ShizukuGateway.openApp(context)) {
-                    toast("无法打开 Shizuku 应用")
-                }
-            }
-            RootGateway.deviceRooted(context) -> scope.launch {
-                rootRequesting = true
-                val granted = RootGateway.requestAccess()
-                rootRequesting = false
-                toast(if (granted) "已获得 Root 权限" else "未获得 Root 权限（设备未 Root 或授权被拒绝）")
-                refresh()
-            }
-            else -> if (!ShizukuGateway.openUrl(context, ShizukuGateway.DOWNLOAD_URL)) {
-                toast("需安装 Shizuku 或设备已 Root")
-            } else {
-                toast("需安装 Shizuku 或设备已 Root")
-            }
-        }
-    }
+    // Android shell（Shizuku / Root）的授权入口已挪到「设置 → 系统权限」页（三档边界卡）：
+    // 终端页只做 Ubuntu（PRoot / chroot）+ 环境内软件，别再往这里塞系统命令通道的东西。
 
     /** 一键配置：解包随包的 Ubuntu rootfs（进度回调来自 IO 线程 → 转主线程写状态） */
     fun provision() {
@@ -250,7 +228,6 @@ fun TerminalSetupScreen(nav: NavController) {
                                 onSelect = { selectEnv(env) },
                                 onProvision = ::provision,
                                 onRequestRoot = ::requestRoot,
-                                onGrantPrivilege = ::grantPrivilege,
                                 onRecheck = { scope.launch { refresh() } },
                             )
                         }
@@ -461,7 +438,6 @@ private fun EnvRow(
     onSelect: () -> Unit,
     onProvision: () -> Unit,
     onRequestRoot: () -> Unit,
-    onGrantPrivilege: () -> Unit,
     onRecheck: () -> Unit,
 ) {
     Column(
@@ -525,12 +501,6 @@ private fun EnvRow(
                         onClick = onRequestRoot,
                         enabled = !rootRequesting,
                         loading = rootRequesting,
-                        height = 34,
-                        contentPadding = 12,
-                    )
-                    EnvAction.GRANT_PRIVILEGE -> PientButton(
-                        text = "用 Shizuku / Root 解锁",
-                        onClick = onGrantPrivilege,
                         height = 34,
                         contentPadding = 12,
                     )

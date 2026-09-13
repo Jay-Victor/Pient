@@ -119,6 +119,10 @@ object SettingsStore {
     var aptMirror by mutableStateOf(APT_MIRRORS[0].name)
     var selectedComponents by mutableStateOf(setOf("ca", "git", "curl"))
 
+    // ── 首启环境安装（2026-09-13，对齐 Operit 的 SetupScreen）：首次进终端页弹一次「环境安装」，
+    //    用户点「安装所选」或「跳过」后置位，永不再自动弹（可在「环境配置」页手动再进）──
+    var envSetupDone by mutableStateOf(false)
+
     // ── 开屏设置（2026-09-12）：启动时是否播放开屏加载动画 ──
     //   关 = 不显示开屏页（跳过动画与最短展示），数据仍在后台加载，直接进入主界面
     var startupAnimation by mutableStateOf(true)
@@ -199,6 +203,7 @@ object SettingsStore {
         aptMirror = p.getString("apt_mirror", APT_MIRRORS[0].name) ?: APT_MIRRORS[0].name
         selectedComponents = p.getStringSet("ubuntu_components", setOf("ca", "git", "curl"))
             ?.toSet() ?: setOf("ca", "git", "curl")
+        envSetupDone = p.getBoolean("env_setup_done", false)
         startupAnimation = p.getBoolean("startup_animation", true)
         filePreviewNoWrap = p.getBoolean("file_preview_no_wrap", false)
         customAccentEnabled = p.getBoolean("custom_accent_enabled", false)
@@ -294,6 +299,7 @@ object SettingsStore {
             .putString("exec_env", execEnv.id)
             .putString("apt_mirror", aptMirror)
             .putStringSet("ubuntu_components", selectedComponents)
+            .putBoolean("env_setup_done", envSetupDone)
             .apply()
     }
 

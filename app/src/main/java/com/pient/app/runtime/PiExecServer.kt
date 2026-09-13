@@ -142,10 +142,39 @@ object PiExecServer {
                     (ShizukuShellChannel.lastError ?: "未知原因"))
         }
 
-        return JSONObject()
-            .put("error", "no-privilege")
-            .put("message", "系统命令需要在「环境配置」里用 Shizuku 或 Root 解锁" +
-                (ShizukuShellChannel.lastError?.let { "（$it）" } ?: ""))
+        // 通道 3：标准权限（应用身份跑 /system/bin/sh）—— 对齐 Operit `StandardShellExecutor`：
+        // `isAvailable()` 恒真、无需任何授权。能跑 shell/toybox 基础命令；`am`/`pm`/`dumpsys` 这类
+        // 多数会被系统拒绝 —— 报错**原样回传**（不假装成功、也不吞掉），模型据此知道是权限问题。
+        return runStandard(command, cwd, timeoutMs)
+    }
+
+    /** 标准档：应用身份（u0_aXXX）的 /system/bin/sh —— 永远可用，能力受限但真实 */
+    private fun runStandard(command: String, cwd: String?, timeoutMs: Long): JSONObject {
+        val full = if (cwd.isNullOrBlank()) command else "cd ${shellQuote(cwd)} && $command"
+        return runCatching {
+            val p = ProcessBuilder("/system/bin/sh", "-c", full).redirectErrorStream(true).start()
+            val text = StringBuilder()
+            val reader = Thread {
+                runCatching { p.inputStream.bufferedReader().forEachLine { text.append(it).append('\n') } }
+            }
+            reader.isDaemon = true
+            reader.start()
+            if (!p.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
+                runCatching { p.destroy() }
+                return@runCatching JSONObject().put("error", "timeout")
+                    .put("channel", "standard")
+                    .put("message", "命令超时（${timeoutMs}ms）")
+            }
+            reader.join(1000)
+            val out = text.toString().let { if (it.length > MAX_OUTPUT) it.takeLast(MAX_OUTPUT) else it }
+            JSONObject()
+                .put("channel", "standard")
+                .put("code", p.exitValue())
+                .put("output", out.trimEnd())
+        }.getOrElse {
+            JSONObject().put("error", "exec-failed").put("channel", "standard")
+                .put("message", it.message ?: it.javaClass.simpleName)
+        }
     }
 
     private fun hasSu(): Boolean = SU_PATHS.any { runCatching { File(it).exists() }.getOrDefault(false) } ||

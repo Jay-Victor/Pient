@@ -65,8 +65,11 @@ export default function (pi) {
         };
       }
       const body = typeof data.output === "string" && data.output.length > 0 ? data.output : "(无输出)";
+      // 通道要写进结果：同一句命令在不同档下能力天差地别（标准=应用身份、shizuku=uid 2000、su=uid 0），
+      // 模型看到 [standard] 里的权限报错时才知道该建议用户去升级档位，而不是以为自己写错了命令。
+      const tier = typeof data.channel === "string" ? data.channel : "?";
       return {
-        content: [{ type: "text", text: `$ ${params.command}\n${body}` }],
+        content: [{ type: "text", text: `$ ${params.command}\n[${tier}] ${body}` }],
         details: { channel: data.channel, code: data.code },
       };
     },

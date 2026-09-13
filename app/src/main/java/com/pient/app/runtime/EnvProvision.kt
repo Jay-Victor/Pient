@@ -93,7 +93,9 @@ object EnvProvision {
     fun detect(context: Context, components: List<UbuntuComponent>): Map<String, Boolean> {
         if (!PiRuntime.rootfsReady(context)) return components.associate { it.id to false }
         val script = components.joinToString("\n") { c ->
-            "if command -v ${c.probe} >/dev/null 2>&1; then echo ${c.id}=1; else echo ${c.id}=0; fi"
+            // 自定义检测命令优先（装了但版本不对 / 没有可执行文件的情形）
+            val check = c.detectCmd ?: "command -v ${c.probe}"
+            "if $check >/dev/null 2>&1; then echo ${c.id}=1; else echo ${c.id}=0; fi"
         }
         val out = query(context, script, timeoutMs = 20_000)
         return components.associate { c ->
@@ -103,17 +105,26 @@ object EnvProvision {
 
     // ─────────────────────────── 组件安装 ───────────────────────────
 
-    /** 安装选中组件（先自愈 dpkg 半配置状态，再 `apt-get update` 刷新索引，最后一次性安装） */
+    /** 安装选中组件（先自愈 dpkg 半配置状态，再 `apt-get update` 刷新索引；自定义命令按清单顺序跟在后面） */
     fun install(context: Context, components: List<UbuntuComponent>) {
         if (running || components.isEmpty()) return
-        val pkgs = components.joinToString(" ") { it.pkg }
+        val aptComponents = components.filter { it.installCmd == null }
+        val custom = components.filter { it.installCmd != null }
         val script = buildString {
             appendLine("export DEBIAN_FRONTEND=noninteractive")
             // 上一次安装被中断（App 被杀 / 用户取消）会留下 dpkg 半配置状态，
             // 之后 apt 一律 `E: dpkg was interrupted`（实测踩过）→ 先自愈再装。
             appendLine("dpkg --configure -a >/dev/null 2>&1 || true")
             appendLine("apt-get update")
-            appendLine("apt-get install -y --no-install-recommends $pkgs")
+            if (aptComponents.isNotEmpty()) {
+                appendLine("apt-get install -y --no-install-recommends ${aptComponents.joinToString(" ") { it.pkg }}")
+            }
+            // 自定义安装（NodeSource / npm 全局包 / rustup…）—— 顺序即清单顺序：
+            // node 在 pnpm/typescript 之前、pip 在 uv 之前，别重排。
+            custom.forEach { c ->
+                appendLine("echo '--- ${c.name} ---'")
+                appendLine(c.installCmd)
+            }
         }
         run(context, script, "安装 ${components.size} 个组件")
     }
