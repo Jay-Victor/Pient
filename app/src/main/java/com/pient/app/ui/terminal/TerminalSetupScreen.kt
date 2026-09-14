@@ -32,6 +32,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -45,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.state.ToggleableState
 import com.pient.app.ui.theme.DarkWarn
 import com.pient.app.ui.theme.LightWarn
 import androidx.compose.ui.text.font.FontWeight
@@ -546,7 +548,18 @@ private fun CategoryCard(
 ) {
     val installed = list.count { status?.get(it.id) == true }
     val uninstalled = list.filter { status?.get(it.id) != true }
-    val allSelected = uninstalled.isNotEmpty() && uninstalled.all { selected[it.id] == true }
+    /**
+     * 分类级勾选状态（2026-09-14 修）：**「已装」与「已勾选」一起算**——
+     * 原来的判定要求「有未装项」且它们全被勾，于是**整类都装完之后反而显示未勾**（用户实测报的）。
+     * 现在三态：全齐（装好的 + 已勾的 = 全部）→ 勾上；一个都没有 → 空；其它 → 半选。
+     */
+    val picked = uninstalled.count { selected[it.id] == true }
+    val triState = when {
+        status == null || list.isEmpty() -> ToggleableState.Off
+        installed + picked >= list.size -> ToggleableState.On
+        picked == 0 && installed == 0 -> ToggleableState.Off
+        else -> ToggleableState.Indeterminate
+    }
 
     SetupCard {
         Row(
@@ -575,13 +588,26 @@ private fun CategoryCard(
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = allSelected,
-                    onCheckedChange = { on -> uninstalled.forEach { selected[it.id] = on } },
-                    enabled = status != null && uninstalled.isNotEmpty(),
+                // 同样套 48dp 槽位：onClick = null（"已齐"/检测中）时 Material3 不套最小触控尺寸包裹，
+                // 裸放会缩成 20dp 并改变横向位置
+                Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                    TriStateCheckbox(
+                            state = triState,
+                    // 全部装好 = 没有可勾的：onClick 传 null（不可点），但 **enabled 保持 true** ——
+                    // 实测：disabled 的复选框在无障碍树里等于"不显示"，用户看到的就是"框里没勾"
+                        onClick = if (status == null || uninstalled.isEmpty()) {
+                            null
+                        } else {
+                            { uninstalled.forEach { selected[it.id] = picked < uninstalled.size } }
+                        },
+                        enabled = status != null,
+                    )
+                    }
+                Text(
+                    if (uninstalled.isEmpty() && list.isNotEmpty()) "已齐" else "全选",
+                    style = MaterialTheme.typography.labelSmall,
                 )
-                Text("全选", style = MaterialTheme.typography.labelSmall)
-            }
+                }
             Icon(
                 if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
                 if (expanded) "收起" else "展开",
@@ -590,7 +616,7 @@ private fun CategoryCard(
                     .padding(start = 4.dp)
                     .size(20.dp),
             )
-        }
+            }
         if (expanded) {
             list.forEachIndexed { i, c ->
                 if (i > 0) DividerThin()
@@ -601,11 +627,11 @@ private fun CategoryCard(
                     selected = selected[c.id] == true,
                     onToggle = { selected[c.id] = selected[c.id] != true },
                 )
-            }
+                }
             Spacer(Modifier.height(4.dp))
+            }
         }
     }
-}
 
 /** 单个组件行（照 Operit `PackageItem`）：勾选 + 名称（+已安装/大）+ 描述；已安装不可取消 */
 @Composable
@@ -623,15 +649,23 @@ private fun ComponentRow(
             .clickable(enabled = !installed && !checking, onClick = onToggle)
             .padding(start = 4.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
     ) {
+        // 一律套 48dp 槽位：onCheckedChange = null 时 Material3 **不会**再套最小触控尺寸包裹，
+        // 复选框会缩成 20dp 贴到行左边 —— 实测已装行方框在 x 58..110、未装行在 x 90..142（左移 32px），
+        // 就是用户看到的「勾选的和没勾的方框不对齐」。用固定槽位让两种状态同宽同位。
         if (checking) {
             Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) { ArcSpinner(size = 16.dp) }
-        } else {
-            Checkbox(
-                checked = installed || selected,
-                onCheckedChange = { onToggle() },
-                enabled = !installed,
-            )
-        }
+            } else {
+            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                Checkbox(
+                    checked = installed || selected,
+                // 已装 = 只读：用 **onCheckedChange = null**（不是 enabled = false）——
+                // enabled=false 会被 Material3 画成**灰色**（用户明确说「不要灰色」）；
+                // 传 null 时控件不可点但按正常配色渲染（蓝色实心勾），与分类级那个框一致。
+                    onCheckedChange = if (installed) null else { { onToggle() } },
+                        enabled = !checking,
+                )
+                }
+            }
         Column(Modifier.padding(start = 2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(component.name, style = MaterialTheme.typography.bodyMedium)
@@ -642,19 +676,19 @@ private fun ComponentRow(
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(start = 6.dp),
                     )
-                }
+                    }
                 if (component.required) Badge("必须", strong = true)
                 if (component.heavy) Badge("大")
-            }
+                }
             Text(
                 component.desc,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp),
             )
+            }
         }
     }
-}
 
 /** 「Pient 运行时」卡片的更新检查状态（默认 Idle = 显示「检测更新」） */
 private sealed interface PiUpdateState {
@@ -670,4 +704,4 @@ private sealed interface PiUpdateState {
     data class Available(val current: String, val latest: String) : PiUpdateState
 
     data class Failed(val reason: String) : PiUpdateState
-}
+    }
