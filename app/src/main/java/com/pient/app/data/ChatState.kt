@@ -342,7 +342,7 @@ class ChatState {
 
     /**
      * 会话删除：宿主已冻结（2026-09-14），pi 侧不再有映射项与会话文件需要清理。
-     * 走 IO 线程、失败只记日志 —— 删除动作本身不等宿主回答（UI 立即反馈）。
+     * 走 IO 线程、失败只记日志 —— 删除动作本身不等任何外部进程回答（UI 立即反馈）。
      */
     private fun forgetPiSession(id: String) {
         val ctx = AppCtx.get() ?: return
@@ -472,6 +472,12 @@ class ChatState {
         hostThinkingFlushed = false   // 落库标记按轮复位（上一轮中止/重新生成留下的标记不得吞掉本轮思考）
         // ★ 历史快照必须先于消息上屏：buildApiHistory 读 currentMessages，
         //   上屏后再取会把本条用户消息算进历史、又被末尾显式追加一次 = 重复（2026-09-09 修复）
+        // 内核自实现的自动压缩（宿主冻结后取代 pi 原生 compaction）：逼近上限时先把老消息压成摘要卡，
+        // 这样紧接着构建的 history 就是压缩后的形态。失败只记日志，绝不阻断发送。
+        selectedModel?.provider?.let { AiConfigStore.configs[it] }?.let { c ->
+            runCatching { maybeAutoCompact(c) }
+                .onFailure { Log.w(TAG, "自动压缩失败：${it.message}") }
+        }
         val historyBefore = buildApiHistory()
         // 当前这条用户消息（附件随文本进请求用；attachments 列表马上会被清空，先取快照）
         val currentMsg = Msg.User(userText, attachments.toList(), quote)
@@ -855,10 +861,52 @@ class ChatState {
      * `compaction_end` 事件 —— 按「摘要 + tokensBefore」去重（见 [appendCompactionEntry]），
      * 所以这里落库与事件落库不会出现两张卡。返回 false = 宿主没跑 / 会话太小 / 失败（调用方提示）。
      */
-    suspend fun compactNow(): Boolean {
-        // 内核自研的压缩尚未落地（宿主已冻结）：如实返回 false，调用方给提示，不做假动作
-        Log.i(TAG, "压缩上下文：内核自实现尚未落地（原宿主 RPC 随宿主一并冻结）")
-        return false
+    suspend fun compactNow(): String? {
+        val cfg = selectedModel?.provider?.let { AiConfigStore.configs[it] }
+            ?: return "没有可用的服务商 / 模型"
+        return runCompaction(cfg, "manual")
+    }
+
+    /** 自动压缩：超阈值才动手（[Compaction.shouldCompact]）；摘要失败静默，不阻断本轮发送 */
+    private suspend fun maybeAutoCompact(cfg: ProviderConfig) {
+        if (compacting) return
+        val history = buildApiHistory()
+        val limit = Compaction.compactLimitTokens(cfg.ctxLenK, cfg.reserveTokensValue)
+        if (!Compaction.shouldCompact(history, cfg.ctxLenK, cfg.reserveTokensValue, cfg.compactionEnabled)) return
+        Log.i(TAG, "自动压缩触发：估 ${Compaction.estimateTokens(history)} tokens > 阈值 $limit")
+        runCompaction(cfg, "threshold")?.let { Log.w(TAG, "自动压缩未执行：$it") }
+    }
+
+    /**
+     * 真做一次压缩：切片 → 调模型生成 checkpoint 摘要 → 落一张压缩卡。
+     * 摘要在卡里、也在请求里（[apiHistoryOf] 把 `Msg.Compaction` 当一条 user 文本发出），
+     * 之后的请求由 [ContextPolicy.sliceFromLastCompaction] 从该卡起算。
+     */
+    private suspend fun runCompaction(cfg: ProviderConfig, reason: String): String? {
+        if (compacting) return "上一次压缩还在进行中"
+        val history = buildApiHistory()
+        val prefix = Compaction.prefixToSummarize(history, cfg.keepRecentTokensValue) ?: run {
+            Log.i(TAG, "压缩跳过：可压缩的前缀太短（历史太短或 keepRecentTokens 太大）")
+            return "没什么可压缩的：当前历史太短（或「保留最近 tokens」设得过大）"
+        }
+        compacting = true
+        return try {
+            val before = Compaction.estimateTokens(history)
+            val summary = Compaction.summarize(cfg, prefix, cfg.compactInstructions.ifBlank { null })
+            if (summary.isNullOrBlank()) {
+                Log.w(TAG, "压缩失败：摘要为空（保持原文，不落假卡）")
+                return "压缩失败：模型没有返回摘要（原文保持不变）"
+            }
+            // 压缩后的上下文 = 摘要 + **保留的尾部**（tail 是要继续带着走的，不能漏算 —— 漏了会把
+            // 「节省」夸大成 before − 摘要，实测在 keepRecentTokens≈历史长度时最离谱）
+            val tailTokens = Compaction.estimateTokens(history.subList(prefix.size, history.size))
+            val after = Compaction.estimateTokens(listOf("user" to summary)) + tailTokens
+            appendCompactionEntry(summary, before, after, reason)
+            Log.i(TAG, "压缩完成（$reason）：估 $before → $after tokens（摘要 ${summary.length} 字 + 保留尾部 $tailTokens tokens）")
+            null
+        } finally {
+            compacting = false
+        }
     }
 
     /**
@@ -1149,8 +1197,8 @@ class ChatState {
      * 粗略估算 token ≈ 字符数/2（中英混排折中），超预算丢最旧条目；
      * 但永远保留最新一条用户消息（本轮提问不可丢）。
      *
-     * 2026-09-13：这条退化为**兜底**（触发总结失败/宿主不可用时仍不发超长请求）——
-     * Operit 的常规路径是「先总结、再发送」（见 [maybeSummarize]），没有这种硬裁剪。
+     * 定位 = **兜底**：常规路径是「先压缩、再发送」（[maybeAutoCompact] → [runCompaction]），
+     * 只有摘要失败或 keepRecentTokens 配得过大时才轮到这条硬裁剪。
      */
     private fun trimToContextBudget(
         history: List<Pair<String, String>>,

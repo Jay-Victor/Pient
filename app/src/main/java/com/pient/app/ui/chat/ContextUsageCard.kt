@@ -143,9 +143,9 @@ fun ContextUsageCard(
                 }
             }
 
-            // ⑤ 压缩（2026-09-14 改为 pi 原生口径）：触发线来自 pi 的
-            // `contextTokens > contextWindow − reserveTokens`，这里只做等价换算展示；
-            // 右侧「压缩上下文」= 移动端对 `/compact` 命令的入口（宿主在跑时可用）。
+            // ⑤ 压缩（内核自实现，2026-09-14）：触发线 = `估算 tokens > 上下文窗口 − reserveTokens`
+            // （与 pi 同口径，见 data/Compaction.kt）；这里只做等价换算展示。
+            // 右侧「压缩上下文」= 移动端对桌面端 `/compact` 的等价入口，任何时候都能按。
             val cfg = chatState.selectedModel?.provider?.let { AiConfigStore.configs[it] }
             val threshold = cfg?.let {
                 ContextPolicy.autoCompactThresholdPercent(
