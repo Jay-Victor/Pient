@@ -8,7 +8,6 @@ import com.pient.app.runtime.ShizukuShellChannel
 import com.pient.app.tools.ToolLayer
 import com.pient.app.tools.ToolOutcome
 import com.pient.app.tools.ToolPart
-import com.pient.app.tools.ToolSpec
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -36,21 +35,6 @@ object SystemPart : ToolPart {
     override val layer = ToolLayer.SYSTEM
 
     /** AI 可见工具 = `shell`：Android 系统命令通道（am / pm / cmd / dumpsys / getprop / settings） */
-    override fun specs(): List<ToolSpec> = listOf(
-        ToolSpec(
-            "shell",
-            "系统命令（Android）",
-            "Run an Android system command (am / pm / cmd / dumpsys / getprop / settings …) through Pient's " +
-                "privileged channel (Shizuku ADB-level or root, falling back to the app's own uid). " +
-                "Use this for Android system operations; use `terminal` for GNU/Linux work inside Ubuntu.",
-            ToolSpec.obj(
-                "command" to ToolSpec.prop("string", "Android system command to run, e.g. 'dumpsys battery' or 'pm list packages'"),
-                "timeoutMs" to ToolSpec.prop("number", "Timeout in milliseconds (default 120000)"),
-                required = listOf("command"),
-            ),
-            layer,
-        ),
-    )
 
     override fun notReady(context: Context): String? = null
 

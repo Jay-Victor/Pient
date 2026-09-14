@@ -4,7 +4,6 @@ import android.content.Context
 import com.pient.app.tools.ToolLayer
 import com.pient.app.tools.ToolOutcome
 import com.pient.app.tools.ToolPart
-import com.pient.app.tools.ToolSpec
 import org.json.JSONObject
 
 /**
@@ -24,8 +23,6 @@ object ExtensionsPart : ToolPart {
     override val layer = ToolLayer.EXTENSION
 
     /** AI 可见工具：M2 起提供 `use_package`（照 Operit 的三兼容入口：工具包 / 技能 / 插件） */
-    override fun specs(): List<ToolSpec> = emptyList()
-
     override suspend fun run(context: Context, name: String, args: JSONObject): ToolOutcome =
         ToolOutcome.err("扩展层暂无可执行工具：$name（工具包支持在 M2 落地）")
 }

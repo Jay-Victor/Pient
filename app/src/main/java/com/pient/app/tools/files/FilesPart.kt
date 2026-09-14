@@ -4,11 +4,9 @@ import android.content.Context
 import com.pient.app.data.DocxConverter
 import com.pient.app.data.MEDIA_IMAGE_EXTS
 import com.pient.app.runtime.PiRuntime
-import com.pient.app.tools.GLOB_ANY_DEPTH
 import com.pient.app.tools.ToolLayer
 import com.pient.app.tools.ToolOutcome
 import com.pient.app.tools.ToolPart
-import com.pient.app.tools.ToolSpec
 import com.pient.app.tools.Truncate
 import org.json.JSONObject
 import java.io.File
@@ -28,109 +26,11 @@ object FilesPart : ToolPart {
 
     override val layer = ToolLayer.APP
 
-    /** 截断口径与 pi 的 truncate.ts 同源（唯一实现在 [com.pient.app.tools.Truncate]） */
-    private const val MAX_LINES = Truncate.MAX_LINES
-    private const val MAX_BYTES = Truncate.MAX_BYTES
+    /** 各列表工具的默认条数上限（截断口径本身在 [com.pient.app.tools.Truncate]） */
     private const val LS_LIMIT = 500
     private const val FIND_LIMIT = 1000
     private const val GREP_LIMIT = 100
 
-    override fun specs(): List<ToolSpec> = listOf(
-        ToolSpec(
-            "read",
-            "读取文件",
-            "Read the contents of a file. Supports text files. Output is truncated to $MAX_LINES lines " +
-                "or ${MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files.",
-            ToolSpec.obj(
-                "path" to ToolSpec.prop("string", "Path to the file to read (relative or absolute)"),
-                "offset" to ToolSpec.prop("number", "Line number to start reading from (1-indexed)"),
-                "limit" to ToolSpec.prop("number", "Maximum number of lines to read"),
-                required = listOf("path"),
-            ),
-            layer,
-        ),
-        ToolSpec(
-            "write",
-            "写入文件",
-            "Create or overwrite a file with the given content. Creates parent directories as needed. " +
-                "Use write only for new files or complete rewrites.",
-            ToolSpec.obj(
-                "path" to ToolSpec.prop("string", "Path to the file to write (relative or absolute)"),
-                "content" to ToolSpec.prop("string", "Content to write to the file"),
-                required = listOf("path", "content"),
-            ),
-            layer,
-        ),
-        ToolSpec(
-            "edit",
-            "编辑文件",
-            "Apply targeted replacements to a file. Each oldText must be unique in the original file " +
-                "and must not overlap with other edits in the same call.",
-            ToolSpec.obj(
-                "path" to ToolSpec.prop("string", "Path to the file to edit (relative or absolute)"),
-                "oldText" to ToolSpec.prop("string", "Exact text for one targeted replacement (must be unique in the file)"),
-                "newText" to ToolSpec.prop("string", "Replacement text for this targeted edit"),
-                "edits" to JSONObject()
-                    .put("type", "array")
-                    .put(
-                        "description",
-                        "One or more targeted replacements (alternative to oldText/newText). " +
-                            "Each edit is matched against the original file, not incrementally.",
-                    )
-                    .put(
-                        "items",
-                        ToolSpec.obj(
-                            "oldText" to ToolSpec.prop("string", "Exact text to replace"),
-                            "newText" to ToolSpec.prop("string", "Replacement text"),
-                            required = listOf("oldText", "newText"),
-                        ),
-                    ),
-                required = listOf("path"),
-            ),
-            layer,
-        ),
-        ToolSpec(
-            "grep",
-            "内容搜索",
-            "Search file contents for a pattern. Returns matching lines with file paths and line numbers. " +
-                "Output is truncated to $GREP_LIMIT matches or ${MAX_BYTES / 1024}KB (whichever is hit first).",
-            ToolSpec.obj(
-                "pattern" to ToolSpec.prop("string", "Search pattern (regex or literal string)"),
-                "path" to ToolSpec.prop("string", "Directory or file to search (default: current directory)"),
-                "glob" to ToolSpec.prop("string", "Filter files by glob pattern, e.g. '*.md' or 'src" + GLOB_ANY_DEPTH + ".kt'"),
-                "ignoreCase" to ToolSpec.prop("boolean", "Case-insensitive search (default: false)"),
-                "literal" to ToolSpec.prop("boolean", "Treat pattern as literal string instead of regex (default: false)"),
-                "context" to ToolSpec.prop("number", "Number of lines to show before and after each match (default: 0)"),
-                "limit" to ToolSpec.prop("number", "Maximum number of matches to return (default: $GREP_LIMIT)"),
-                required = listOf("pattern"),
-            ),
-            layer,
-        ),
-        ToolSpec(
-            "find",
-            "按名找文件",
-            "Search for files by glob pattern. Returns matching file paths relative to the search directory. " +
-                "Output is truncated to $FIND_LIMIT results or ${MAX_BYTES / 1024}KB (whichever is hit first).",
-            ToolSpec.obj(
-                "pattern" to ToolSpec.prop("string", "Glob pattern to match files, e.g. '*.md' or '" + GLOB_ANY_DEPTH + ".json'"),
-                "path" to ToolSpec.prop("string", "Directory to search in (default: current directory)"),
-                "limit" to ToolSpec.prop("number", "Maximum number of results (default: $FIND_LIMIT)"),
-                required = listOf("pattern"),
-            ),
-            layer,
-        ),
-        ToolSpec(
-            "ls",
-            "列目录",
-            "List directory contents. Returns entries sorted alphabetically, with '/' suffix for directories. " +
-                "Includes dotfiles. Output is truncated to $LS_LIMIT entries.",
-            ToolSpec.obj(
-                "path" to ToolSpec.prop("string", "Directory to list (default: current directory)"),
-                "limit" to ToolSpec.prop("number", "Maximum number of entries to return (default: $LS_LIMIT)"),
-            ),
-            layer,
-        ),
-    )
 
     override suspend fun run(context: Context, name: String, args: JSONObject): ToolOutcome = when (name) {
         "read" -> read(context, args)
@@ -178,20 +78,6 @@ object FilesPart : ToolPart {
         }
     }.getOrDefault(false)
 
-    private fun truncate(text: String, note: String): String {
-        val lines = text.split("\n")
-        var out = text
-        var truncated = false
-        if (lines.size > MAX_LINES) {
-            out = lines.take(MAX_LINES).joinToString("\n")
-            truncated = true
-        }
-        if (out.toByteArray(Charsets.UTF_8).size > MAX_BYTES) {
-            out = out.toByteArray(Charsets.UTF_8).copyOf(MAX_BYTES).toString(Charsets.UTF_8)
-            truncated = true
-        }
-        return if (truncated) "$out\n\n[$note：输出已截断（上限 $MAX_LINES 行 / ${MAX_BYTES / 1024}KB）]" else out
-    }
 
     /** glob → 正则：`**` = 任意层、`*` = 单层通配、`?` = 单字符 */
     private fun globRegex(glob: String): Regex {
@@ -231,7 +117,7 @@ object FilesPart : ToolPart {
         if (ext == "docx") {
             val text = DocxConverter.toPlainText(context, f.path)
             if (!text.isNullOrBlank()) {
-                return ToolOutcome.ok("（docx 已抽取为文本）\n" + truncate(text, "read"))
+                return ToolOutcome.ok("（docx 已抽取为文本）\n" + Truncate.of(text, "read"))
             }
         }
         if (isBinary(f)) {
@@ -248,7 +134,7 @@ object FilesPart : ToolPart {
         } else {
             ""
         }
-        return ToolOutcome.ok(truncate(head + numbered, "read"))
+        return ToolOutcome.ok(Truncate.of(head + numbered, "read"))
     }
 
     // ── write ──
@@ -344,7 +230,7 @@ object FilesPart : ToolPart {
         val shown = entries.take(limit)
         val lines = shown.map { if (it.isDirectory) it.name + "/" else it.name }
         val head = if (entries.size > shown.size) "（共 ${entries.size} 项，显示前 ${shown.size} 项）\n" else ""
-        return ToolOutcome.ok(truncate(head + lines.joinToString("\n"), "ls"))
+        return ToolOutcome.ok(Truncate.of(head + lines.joinToString("\n"), "ls"))
     }
 
     // ── find ──
@@ -364,7 +250,7 @@ object FilesPart : ToolPart {
             .take(limit)
             .toList()
         if (matches.isEmpty()) return ToolOutcome.ok("没有匹配 $pattern 的文件（搜索目录：${dir.path}）")
-        return ToolOutcome.ok(truncate(matches.joinToString("\n") { it.second }, "find"))
+        return ToolOutcome.ok(Truncate.of(matches.joinToString("\n") { it.second }, "find"))
     }
 
     // ── grep ──
@@ -419,6 +305,6 @@ object FilesPart : ToolPart {
         }
         if (hits == 0) return ToolOutcome.ok("没有匹配：$pattern（目录：${root.path}）")
         val head = "（$files 个文件命中 $hits 行）\n"
-        return ToolOutcome.ok(truncate(head + sb.toString().trimEnd(), "grep"))
+        return ToolOutcome.ok(Truncate.of(head + sb.toString().trimEnd(), "grep"))
     }
 }

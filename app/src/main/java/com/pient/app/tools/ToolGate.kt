@@ -55,14 +55,14 @@ object ToolGate {
     private fun valid(v: String?): String? = v?.takeIf { it == ALLOW || it == ASK || it == FORBID }
 
     /** 当前工具清单（唯一来源 = 调度器注册表；这里不再自己维护一份名单） */
-    private fun toolNames(): List<String> = ToolRegistry.gateNames()
+    private fun toolNames(context: Context): List<String> = ToolRegistry.gateNames(context)
 
     /** 策略快照：全局默认 + 每个工具的有效策略（文件缺失/损坏 → 内置默认，不写盘） */
     fun snapshot(context: Context): Pair<String, Map<String, String>> {
         val builtin = JSONObject(PiRuntime.DEFAULT_TOOL_POLICY)
         val defPolicy = valid(builtin.optString("default")) ?: ASK
         val builtinTools = builtin.optJSONObject("tools")
-        val names = toolNames()
+        val names = toolNames(context)
         val fallback = names.associateWith { t -> valid(builtinTools?.optString(t)) ?: defPolicy }
         val f = file(context)
         if (!f.exists()) return defPolicy to fallback

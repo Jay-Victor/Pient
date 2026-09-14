@@ -23,6 +23,8 @@ object Prompts {
         nativeTools: Boolean,
         /** 已启用技能的 available_skills 段（见 [Skills.promptBlock]）；null = 没有技能，不写这一段 */
         skillsBlock: String? = null,
+        /** 可用工具目录（[ToolRegistry.specs] 的结果）——标记模式下要逐条列给模型 */
+        toolCatalog: List<ToolSpec> = emptyList(),
     ): String {
         val sb = StringBuilder()
         sb.append("You are Pient's on-device agent, running inside the Pient Android app. ")
@@ -42,7 +44,7 @@ object Prompts {
             sb.append("<invoke name=\"read\"><parameter name=\"path\">notes.md</parameter></invoke>\n")
             sb.append("</tool_call>\n\n")
             sb.append("Available tools:\n")
-            for (t in ToolRegistry.specs()) {
+            for (t in toolCatalog) {
                 sb.append("- ").append(t.name)
                 val params = paramList(t)
                 if (params.isNotEmpty()) sb.append(": ").append(params)

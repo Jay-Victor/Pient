@@ -34,9 +34,9 @@ object ToolDispatcher {
         call: ToolCall,
         authorize: (suspend (ToolCall) -> Boolean)? = null,
     ): ToolOutcome = withContext(Dispatchers.IO) {
-        val spec = ToolRegistry.specOf(call.name)
+        val spec = ToolRegistry.specOf(context, call.name)
             ?: return@withContext ToolOutcome.err(
-                "未知工具：${call.name}（可用：${ToolRegistry.names().joinToString(", ")}）",
+                "未知工具：${call.name}（可用：${ToolRegistry.names(context).joinToString(", ")}）",
             )
         val part = ToolRegistry.partOf(spec.layer)
 

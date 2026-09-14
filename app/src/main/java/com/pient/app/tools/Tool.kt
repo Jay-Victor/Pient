@@ -58,9 +58,6 @@ data class ToolOutcome(
 interface ToolPart {
     val layer: ToolLayer
 
-    /** 本层提供的工具声明（顺序即下发顺序） */
-    fun specs(): List<ToolSpec>
-
     /** 层是否就绪；返回非空 = 未就绪原因（调度器不执行，直接把它作为错误结果回给模型） */
     fun notReady(context: Context): String? = null
 

@@ -474,7 +474,7 @@ fun SystemPermissionScreen(nav: NavController) {
                         },
                         onPick = { p -> applyToolPolicy(null, p) },
                     )
-                    ToolRegistry.names().forEach { tool ->
+                    ToolRegistry.names(context).forEach { tool ->
                         CardDivider()
                         ToolPolicyRow(
                             title = tool,

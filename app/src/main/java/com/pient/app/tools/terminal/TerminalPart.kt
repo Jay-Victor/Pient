@@ -5,7 +5,6 @@ import com.pient.app.runtime.PiRuntime
 import com.pient.app.tools.ToolLayer
 import com.pient.app.tools.ToolOutcome
 import com.pient.app.tools.ToolPart
-import com.pient.app.tools.ToolSpec
 import com.pient.app.tools.Truncate
 import org.json.JSONObject
 
@@ -27,20 +26,6 @@ object TerminalPart : ToolPart {
 
     private const val DEFAULT_TIMEOUT_S = 120L
 
-    override fun specs(): List<ToolSpec> = listOf(
-        ToolSpec(
-            "terminal",
-            "执行命令（Ubuntu）",
-            "Execute a bash command in the workspace (Ubuntu). Returns stdout and stderr, truncated to " +
-                "the last ${Truncate.MAX_LINES} lines or ${Truncate.MAX_BYTES / 1024}KB. Optionally provide a timeout in seconds.",
-            ToolSpec.obj(
-                "command" to ToolSpec.prop("string", "Shell command to execute"),
-                "timeout" to ToolSpec.prop("number", "Timeout in seconds (optional, default $DEFAULT_TIMEOUT_S)"),
-                required = listOf("command"),
-            ),
-            layer,
-        ),
-    )
 
     /**
      * 未就绪的两种情况分别说明（对应页面上「未就绪不可选」的同一口径）：

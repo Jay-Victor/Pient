@@ -684,16 +684,17 @@ class ChatState {
     ): ChatOutcome {
         val ctx = AppCtx.get()
         val nativeTools = cfg.toolCallEnabled && ctx != null
-        val toolsJson = when {
-            !nativeTools -> null
-            AiBackend.isAnthropicProtocol(cfg.endpoint) -> ToolRegistry.anthropicDefinitions()
-            else -> ToolRegistry.definitions()
+        // 工具声明来自工具包（[ToolRegistry.specs]），需要 context 才能装载包
+        val toolsJson = if (!nativeTools) null else ctx?.let { c ->
+            if (AiBackend.isAnthropicProtocol(cfg.endpoint)) ToolRegistry.anthropicDefinitions(c)
+            else ToolRegistry.definitions(c)
         }
         val prompt = Prompts.systemPrompt(
             workspace = ctx?.let { PiRuntime.workspaceDir(it).absolutePath }.orEmpty(),
             nativeTools = nativeTools,
             // 技能装配（与 pi 同口径）：提示词里只给 name/description/location，正文由模型按需 read
             skillsBlock = ctx?.let { Skills.promptBlock(Skills.enabled(it)) },
+            toolCatalog = ctx?.let { ToolRegistry.specs(it) }.orEmpty(),
         )
         systemPrompt = prompt   // 面板显示真实下发内容（含技能段）
         val turns = ArrayList<ChatTurn>(history.size)
