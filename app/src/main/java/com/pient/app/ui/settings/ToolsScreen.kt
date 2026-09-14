@@ -1,5 +1,6 @@
 package com.pient.app.ui.settings
 
+import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,6 +22,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Shield
@@ -30,6 +34,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,23 +54,44 @@ import com.pient.app.tools.ToolPkgLoader
 import com.pient.app.tools.ToolRegistry
 
 /**
- * **工具页** —— 工具层的唯一可视化入口（2026-09-14）：
+ * **工具页** —— 工具层的唯一可视化入口（2026-09-14）。
  *
- * 页面的组织方式就是架构本身：**层（工具在哪跑）→ 包（谁声明的）→ 工具（AI 能用什么）**。
- * - 层：四层各自的就绪状态（层① 要 Shizuku/Root、层② 要 rootfs、层③/④ 始终就绪）；
- * - 包：每个包的启停（关掉即不再下发给模型）、来源（内置/用户）、真实落点路径；
- * - 工具：名字 + 中文标签 + 描述（就是模型收到的那段），参数 schema 不在页面重复渲染。
+ * 一页装两件事，且刻意分成上下两段（2026-09-14 用户拍板合并，原「工具权限」页并入本页）：
+ * - **清单**（上面）：层（工具在哪跑）→ 包（谁声明的、开不开）→ 工具（AI 能用什么）；
+ * - **策略**（下面）：调用时的授权（允许 / 每次询问 / 禁止），全局默认 + 逐工具例外。
  *
- * 授权（ToolGate）不在这里改 —— 那是「系统权限设置」页的职责（单一写入点），这里只给跳转。
+ * 为什么合成一页：两页面对的是**同一份工具清单**，只是看的角度不同（有什么 / 问不问）；
+ * 分成两页会让人来回跳（改完包再跑另一页改授权）。段与段之间用分组标题隔开，
+ * 各自的数据源仍是单一实现：清单来自工具包、策略来自 [ToolGate]（`pient_gate.json`）。
+ *
+ * 工具清单随包增减（[ToolRegistry.specs]，按层排序），不再维护手写工具说明表。
  */
 @Composable
 fun ToolsScreen(nav: NavController) {
     val context = LocalContext.current
     var packages by remember { mutableStateOf(ToolPkgLoader.packages(context)) }
-    var expanded by remember { mutableStateOf(setOf<String>()) }
+    var expandedPkg by remember { mutableStateOf(setOf<String>()) }
+
+    // ── 授权策略（原「工具权限」页） ──
+    var toolDefault by remember { mutableStateOf(ToolGate.ASK) }
+    var toolPolicies by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var expandedKey by remember { mutableStateOf<String?>(null) }
+
+    fun reloadPolicies() {
+        val (d, m) = ToolGate.snapshot(context)
+        toolDefault = d
+        toolPolicies = m
+    }
+
+    fun applyPolicy(tool: String?, policy: String) {
+        if (tool == null) ToolGate.setDefault(context, policy) else ToolGate.setToolPolicy(context, tool, policy)
+        reloadPolicies()
+        expandedKey = null
+        Toast.makeText(context, "已设为「${policyLabel(policy)}」", Toast.LENGTH_SHORT).show()
+    }
 
     /** 关/开一个包（写盘后强制重载，页面与下发清单立即一致） */
-    fun toggle(pkg: ToolPackageState, on: Boolean) {
+    fun togglePkg(pkg: ToolPackageState, on: Boolean) {
         ToolPkgLoader.setEnabled(context, pkg.pkg.name, on)
         packages = ToolPkgLoader.packages(context, force = true)
         Toast.makeText(
@@ -75,8 +101,10 @@ fun ToolsScreen(nav: NavController) {
         ).show()
     }
 
-    val enabledTools = packages.filter { it.enabled }.flatMap { it.effectiveTools }
-    val layerCount = ToolLayer.entries.count { layer -> enabledTools.any { ToolRegistry.layerOf(context, it.name) == layer } }
+    LaunchedEffect(Unit) { reloadPolicies() }
+
+    val specs = ToolRegistry.specs(context)
+    val layers = ToolLayer.entries.filter { layer -> specs.any { it.layer == layer } }
 
     Column(Modifier.fillMaxSize()) {
         // ── 顶栏（与其他设置二级页一致） ──
@@ -101,33 +129,33 @@ fun ToolsScreen(nav: NavController) {
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 24.dp),
         ) {
-            // ── 概览：层 × 包 × 工具 ──
-            GroupHeader("工具层", "$layerCount 层 · ${packages.count { it.enabled }} 个包 · ${enabledTools.size} 个工具")
+            /* ═══════════ 一、工具清单 ═══════════ */
+
+            // 概览：层 × 包 × 工具
+            GroupHeader("工具层", "${layers.size} 层 · ${packages.count { it.enabled }} 个包 · ${specs.size} 个工具")
             Card {
-                ToolLayer.entries.forEachIndexed { i, layer ->
+                layers.forEachIndexed { i, layer ->
                     if (i > 0) CardDivider()
-                    LayerRow(context, layer)
+                    LayerRow(context, layer, specs)
                 }
             }
 
-            // ── 包清单 ──
+            // 包清单（声明工具的地方；执行体是四层 Kotlin 实现）
             GroupHeader("工具包", "声明工具的地方；执行体是四层 Kotlin 实现")
             packages.forEach { st ->
                 Card {
-                    PackageHead(st, expanded = st.pkg.name in expanded, onToggle = { toggle(st, it) }) {
-                        expanded = if (st.pkg.name in expanded) expanded - st.pkg.name else expanded + st.pkg.name
+                    PackageHead(st, expanded = st.pkg.name in expandedPkg, onToggle = { togglePkg(st, it) }) {
+                        expandedPkg = if (st.pkg.name in expandedPkg) expandedPkg - st.pkg.name else expandedPkg + st.pkg.name
                     }
-                    if (st.pkg.name in expanded) {
+                    if (st.pkg.name in expandedPkg) {
                         st.effectiveTools.forEach { t ->
                             CardDivider()
                             ToolRow(t.name, t.label, t.description)
                         }
                         if (st.effectiveTools.isEmpty()) {
                             CardDivider()
-                            Text(
+                            Hint(
                                 "（此包未声明可用工具）",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(14.dp),
                             )
                         }
@@ -136,30 +164,66 @@ fun ToolsScreen(nav: NavController) {
                 Spacer(Modifier.height(12.dp))
             }
 
-            // ── 用户包入口与边界说明 ──
+            // 用户包与装载诊断
             GroupHeader("用户包", null)
             Card {
-                NoteRow(
+                Hint(
                     "把包文件放到应用私有目录 toolpkg/ 下即可被扫描（与内置包同一格式）。" +
                         "当前版本只支持「声明 + 调度」——包里的 JS 实现体尚未接线，用户包的工具会走内置执行体（同名即接管）。",
+                    modifier = Modifier.padding(14.dp),
                 )
                 CardDivider()
                 val dir = remember { java.io.File(context.filesDir, "toolpkg").absolutePath }
-                NoteRow("落点：$dir", mono = true)
+                IconHint(Icons.Outlined.Folder, dir)
                 CardDivider()
                 val warns = ToolPkgLoader.warnings
                 if (warns.isEmpty()) {
-                    NoteRow("装载诊断：无（${packages.size} 个包全部解析成功）")
+                    Hint("装载诊断：无（${packages.size} 个包全部解析成功）", modifier = Modifier.padding(14.dp))
                 } else {
-                    warns.forEach { NoteRow("装载诊断：$it", warn = true) }
+                    warns.forEach { Hint("装载诊断：$it", warn = true, modifier = Modifier.padding(14.dp)) }
                 }
-                CardDivider()
-                val defaultPolicy = remember { ToolGate.snapshot(context).first }
-                NoteRow(
-                    "工具级授权（每个工具问不问用户）在「系统权限设置」里改；本页只负责「有哪些工具」。" +
-                        "当前默认策略：${policyLabelText(defaultPolicy)}",
-                    onClick = { nav.navigate("system_permissions") },
+            }
+
+            /* ═══════════ 二、调用策略（授权） ═══════════ */
+
+            GroupHeader(
+                "调用策略",
+                "AI 调用工具前按这里执行；${specs.size} 个工具，当前默认「${policyLabel(toolDefault)}」",
+            )
+            Card {
+                Hint(
+                    "允许 = 直接执行；每次询问 = 弹三选授权；禁止 = 直接拦下并把原因回给模型。" +
+                        "授权弹窗里的「始终允许」也写到这里（应用私有目录的 pient_gate.json）。",
+                    modifier = Modifier.padding(14.dp),
                 )
+                CardDivider()
+                PolicyRow(
+                    title = "默认策略",
+                    desc = "未单独设置的工具都按它执行",
+                    policy = toolDefault,
+                    expanded = expandedKey == DEFAULT_KEY,
+                    onClick = { expandedKey = if (expandedKey == DEFAULT_KEY) null else DEFAULT_KEY },
+                    onPick = { p -> applyPolicy(null, p) },
+                )
+            }
+
+            // 逐工具（与上面的清单同一份、同一分层）
+            layers.forEach { layer ->
+                val layerSpecs = specs.filter { it.layer == layer }
+                GroupHeader("${layer.title}层", layer.desc)
+                Card {
+                    layerSpecs.forEachIndexed { i, spec ->
+                        if (i > 0) CardDivider()
+                        PolicyRow(
+                            title = spec.name,
+                            desc = spec.label,
+                            policy = toolPolicies[spec.name] ?: toolDefault,
+                            expanded = expandedKey == spec.name,
+                            onClick = { expandedKey = if (expandedKey == spec.name) null else spec.name },
+                            onPick = { p -> applyPolicy(spec.name, p) },
+                        )
+                    }
+                }
             }
         }
     }
@@ -167,12 +231,20 @@ fun ToolsScreen(nav: NavController) {
 
 /* ────────────────────────── 页面局部组件 ────────────────────────── */
 
-/** 分组标题（与设置页 SettingsGroup 的标题口径一致：卡片外上方） */
+private const val DEFAULT_KEY = "__default__"
+
+private fun policyLabel(policy: String): String = when (policy) {
+    ToolGate.ALLOW -> "允许"
+    ToolGate.FORBID -> "禁止"
+    else -> "每次询问"
+}
+
+/** 分组标题（卡片外上方；与设置页 SettingsGroup 同款口径） */
 @Composable
 private fun GroupHeader(title: String, subtitle: String?) {
     Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 8.dp)) {
         Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-        if (subtitle != null) {
+        if (!subtitle.isNullOrBlank()) {
             Text(
                 subtitle,
                 style = MaterialTheme.typography.bodySmall,
@@ -200,6 +272,35 @@ private fun CardDivider() {
     Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)))
 }
 
+/** 说明文字（可选错误色） */
+@Composable
+private fun Hint(text: String, warn: Boolean = false, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = if (warn) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier.fillMaxWidth(),
+    )
+}
+
+/** 说明行（等宽 + 文件夹图标，用于真实落点路径） */
+@Composable
+private fun IconHint(icon: ImageVector, text: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 /** 层图标：① 系统命令（Shield）② 终端（Terminal）③ 自身工具（Build）④ 扩展（Extension） */
 private fun layerIcon(layer: ToolLayer): ImageVector = when (layer) {
     ToolLayer.SYSTEM -> Icons.Outlined.Shield
@@ -208,11 +309,11 @@ private fun layerIcon(layer: ToolLayer): ImageVector = when (layer) {
     ToolLayer.EXTENSION -> Icons.Outlined.Extension
 }
 
-/** 一层一行：图标 + 层名 + 该层工具名 + 就绪状态 */
+/** 一层一行：图标 + 层名 + 层说明 + 该层工具名 + 就绪状态 */
 @Composable
-private fun LayerRow(context: android.content.Context, layer: ToolLayer) {
+private fun LayerRow(context: Context, layer: ToolLayer, specs: List<com.pient.app.tools.ToolSpec>) {
     val part = ToolRegistry.partOf(layer)
-    val tools = ToolRegistry.specs(context).filter { it.layer == layer }
+    val tools = specs.filter { it.layer == layer }
     val notReady = part.notReady(context)
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -244,7 +345,7 @@ private fun LayerRow(context: android.content.Context, layer: ToolLayer) {
     }
 }
 
-/** 包表头：名称 + 来源 + 副标题（描述）+ 启停开关（整行可点 = 展开/收起） */
+/** 包表头：名称 + 来源徽标 + 副标题 + 启停开关（整行可点 = 展开/收起工具） */
 @Composable
 private fun PackageHead(
     st: ToolPackageState,
@@ -299,30 +400,85 @@ private fun ToolRow(name: String, label: String, description: String) {
     }
 }
 
-/** 说明行（可点则带跳转） */
+/** 策略行：标题 + 说明 + 当前策略 + 展开箭头；展开后三选（允许 / 每次询问 / 禁止，选中打勾） */
 @Composable
-private fun NoteRow(text: String, mono: Boolean = false, warn: Boolean = false, onClick: (() -> Unit)? = null) {
+private fun PolicyRow(
+    title: String,
+    desc: String,
+    policy: String,
+    expanded: Boolean,
+    onClick: () -> Unit,
+    onPick: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(vertical = 10.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onBackground)
+                if (desc.isNotBlank()) {
+                    Text(
+                        desc,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+            }
+            Text(
+                policyLabel(policy),
+                style = MaterialTheme.typography.labelMedium,
+                color = when (policy) {
+                    ToolGate.ALLOW -> MaterialTheme.colorScheme.primary
+                    ToolGate.FORBID -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            Icon(
+                if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 6.dp).size(18.dp),
+            )
+        }
+        if (expanded) {
+            OptionRow("允许", "直接执行，不再询问", ToolGate.ALLOW, policy, onPick)
+            OptionRow("每次询问", "每次调用都弹授权（默认）", ToolGate.ASK, policy, onPick)
+            OptionRow("禁止", "直接拦下，并把原因回给模型", ToolGate.FORBID, policy, onPick)
+        }
+    }
+}
+
+/** 策略选项行（缩进一格；选中 = 主色 + 对勾，整行可点） */
+@Composable
+private fun OptionRow(label: String, desc: String, value: String, current: String, onPick: (String) -> Unit) {
+    val selected = value == current
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .let { if (onClick != null) it.clickable(onClick = onClick) else it }
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .clickable { onPick(value) }
+            .padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
     ) {
-        if (mono) {
-            Icon(
-                Icons.Outlined.Folder, null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp),
+        Column(Modifier.weight(1f)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
             )
-            Spacer(Modifier.width(10.dp))
+            Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text(
-            text,
-            style = if (mono) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall,
-            fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
-            color = if (warn) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (selected) {
+            Icon(
+                Icons.Outlined.CheckCircle, null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
 }
 
@@ -334,18 +490,6 @@ private fun Badge(text: String) {
             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
             .padding(horizontal = 6.dp, vertical = 2.dp),
     ) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
-        )
+        Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
     }
-}
-
-/** 授权档位的中文口径（与 SystemPermissionScreen 一致：ASK 询问 / ALLOW 允许 / DENY 拒绝） */
-private fun policyLabelText(policy: String): String = when (policy) {
-    "ASK" -> "询问"
-    "ALLOW" -> "允许"
-    "DENY" -> "拒绝"
-    else -> policy
 }

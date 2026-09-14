@@ -124,7 +124,7 @@ fun SettingsScreen(nav: NavController) {
                 SettingsRow(
                     icon = Icons.Outlined.Build,
                     title = "工具",
-                    subtitle = "$toolCount 个工具 · 4 层 · 工具包",
+                    subtitle = "$toolCount 个工具 · 层 · 包 · 调用策略",
                     onClick = { nav.navigate("tools") },
                 )
                 DividerLine()
