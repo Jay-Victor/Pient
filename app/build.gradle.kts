@@ -41,7 +41,6 @@ android {
 // 原「pientJniLibs / pientAssets 同步 + ABI 校验」四个构建任务（syncPientTerminalBinaries /
 // syncPientRootfsArchive / syncPientRuntimeLibs / writePientRuntimeLibsManifest）随之删除 ——
 // APK 里不再有 libpient_*.so 与 pient-rootfs.tgz，本模块回归普通应用工程。
-// （runtime/ 目录下的拉取脚本与缓存保留在仓库里，作为历史参考，不再参与构建。）
 
 kotlin {
     compilerOptions {
