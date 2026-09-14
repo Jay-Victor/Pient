@@ -110,11 +110,11 @@ object SettingsStore {
     //   首启引导页「系统权限选项页」选定、设置页「系统权限设置」页可改；语义见 data/SystemPermissions.kt
     var permissionTier by mutableStateOf(PermissionTier.STANDARD)
 
-    // ── 执行环境（环境配置页的界面选择；2026-09-14 执行链路移除后仅作界面状态保存）──
+    // ── 执行环境（环境配置页选择）：写进 files/pient-rt/exec_env，包装脚本每次现读 —— 改完生效 ──
     var execEnv by mutableStateOf(ExecEnv.UBUNTU)
 
-    // ── 环境内软件（Ubuntu）：apt 镜像源 + 组件勾选（id 见 data/EnvCatalog.kt；仅界面状态）──
-    var aptMirror by mutableStateOf(APT_MIRRORS[0].name)
+    // ── 环境内软件（Ubuntu）：apt 镜像源 + 组件勾选（id 见 data/EnvCatalog.kt）──
+    var aptMirror by mutableStateOf(DEFAULT_APT_MIRROR)
     var selectedComponents by mutableStateOf(setOf("ca", "git", "curl"))
 
     // ── 首启环境安装（2026-09-13，对齐 Operit 的 SetupScreen）：首次进终端页弹一次「环境安装」，
@@ -198,7 +198,7 @@ object SettingsStore {
             PermissionTier.valueOf(p.getString("permission_tier", "STANDARD") ?: "STANDARD")
         }.getOrDefault(PermissionTier.STANDARD)
         execEnv = ExecEnv.fromId(p.getString("exec_env", ExecEnv.UBUNTU.id))
-        aptMirror = p.getString("apt_mirror", APT_MIRRORS[0].name) ?: APT_MIRRORS[0].name
+        aptMirror = p.getString("apt_mirror", DEFAULT_APT_MIRROR) ?: DEFAULT_APT_MIRROR
         selectedComponents = p.getStringSet("ubuntu_components", setOf("ca", "git", "curl"))
             ?.toSet() ?: setOf("ca", "git", "curl")
         envSetupDone = p.getBoolean("env_setup_done", false)

@@ -5,13 +5,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
 /**
- * 单个服务商的真实配置（2026-09-09 实现 AI 接入；替换原型期 mock）：
- * 配置页编辑即写入 AiConfigStore.configs（Compose state），snapshotFlow 自动落盘
- * filesDir/pient_data/ai_config.json；AI 是否配置完成（聊天页引导第二步）一并持久化。
+ * 单个服务商的真实配置（2026-09-09 实现 AI 接入；替换原型期 mock）。
+ *
+ * **持久化（2026-09-14 用户拍板「pi 原生文件为唯一真相源」）**：
+ * - 服务商 / 模型 / 密钥 / 思考写法 / 上下文压缩 → 写进 guest 的
+ *   `~/.pi/agent/{models.json, auth.json, settings.json}`（见 [PiAgentFiles]），pi 直接读它；
+ * - **Pient 自有、pi 没有对应概念**的字段（媒体直发三开关、上下文媒体裁剪回合数、
+ *   手动压缩指令、模型定价覆盖、汇率、配置完成标记）→ 留在 `files/pient_data/ai_config.json`。
  */
 data class ProviderConfig(
     val providerId: String,
@@ -32,19 +37,16 @@ data class ProviderConfig(
     /**
      * 思考参数写法（2026-09-12 真实化）：决定「思考模式开关」在线上怎么表达——
      * 关闭 = 显式禁用字面量、开启 = 显式启用（详见 [ReasoningFormat]）。
-     * 老配置缺该字段 → AUTO（按模型名推断，识别不出则维持「不发参数」的老行为）。
+     * 落盘到 pi 的 `compat.thinkingFormat`。
      */
     val reasoningFormat: ReasoningFormat = ReasoningFormat.AUTO,
 
     // ── 媒体能力（照 Operit 的三个 direct-processing 开关；默认关 = 不直发）──
-    //
     // 口径（2026-09-14 用户拍板「照 Operit 全量对齐」）：
     // - **开** = 该类型媒体转成内容部件**直发**给模型（图片 `image_url` / 音频 `input_audio` /
-    //   视频 `video_url`，Operit `OpenAIProvider.buildContentField` 同形）；
-    // - **关** = 不直发，附件行后跟一行 Operit 原文占位「图片内容已省略，当前模型不支持图片处理」
-    //   （音视频同款文案），**消息照常发送**——不拦用户（Operit 从不因媒体阻断对话）；
-    //   与 Operit 的差别：Pient 的附件有真实路径，占位旁边仍保留「名称 · 路径」。
-
+    //   视频 `video_url`）；**关** = 不直发，附件行后跟一行占位文案，消息照常发送。
+    // 注：图片开关同时写进 pi 的 `models[].input`（text/image）；音频与视频 pi 没有对应概念，
+    // 只留在 ai_config.json（Pient 自己的请求侧行为）。
     /** 模型支持识图（Operit `enableDirectImageProcessing`，默认 false） */
     val imageDirectEnabled: Boolean = false,
     /** 模型支持音频解析（Operit `enableDirectAudioProcessing`，默认 false） */
@@ -52,18 +54,16 @@ data class ProviderConfig(
     /** 模型支持视频解析（Operit `enableDirectVideoProcessing`，默认 false） */
     val videoDirectEnabled: Boolean = false,
 
-    // ── 上下文管理（**2026-09-14 改为 pi 原生口径**；此前 Operit 的总结式那一套已删）──
-    // 依据 pi `~/.pi/agent/settings.json` 的 `compaction` 块（见 data/ContextPolicy.kt 文件头）。
-
-    /** 自动压缩上下文（pi `compaction.enabled`，默认 true）；关掉后仍能在用量卡里手动压缩 */
+    // ── 上下文管理（**pi 原生口径**；写进 settings.json 的 compaction 块）──
+    /** 自动压缩上下文（pi `compaction.enabled`，默认 true）；关掉后仍能手动压缩 */
     val compactionEnabled: Boolean = ContextPolicy.DEFAULT_COMPACTION_ENABLED,
     /** 摘要后保留的最近 tokens（pi `compaction.keepRecentTokens`，默认 20000） */
     val keepRecentTokens: String = ContextPolicy.DEFAULT_KEEP_RECENT_TOKENS.toString(),
     /** 给模型回复预留的 tokens（pi `compaction.reserveTokens`，默认 16384） */
     val reserveTokens: String = ContextPolicy.DEFAULT_RESERVE_TOKENS.toString(),
-    /** 手动压缩时交给 pi 的指令（pi `compact` 的 `customInstructions`；留空 = pi 默认 checkpoint 口径） */
+    /** 手动压缩时交给 pi 的指令（`compact` 的 `customInstructions`；Pient 侧字段） */
     val compactInstructions: String = "",
-    /** 历史中保留图片附件的最近用户回合数（请求侧附件裁剪用） */
+    /** 历史中保留图片附件的最近用户回合数（请求侧附件裁剪用，Pient 侧字段） */
     val maxImageHistoryTurns: String = "2",
     /** 历史中保留音视频附件的最近用户回合数（同上） */
     val maxMediaHistoryTurns: String = "1",
@@ -125,136 +125,171 @@ object AiConfigStore {
         pricing.remove(pricingKey(providerId, model))
     }
 
-    private fun file(context: Context) = File(context.filesDir, "pient_data/ai_config.json")
+    // ─────────────────────────── 落盘 ───────────────────────────
+
+    /** Pient 自有数据（pi 没有对应概念的那些）——仍落 pient_data/ai_config.json */
+    private fun legacyFile(context: Context) = File(context.filesDir, "pient_data/ai_config.json")
 
     fun load(context: Context) {
-        val f = file(context)
-        if (!f.exists()) return
         try {
-            val root = JSONObject(f.readText())
-            aiConfigured = root.optBoolean("aiConfigured", false)
-            usdToCnyRate = root.optDouble("usdToCnyRate", ModelPricingDefaults.DEFAULT_USD_TO_CNY_RATE)
-            // 用户覆盖定价（键 = provider:model；无 key 时用内置表默认）
-            root.optJSONObject("pricing")?.let { obj ->
-                for (key in obj.keys()) {
-                    val v = obj.optJSONObject(key) ?: continue
-                    pricing[key] = ModelPricing(
-                        billingMode = if (v.optString("mode").equals("COUNT", ignoreCase = true)) {
-                            BillingMode.COUNT
-                        } else {
-                            BillingMode.TOKEN
-                        },
-                        inputPerMillion = v.optDouble("input", 0.0),
-                        outputPerMillion = v.optDouble("output", 0.0),
-                        cachedInputPerMillion = v.optDouble("cachedInput", 0.0),
-                        pricePerRequest = v.optDouble("pricePerRequest", 0.0),
-                        cacheWritePerMillion = v.optDouble("cacheWrite", 0.0),
-                        currency = if (v.optString("currency").equals("USD", ignoreCase = true)) {
-                            PricingCurrency.USD
-                        } else {
-                            PricingCurrency.CNY
-                        },
-                    )
-                }
+            val (fromPi, keys) = PiAgentFiles.read(context)
+            if (fromPi.isEmpty() && legacyFile(context).isFile) {
+                // ① 首次运行 / 迁移：旧的 ai_config.json 里还带着完整服务商配置
+                if (migrateFromLegacy(context)) return
             }
-            val arr = root.optJSONArray("providers") ?: return
-            for (i in 0 until arr.length()) {
-                val o = arr.getJSONObject(i)
-                val id = o.optString("providerId")
-                if (id.isBlank()) continue
-                configs[id] = ProviderConfig(
-                    providerId = id,
-                    endpoint = o.optString("endpoint"),
-                    apiKey = o.optString("apiKey"),
-                    modelList = o.optString("modelList"),
-                    ctxLenK = o.optString("ctxLenK", "200"),
-                    maxOutK = o.optString("maxOutK", "64"),
-                    tempEnabled = o.optBoolean("tempEnabled", false),
-                    tempValue = o.optString("tempValue", "1.0"),
-                    topKEnabled = o.optBoolean("topKEnabled", false),
-                    topKValue = o.optString("topKValue", "0"),
-                    topPEnabled = o.optBoolean("topPEnabled", false),
-                    topPValue = o.optString("topPValue", "1.0"),
-                    reasoningFormat = runCatching {
-                        ReasoningFormat.valueOf(o.optString("reasoningFormat", ""))
-                    }.getOrNull()?.takeUnless { it == ReasoningFormat.AUTO }
-                        // 老配置缺该字段、或存的还是 AUTO（默认态而非用户主动选择）：
-                        // 已知服务商一律采用服务商目录里的预设写法，自定义服务商才留在 AUTO
-                        ?: ProviderCatalog.byId[id]?.reasoningFormat
-                        ?: ReasoningFormat.AUTO,
-                    // 媒体能力（2026-09-14）：老配置缺字段 → Operit 默认值（三关）
-                    imageDirectEnabled = o.optBoolean("imageDirectEnabled", false),
-                    audioDirectEnabled = o.optBoolean("audioDirectEnabled", false),
-                    videoDirectEnabled = o.optBoolean("videoDirectEnabled", false),
-                    // 上下文管理（2026-09-14 pi 原生口径）：老配置的 summaryEnabled /
-                    // summaryCustomRules 迁移到新键（用户此前关掉自动总结 = 现在也关）
-                    compactionEnabled = o.optBoolean(
-                        "compactionEnabled",
-                        o.optBoolean("summaryEnabled", ContextPolicy.DEFAULT_COMPACTION_ENABLED),
-                    ),
-                    keepRecentTokens = o.optString(
-                        "keepRecentTokens",
-                        ContextPolicy.DEFAULT_KEEP_RECENT_TOKENS.toString(),
-                    ),
-                    reserveTokens = o.optString(
-                        "reserveTokens",
-                        ContextPolicy.DEFAULT_RESERVE_TOKENS.toString(),
-                    ),
-                    compactInstructions = o.optString(
-                        "compactInstructions",
-                        o.optString("summaryCustomRules", ""),
-                    ),
-                    maxImageHistoryTurns = o.optString(
-                        "maxImageHistoryTurns",
-                        ContextPolicy.DEFAULT_MAX_IMAGE_HISTORY_TURNS.toString(),
-                    ),
-                    maxMediaHistoryTurns = o.optString(
-                        "maxMediaHistoryTurns",
-                        ContextPolicy.DEFAULT_MAX_MEDIA_HISTORY_TURNS.toString(),
-                    ),
-                )
-            }
+            fromPi.forEach { (id, c) -> configs[id] = c.copy(apiKey = keys[id].orEmpty()) }
+            loadExtras(context)
         } catch (e: Exception) {
             // 配置损坏：忽略（按未配置处理）
         }
     }
 
+    /**
+     * 从旧格式迁移（`providers` 数组 + 完整字段）：写一份 pi 原生文件，之后 ai_config.json
+     * 只剩 Pient 附加数据。迁移只做一次（迁移后 pi 文件在手，[load] 不会再走这条路）。
+     */
+    private fun migrateFromLegacy(context: Context): Boolean = runCatching {
+        val root = JSONObject(legacyFile(context).readText())
+        val arr = root.optJSONArray("providers") ?: return@runCatching false
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            val id = o.optString("providerId")
+            if (id.isBlank()) continue
+            configs[id] = ProviderConfig(
+                providerId = id,
+                endpoint = o.optString("endpoint"),
+                apiKey = o.optString("apiKey"),
+                modelList = o.optString("modelList"),
+                ctxLenK = o.optString("ctxLenK", "200"),
+                maxOutK = o.optString("maxOutK", "64"),
+                tempEnabled = o.optBoolean("tempEnabled", false),
+                tempValue = o.optString("tempValue", "1.0"),
+                topKEnabled = o.optBoolean("topKEnabled", false),
+                topKValue = o.optString("topKValue", "0"),
+                topPEnabled = o.optBoolean("topPEnabled", false),
+                topPValue = o.optString("topPValue", "1.0"),
+                reasoningFormat = runCatching { ReasoningFormat.valueOf(o.optString("reasoningFormat", "")) }
+                    .getOrNull()?.takeUnless { it == ReasoningFormat.AUTO }
+                    ?: ProviderCatalog.byId[id]?.reasoningFormat
+                    ?: ReasoningFormat.AUTO,
+                imageDirectEnabled = o.optBoolean("imageDirectEnabled", false),
+                audioDirectEnabled = o.optBoolean("audioDirectEnabled", false),
+                videoDirectEnabled = o.optBoolean("videoDirectEnabled", false),
+                compactionEnabled = o.optBoolean("compactionEnabled", ContextPolicy.DEFAULT_COMPACTION_ENABLED),
+                keepRecentTokens = o.optString("keepRecentTokens", ContextPolicy.DEFAULT_KEEP_RECENT_TOKENS.toString()),
+                reserveTokens = o.optString("reserveTokens", ContextPolicy.DEFAULT_RESERVE_TOKENS.toString()),
+                compactInstructions = o.optString("compactInstructions", ""),
+                maxImageHistoryTurns = o.optString("maxImageHistoryTurns", ContextPolicy.DEFAULT_MAX_IMAGE_HISTORY_TURNS.toString()),
+                maxMediaHistoryTurns = o.optString("maxMediaHistoryTurns", ContextPolicy.DEFAULT_MAX_MEDIA_HISTORY_TURNS.toString()),
+            )
+        }
+        aiConfigured = root.optBoolean("aiConfigured", false)
+        usdToCnyRate = root.optDouble("usdToCnyRate", ModelPricingDefaults.DEFAULT_USD_TO_CNY_RATE)
+        readPricing(root.optJSONObject("pricing"))
+        if (configs.isEmpty()) return@runCatching false
+        // 立刻把 pi 原生文件写出来，并把 ai_config.json 收敛成「只含附加数据」
+        save(context)
+        android.util.Log.i("PientConfig", "已从 ai_config.json 迁移到 pi 原生配置（${configs.size} 个服务商）")
+        true
+    }.getOrDefault(false)
+
+    /** 读取 Pient 附加数据（媒体开关/压缩指令/定价/汇率/完成标记），合并进已有 configs */
+    private fun loadExtras(context: Context) {
+        val f = legacyFile(context)
+        if (!f.isFile) return
+        val root = JSONObject(f.readText())
+        aiConfigured = root.optBoolean("aiConfigured", aiConfigured)
+        usdToCnyRate = root.optDouble("usdToCnyRate", usdToCnyRate)
+        readPricing(root.optJSONObject("pricing"))
+        root.optJSONArray("providers")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                val id = o.optString("providerId")
+                if (id.isBlank()) continue
+                val key = o.optString("apiKey")
+                val cur = configs[id]
+                if (cur == null) {
+                    // 只在附加数据里出现的服务商（理论上不该有）：按最小配置恢复
+                    configs[id] = ProviderConfig(
+                        providerId = id,
+                        apiKey = key,
+                        audioDirectEnabled = o.optBoolean("audioDirectEnabled", false),
+                        videoDirectEnabled = o.optBoolean("videoDirectEnabled", false),
+                        compactInstructions = o.optString("compactInstructions", ""),
+                        maxImageHistoryTurns = o.optString("maxImageHistoryTurns", "2"),
+                        maxMediaHistoryTurns = o.optString("maxMediaHistoryTurns", "1"),
+                    )
+                } else {
+                    configs[id] = cur.copy(
+                        audioDirectEnabled = o.optBoolean("audioDirectEnabled", cur.audioDirectEnabled),
+                        videoDirectEnabled = o.optBoolean("videoDirectEnabled", cur.videoDirectEnabled),
+                        compactInstructions = o.optString("compactInstructions", cur.compactInstructions),
+                        maxImageHistoryTurns = o.optString("maxImageHistoryTurns", cur.maxImageHistoryTurns),
+                        maxMediaHistoryTurns = o.optString("maxMediaHistoryTurns", cur.maxMediaHistoryTurns),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun readPricing(obj: JSONObject?) {
+        obj ?: return
+        for (key in obj.keys()) {
+            val v = obj.optJSONObject(key) ?: continue
+            pricing[key] = ModelPricing(
+                billingMode = if (v.optString("mode").equals("COUNT", ignoreCase = true)) {
+                    BillingMode.COUNT
+                } else {
+                    BillingMode.TOKEN
+                },
+                inputPerMillion = v.optDouble("input", 0.0),
+                outputPerMillion = v.optDouble("output", 0.0),
+                cachedInputPerMillion = v.optDouble("cachedInput", 0.0),
+                pricePerRequest = v.optDouble("pricePerRequest", 0.0),
+                cacheWritePerMillion = v.optDouble("cacheWrite", 0.0),
+                currency = if (v.optString("currency").equals("USD", ignoreCase = true)) {
+                    PricingCurrency.USD
+                } else {
+                    PricingCurrency.CNY
+                },
+            )
+        }
+    }
+
+    /** 落盘：pi 原生三件套（真相源）+ Pient 附加数据 */
     fun save(context: Context) {
+        try {
+            if (PiAgentFiles.available(context)) {
+                val list = configs.values.toList()
+                PiAgentFiles.writeModels(context, list)
+                PiAgentFiles.writeAuth(context, list)
+                PiAgentFiles.writeSettings(context, list.firstOrNull())
+            }
+            saveExtras(context)
+        } catch (e: Exception) {
+            // 落盘失败不阻断使用
+        }
+    }
+
+    /** Pient 附加数据（pi 没有对应概念）：定价/汇率/完成标记 + 每个服务商的 Pient 侧字段 */
+    private fun saveExtras(context: Context) {
         try {
             val root = JSONObject()
             root.put("aiConfigured", aiConfigured)
-            val arr = org.json.JSONArray()
+            root.put("usdToCnyRate", usdToCnyRate)
+            val arr = JSONArray()
             for (c in configs.values) {
                 arr.put(
                     JSONObject()
                         .put("providerId", c.providerId)
-                        .put("endpoint", c.endpoint)
-                        .put("apiKey", c.apiKey)
-                        .put("modelList", c.modelList)
-                        .put("ctxLenK", c.ctxLenK)
-                        .put("maxOutK", c.maxOutK)
-                        .put("tempEnabled", c.tempEnabled)
-                        .put("tempValue", c.tempValue)
-                        .put("topKEnabled", c.topKEnabled)
-                        .put("topKValue", c.topKValue)
-                        .put("topPEnabled", c.topPEnabled)
-                        .put("topPValue", c.topPValue)
-                        .put("reasoningFormat", c.reasoningFormat.name)
-                        // 媒体能力（2026-09-14）：三个 direct-processing 开关（Operit 同款）
-                        .put("imageDirectEnabled", c.imageDirectEnabled)
                         .put("audioDirectEnabled", c.audioDirectEnabled)
                         .put("videoDirectEnabled", c.videoDirectEnabled)
-                        // 上下文管理（2026-09-14 pi 原生口径）
-                        .put("compactionEnabled", c.compactionEnabled)
-                        .put("keepRecentTokens", c.keepRecentTokens)
-                        .put("reserveTokens", c.reserveTokens)
                         .put("compactInstructions", c.compactInstructions)
                         .put("maxImageHistoryTurns", c.maxImageHistoryTurns)
                         .put("maxMediaHistoryTurns", c.maxMediaHistoryTurns),
                 )
             }
             root.put("providers", arr)
-            root.put("usdToCnyRate", usdToCnyRate)
             root.put("pricing", JSONObject().apply {
                 for ((key, p) in pricing) {
                     put(
@@ -270,7 +305,7 @@ object AiConfigStore {
                     )
                 }
             })
-            val f = file(context)
+            val f = legacyFile(context)
             f.parentFile?.mkdirs()
             val tmp = File(f.parentFile, "ai_config.json.tmp")
             tmp.writeText(root.toString())

@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ThemeMode
+import com.pient.app.runtime.PiRuntime
 import com.pient.app.ui.theme.preloadBackgroundImage
 
 class MainActivity : ComponentActivity() {
@@ -17,6 +18,11 @@ class MainActivity : ComponentActivity() {
 
         // 恢复持久化主题（必须在 setContent 前，否则首帧用默认暗色渲染再闪切）
         SettingsStore.load(this)
+        // 终端环境（Ubuntu 24.04 rootfs，随包）**首启解包**：后台线程铺到 files/pient-rt/rootfs，
+        // 不阻塞首帧；rootfs 已就绪时这是空操作（判据含 ELF 架构，换包/换架构会自动重解）。
+        PiRuntime.ensureRootfsAsync(this)
+        // 预置的 pi 包解进 Ubuntu（rootfs 未就绪时立即返回，由解包完成后的链式调用接手）
+        PiRuntime.ensurePiAsync(this)
         // 背景图片预解码（与 Compose 启动重叠）：聊天页首帧即可同步命中缓存，
         // 不再出现「先空背景、等 IO 解码完才出图」的一瞬（2026-09-12）
         preloadBackgroundImage(this)

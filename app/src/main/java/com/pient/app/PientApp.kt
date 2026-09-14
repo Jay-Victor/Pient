@@ -321,7 +321,7 @@ fun PientApp() {
                         BehaviorSettingsScreen(nav = nav)
                     }
                     composable("terminal_setup") {
-                        TerminalSetupScreen(nav = nav)
+                        TerminalSetupScreen(nav = nav, chatState = chatState)
                     }
                     composable("usage") {
                         UsageScreen(nav = nav)

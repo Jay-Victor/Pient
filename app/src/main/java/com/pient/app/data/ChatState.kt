@@ -13,12 +13,17 @@ import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
+import com.pient.app.runtime.PiRpc
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONObject
 import kotlinx.coroutines.withContext
 
 /** 顶栏右下方区域内容（消息区 / 文件内容预览区 / 终端页 / 分支画布 四态切换） */
@@ -431,6 +436,16 @@ class ChatState {
     var streamJob: Job? = null
 
     /**
+     * **pi 通道开关**（2026-09-14）：开 = 对话由 guest(Ubuntu) 里的 pi 跑（它自己维护会话上下文、
+     * 自己拿工具），关 = 退回 Pient 内核直连（[AiBackend]）。通道起不来（Ubuntu/pi 未就绪）时
+     * 自动落回直连，聊天不断。
+     */
+    var piChannelEnabled: Boolean = true
+
+    /** pi 通道最近一次报错（回合内收敛，供本回合失败时如实抛给 UI） */
+    private var lastPiError: String? = null
+
+    /**
      * 发送消息并请求 AI 回复：历史重建 = 当前会话的 User/Assistant（跳过错误消息与
      * 思考/工具条目），system prompt 走 ChatState.systemPrompt；思考级别/流式开关/
      * 模型参数均来自输入栏与配置页状态。请求失败以 error 助手消息呈现（不进 API 上下文）。
@@ -607,6 +622,15 @@ class ChatState {
         /** 本回合要直发的附件部件（媒体能力开关；只作用于最新一条用户消息） */
         media: List<WirePart> = emptyList(),
     ): ChatOutcome {
+        // ── pi 通道（2026-09-14）：这一轮交给 Ubuntu 里的 pi ──
+        // 会话上下文由 pi 自己维护（同一进程内连续 prompt），这里只把新消息送进去、
+        // 把流式增量与 usage 接回 UI；起不来就落回下面的直连内核。
+        if (piChannelEnabled) {
+            val modelId = cfg.models.firstOrNull()
+            if (!modelId.isNullOrBlank() && PiRpc.usable() && PiRpc.start(cfg.providerId, modelId)) {
+                return runChatViaPi(cfg, history, onDelta, onThinking)
+            }
+        }
         // 思考模式的总开关：null = 不给服务商发思考参数、且**服务商自带的推理内容一律不展示不落库**
         // （DeepSeek-R1 / GLM / Kimi 思考系列不靠 reasoning_effort 也会回 reasoning_content，
         //   开关关着却把推理显示出来＝越权；2026-09-12 用户报「关了思考模式、流式期间仍显示思考内容、
@@ -657,6 +681,91 @@ class ChatState {
         return ChatOutcome(text, usage?.takeIf { it.inTokens + it.outTokens > 0 }, streamThinking)
     }
 
+
+    /**
+     * **走 pi 通道跑一轮**（2026-09-14）：只送最后一条用户消息 —— pi 在同一条 RPC 会话里
+     * 自己累积上下文（含工具结果），这也是官方客户端（pi-web / SDK）的口径。
+     *
+     * 流式：`message_update.assistantMessageEvent` 的 `text_delta` / `thinking_delta`；
+     * usage：事件顶层的累积值（provider 不上报时为 0，回合结束以 `message_end` 为准不动）；
+     * 回合结束判据：**`agent_settled`**（pi 口径：重试、压缩重试、排队续写都settled了才算完）。
+     *
+     * 工具调用（`tool_execution_start/update/end`）本切片只记日志，工具行 UI 是下一步。
+     */
+    private suspend fun runChatViaPi(
+        cfg: ProviderConfig,
+        history: List<Pair<String, String>>,
+        onDelta: (String) -> Unit,
+        onThinking: (String) -> Unit,
+    ): ChatOutcome = coroutineScope {
+        val userText = history.lastOrNull { it.first == "user" }?.second.orEmpty()
+        val text = StringBuilder()
+        val think = StringBuilder()
+        var usage: Usage? = null
+        val settled = CompletableDeferred<Unit>()
+        lastPiError = null
+        val collector = launch {
+            PiRpc.events.collect { ev ->
+                when (ev.optString("type")) {
+                    "message_update" -> {
+                        ev.optJSONObject("usage")?.let { u -> piUsage(u)?.let { usage = it } }
+                        val d = ev.optJSONObject("assistantMessageEvent") ?: return@collect
+                        when (d.optString("type")) {
+                            "text_delta" -> {
+                                text.append(d.optString("delta"))
+                                onDelta(text.toString())
+                            }
+                            "thinking_delta" -> if (thinkingEnabled) {
+                                think.append(d.optString("delta"))
+                                onThinking(think.toString())
+                            }
+                        }
+                    }
+                    "tool_execution_start" -> Log.i("PientChat", "pi 工具开始：${ev.optString("toolName")}")
+                    "tool_execution_end" -> Log.i(
+                        "PientChat",
+                        "pi 工具结束：${ev.optString("toolName")} 失败=${ev.optBoolean("isError")}",
+                    )
+                    "agent_settled", "channel_closed" -> settled.complete(Unit)
+                    "error" -> {
+                        val msg = ev.optJSONObject("error")?.optString("message").orEmpty()
+                            .ifBlank { ev.optString("message") }
+                        if (msg.isNotBlank()) lastPiError = msg
+                    }
+                }
+            }
+        }
+        val res = PiRpc.prompt(userText)
+        if (res != null && !res.optBoolean("success", true)) {
+            collector.cancel()
+            throw AiException(res.optString("error").ifBlank { "pi 拒绝了这次请求" })
+        }
+        val ok = withTimeoutOrNull(600_000) { settled.await() } != null
+        collector.cancel()
+        if (!ok) {
+            bgScope.launch { PiRpc.abort() }
+            throw AiException("pi 通道超时（10 分钟未见 agent_settled）")
+        }
+        lastPiError?.let { err ->
+            lastPiError = null
+            if (text.isEmpty()) throw AiException(err)
+        }
+        usage?.let { updateContextPercent(it, cfg) }
+        val out = text.toString().trim()
+        if (out.isNotEmpty()) onDelta(out)
+        ChatOutcome(out, usage?.takeIf { it.inTokens + it.outTokens > 0 }, think.toString())
+    }
+
+    /** pi 事件的 usage → Pient 的 [Usage]（pi 口径：input 不含 cacheRead/cacheWrite） */
+    private fun piUsage(u: JSONObject): Usage? {
+        val inTok = u.optInt("input", 0)
+        val outTok = u.optInt("output", 0)
+        val cache = u.optInt("cacheRead", 0)
+        val cacheWrite = u.optInt("cacheWrite", 0)
+        if (inTok + outTok + cache + cacheWrite <= 0) return null
+        val cost = u.optJSONObject("cost")?.optDouble("total", 0.0) ?: 0.0
+        return Usage(inTok, outTok, cache, cost, cacheWrite)
+    }
 
     /** 单次请求结果：正文 + usage + 思考文本（思考模式关闭时为空串） */
     private data class ChatOutcome(val text: String, val usage: Usage?, val thinking: String)
@@ -935,6 +1044,7 @@ class ChatState {
 
     fun abort() {
         streamJob?.cancel()
+        if (piChannelEnabled) bgScope.launch { PiRpc.abort() }   // pi 侧也要停（否则它继续跑）
         if (streamDraft.isNotEmpty()) {
             appendEntry(Msg.Assistant(streamDraft, null))
             streamDraft = ""

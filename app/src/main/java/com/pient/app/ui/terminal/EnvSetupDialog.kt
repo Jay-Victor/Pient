@@ -34,14 +34,15 @@ import com.pient.app.data.UBUNTU_COMPONENTS
 import com.pient.app.ui.components.PientDialog
 
 /**
- * 首启「环境安装」弹窗（UI 壳，2026-09-14：安装链路已移除，只保留界面与勾选交互）。
+ * 首启「环境安装」弹窗（2026-09-14 接回真实安装）。
  *
- * 定位（用户 2026-09-13 拍板）：**首启进终端页弹一次、可跳过**。
+ * 定位（用户 2026-09-13 拍板）：**首启进终端页弹一次、可跳过**；rootfs 就绪后才弹
+ * （解包那 1–2 秒别让用户在还没就绪的界面上做选择）。
  * 与「环境配置 → 环境内软件」是同一份清单（[UBUNTU_COMPONENTS]）、同一个分类
- * （[ComponentGroups]）；点「安装所选」当前只同步勾选状态并关闭（不会真正安装）。
+ * （[ComponentGroups]）；点「安装所选」→ 交给调用方跑（终端页的专用会话），弹窗只负责勾选。
  */
 @Composable
-fun EnvSetupDialog(onDone: () -> Unit) {
+fun EnvSetupDialog(onDone: () -> Unit, onInstall: (List<UbuntuComponent>) -> Unit) {
     val context = LocalContext.current
     // 默认勾选：必备基础（认证/下载/版本控制）+ Python + Node
     var selected by remember { mutableStateOf(DEFAULT_SETUP) }
@@ -55,14 +56,10 @@ fun EnvSetupDialog(onDone: () -> Unit) {
         confirmText = if (toInstall.isEmpty()) "完成" else "安装所选（${toInstall.size}）",
         confirmEnabled = true,
         onConfirm = {
-            if (toInstall.isEmpty()) {
-                onDone()
-            } else {
-                // 勾选集同步给「环境内软件」段（同一份状态，两处一致；安装本身已停用）
-                SettingsStore.selectedComponents = selected
-                toast("安装功能已停用（当前版本仅保留界面）")
-                onDone()
-            }
+            // 勾选集同步给「环境内软件」段（同一份状态，两处一致）
+            SettingsStore.selectedComponents = selected
+            if (toInstall.isNotEmpty()) onInstall(toInstall)
+            onDone()
         },
         extraActionText = "跳过",
         onExtraAction = onDone,
@@ -76,7 +73,7 @@ fun EnvSetupDialog(onDone: () -> Unit) {
                 .padding(top = 6.dp),
         ) {
             Text(
-                "这些工具链原用于 Ubuntu 环境（当前版本已移除安装链路，仅保留勾选界面）。",
+                "这些工具链装进内置的 Ubuntu 环境；安装过程会在终端页实时显示。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 10.dp),

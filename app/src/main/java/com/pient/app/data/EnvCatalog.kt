@@ -46,6 +46,13 @@ enum class ExecEnv(
 /** apt 镜像源（展示名 + 源地址） */
 data class AptMirror(val name: String, val uri: String)
 
+/**
+ * 默认 apt 镜像源（2026-09-14 实测结论）：**国内网络下 archive.ubuntu.com 拉包会
+ * `E: Failed to fetch` → apt 退出码 100**，而清华 TUNA 同一步骤通过。
+ * 所以新增/首启的默认值取 TUNA（用户可在页面里改；已选过的不受影响）。
+ */
+const val DEFAULT_APT_MIRROR = "清华 TUNA"
+
 val APT_MIRRORS = listOf(
     AptMirror("Ubuntu 官方", "http://archive.ubuntu.com/ubuntu/"),
     AptMirror("清华 TUNA", "http://mirrors.tuna.tsinghua.edu.cn/ubuntu/"),
@@ -139,6 +146,14 @@ val UBUNTU_COMPONENTS = listOf(
         "typescript", "TypeScript", "typescript", "tsc", "tsc 编译器（AI 写 TS 时用）", ComponentGroups.RUNTIME,
         detectCmd = "command -v tsc",
         installCmd = "npm install -g typescript",
+    ),
+    // pi 本体：**已随 Pient 预置**（解在 npm 全局位置，装完 node 就能用）；这一项是「更新到官方最新」
+    UbuntuComponent(
+        "pi", "pi agent（Pient 运行时）", "pi", "pi",
+        "已随 Pient 预置；此项把它更新到 npm 官方最新（依赖 Node，需先装 nodejs）",
+        ComponentGroups.RUNTIME,
+        detectCmd = "command -v pi && pi --version",
+        installCmd = "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
     ),
 
     // ── 开发与构建 ──

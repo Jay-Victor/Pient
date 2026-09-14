@@ -165,6 +165,34 @@ object ProviderCatalog {
             "https://opencode.ai/zen"),
     )
 
+    /**
+     * **provider → pi 的 api 类型**（事实表，2026-09-14 从 pi-0.85.1 各 provider 的 .ts 源文件核出）。
+     *
+     * pi 的 `api` 是 **per-model** 的（同一 provider 可以挂多种：opencode 挂 4 种、fireworks/github-copilot
+     * 挂 2–3 种），Pient 页面按服务商配置，所以这里取该家的**主用法**写在 provider 级；
+     * 生成 `models.json` 时用它（模型级仍可在 JSON 里单独覆盖）。
+     * 表里没有的一律 `openai-completions`（最兼容；自定义服务商也走这条）。
+     */
+    private val API_BY_ID: Map<String, String> = mapOf(
+        "openai" to "openai-responses",
+        "openai-codex" to "openai-codex-responses",
+        "azure-openai-responses" to "azure-openai-responses",
+        "anthropic" to "anthropic-messages",
+        "amazon-bedrock" to "bedrock-converse-stream",
+        "google" to "google-generative-ai",
+        "google-vertex" to "google-vertex",
+        "mistral" to "mistral-conversations",
+        "kimi-coding" to "anthropic-messages",
+        "minimax" to "anthropic-messages",
+        "minimax-cn" to "anthropic-messages",
+        "vercel-ai-gateway" to "anthropic-messages",
+        "xai" to "openai-responses",
+        "radius" to "pi-messages",
+    )
+
+    /** 该服务商在 pi 里使用的 api 类型（见 [API_BY_ID]） */
+    fun apiOf(id: String): String = API_BY_ID[id] ?: "openai-completions"
+
     val byId: Map<String, ProviderInfo> = all.associateBy { it.id }
 
     fun find(id: String): ProviderInfo = byId[id] ?: custom
