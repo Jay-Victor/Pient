@@ -116,10 +116,10 @@ import android.widget.Toast
 import com.pient.app.data.Attachment
 import com.pient.app.data.ContextPolicy
 import com.pient.app.data.Msg
-import com.pient.app.data.PendingPermission
+import com.pient.app.tools.PendingPermission
 import com.pient.app.data.Quote
 import com.pient.app.data.SettingsStore
-import com.pient.app.data.ToolPolicy
+import com.pient.app.tools.ToolGate
 import com.pient.app.data.ToolStatus
 import com.pient.app.data.markdownToPlainText
 import com.pient.app.ui.components.MarkdownText
@@ -171,7 +171,7 @@ fun ChatMessages(
     onPermOnce: () -> Unit = {},
     onPermAlways: () -> Unit = {},
     onPermDeny: () -> Unit = {},
-    /** 工具卡授权按钮：给该工具写策略（ToolPolicy.ALLOW / FORBID） */
+    /** 工具卡授权按钮：给该工具写策略（ToolGate.ALLOW / FORBID） */
     onPolicySet: (String, String) -> Unit = { _, _ -> },
 ) {
     val scope = rememberCoroutineScope()
@@ -532,11 +532,11 @@ fun ChatMessages(
                 dangerous = false,
                 onAllowOnce = { manualPolicyAsk = null },
                 onAlwaysAllow = {
-                    onPolicySet(tool, ToolPolicy.ALLOW)
+                    onPolicySet(tool, ToolGate.ALLOW)
                     manualPolicyAsk = null
                 },
                 onDeny = {
-                    onPolicySet(tool, ToolPolicy.FORBID)
+                    onPolicySet(tool, ToolGate.FORBID)
                     manualPolicyAsk = null
                 },
                 onDismiss = { manualPolicyAsk = null },

@@ -1,5 +1,6 @@
 package com.pient.app.data
 
+import com.pient.app.tools.terminal.TerminalSessions
 import androidx.compose.runtime.mutableStateListOf
 
 // ─────────────────────────────────────────────────────────────

@@ -1,5 +1,13 @@
 package com.pient.app.data
 
+import com.pient.app.AppCtx
+
+import com.pient.app.tools.PendingPermission
+import com.pient.app.tools.ToolCall
+import com.pient.app.tools.ToolDispatcher
+import com.pient.app.tools.ToolGate
+import com.pient.app.tools.ToolOutcome
+import com.pient.app.tools.ToolRegistry
 import android.content.Context
 import android.util.Log
 import androidx.compose.runtime.getValue
@@ -341,7 +349,7 @@ class ChatState {
      * 走 IO 线程、失败只记日志 —— 删除动作本身不等宿主回答（UI 立即反馈）。
      */
     private fun forgetPiSession(id: String) {
-        val ctx = PiHost.appContextOrNull() ?: return
+        val ctx = AppCtx.get() ?: return
         bgScope.launch { withContext(Dispatchers.IO) { PiSessions.forget(ctx, id) } }
     }
 
@@ -499,7 +507,7 @@ class ChatState {
         // 宿主在跑：先把宿主切到「当前 Pient 会话」对应的 pi 会话（映射见 PiSessions），
         // 否则换会话后宿主会接着用上一条会话的上下文
         if (PiHost.state.value is PiHostState.Running) {
-            PiHost.appContextOrNull()?.let { ctx ->
+            AppCtx.get()?.let { ctx ->
                 PiSessions.ensure(
                     ctx, currentSessionId.orEmpty(), historyBefore, cfg.providerId, effectiveModel,
                 )
@@ -512,11 +520,11 @@ class ChatState {
         // 附件直发（2026-09-14 照 Operit 的三个媒体开关）：开启的类别把文件本体转成内容部件随请求发出，
         // 已直发的附件不再重复列路径（Operit 的「移除链接」）；关闭的类别**不拦消息**，
         // 只追加一行 Operit 原文占位（「图片内容已省略，当前模型不支持图片处理」）。
-        val appCtx = PiHost.appContextOrNull()
+        val appCtx = AppCtx.get()
         val inline = if (appCtx != null) {
-            AppTools.mediaParts(appCtx, currentMsg.attachments, cfg)
+            MediaInline.parts(appCtx, currentMsg.attachments, cfg)
         } else {
-            AppTools.InlineResult(emptyList(), emptySet(), emptyList())
+            MediaInline.InlineResult(emptyList(), emptySet(), emptyList())
         }
         val textMsg = if (inline.inlinedIndexes.isEmpty()) {
             currentMsg
@@ -593,7 +601,7 @@ class ChatState {
         // 宿主不会随抽屉切会话自动跟随（ensure 只在发消息时调），应用重启后宿主也是新会话，
         // 少了这一步「重新生成」会打到别的会话上下文上
         if (PiHost.state.value is PiHostState.Running) {
-            PiHost.appContextOrNull()?.let { ctx ->
+            AppCtx.get()?.let { ctx ->
                 PiSessions.ensure(
                     ctx, currentSessionId.orEmpty(), history, cfg.providerId, effectiveModel,
                 )
@@ -662,53 +670,14 @@ class ChatState {
         //   开关关着却把推理显示出来＝越权；2026-09-12 用户报「关了思考模式，流式期间仍显示思考内容、
         //   回答完又消失」即此处漏门控——流式分支当时漏了判 `thinking != null`，只落了「不落库」）。
         val thinking = if (thinkingEnabled) thinkingLevel else null
-        // 宿主在跑且有模型 → 走宿主（pi agent 循环：工具真的会被调用）；否则退回 Kotlin 直连旧路径
-        if (PiHost.state.value is PiHostState.Running) {
-            val sb = StringBuilder()
-            val th = StringBuilder()
-            var usage: Usage? = null
-            val finalText = PiChat.prompt(history.lastOrNull()?.second.orEmpty()) { ev ->
-                when (ev) {
-                    is PiAgentEvent.TextDelta -> {
-                        sb.append(ev.text)
-                        // 与直连路径同一道闸：漏出来的工具标记不许在流式期间显示（2026-09-14）
-                        onDelta(AppTools.safeStreamText(sb.toString()))
-                    }
-                    is PiAgentEvent.ThinkingDelta -> if (thinking != null) {
-                        th.append(ev.text)
-                        onThinking(th.toString())
-                    }
-                    is PiAgentEvent.UsageEvent -> {
-                        usage = ev.usage
-                        updateContextPercent(ev.usage, cfg)
-                    }
-                    is PiAgentEvent.ToolStart -> {
-                        // 工具卡之前已把当前思考块落库（flushStreamingThinking）→ 清掉累计，
-                        // 让 outcome.thinking 只代表**最后一条** assistant 消息的思考块
-                        // （pi 的思考块是每条 assistant 消息一块，跨消息累加会把两块拼成一块）
-                        th.clear()
-                        onTool(ev)
-                    }
-                    else -> onTool(ev)
-                }
-            }
-            // 宿主路径的最终文本同样过一道闸：模型把标记漏进正文时，不许它落库/渲染成正文
-            val clean = if (AppTools.hasToolMarkup(finalText)) {
-                Log.w(TAG, "宿主回答里含工具标记（模型未按协议调用工具），已从正文剔除")
-                AppTools.extractTextCalls(finalText).first
-            } else {
-                finalText
-            }
-            return ChatOutcome(clean, usage, th.toString())
-        }
-        // 直连路径：应用内工具循环（2026-09-14）——开关开 = 工具经服务商原生接口下发，
-        // 开关关 = 工具说明写进系统提示、模型用文本标记调用；两条路都执行应用内工具（AppTools）
+        // **唯一路径**（2026-09-14 决策：内核自研、宿主冻结）：没有「宿主 / 直连」两条路了——
+        // 对话与工具都在 Pient 自己的内核里，工具经 [ToolDispatcher] 落到四层执行体。
         return runDirectChat(cfg, history, thinking, onDelta, onThinking, onTool, media)
     }
 
     /**
      * 直连路径的一轮对话（**含工具循环**）：请求 → 解析工具调用（原生 `tool_calls` / 文本标记）→
-     * 应用内执行（[AppTools]）→ 结果回灌 → 再请求，直到模型给出最终回答（上限 [AppTools.MAX_ROUNDS] 轮）。
+     * 应用内执行（[AppTools]）→ 结果回灌 → 再请求，直到模型给出最终回答（上限 [ToolDispatcher.MAX_ROUNDS] 轮）。
      *
      * 工具卡与思考块走**与宿主路径同一套事件**（[PiAgentEvent.ToolStart]/[ToolEnd] → [handleToolEvent]），
      * 所以直连与宿主在聊天页的渲染完全一致（同一张工具卡、同一段 diff）。
@@ -727,14 +696,14 @@ class ChatState {
         onTool: (PiAgentEvent) -> Unit,
         media: List<WirePart>,
     ): ChatOutcome {
-        val ctx = PiHost.appContextOrNull()
+        val ctx = AppCtx.get()
         val nativeTools = cfg.toolCallEnabled && ctx != null
         val toolsJson = when {
             !nativeTools -> null
-            AiBackend.isAnthropicProtocol(cfg.endpoint) -> AppTools.anthropicDefinitions()
-            else -> AppTools.definitions()
+            AiBackend.isAnthropicProtocol(cfg.endpoint) -> ToolRegistry.anthropicDefinitions()
+            else -> ToolRegistry.definitions()
         }
-        val prompt = AppTools.systemPrompt(
+        val prompt = Prompts.systemPrompt(
             workspace = ctx?.let { PiRuntime.workspaceDir(it).absolutePath }.orEmpty(),
             nativeTools = nativeTools,
         )
@@ -752,10 +721,10 @@ class ChatState {
         var cacheTok = 0
         var cacheWriteTok = 0
         var lastText = ""
-        for (round in 0 until AppTools.MAX_ROUNDS) {
+        for (round in 0 until ToolDispatcher.MAX_ROUNDS) {
             val roundText = StringBuilder()
             val roundThinking = StringBuilder()
-            val nativeCalls = ArrayList<AppTools.Call>()
+            val nativeCalls = ArrayList<ToolCall>()
             var usage: Usage? = null
             if (!streamingOutputEnabled) {
                 val res = AiBackend.chat(cfg, prompt, turns, thinking, toolsJson)
@@ -771,7 +740,7 @@ class ChatState {
                         is ChatEvent.TextDelta -> {
                             roundText.append(ev.text)
                             // 标记可能正在流进来 —— 只把标记之前的正文交给界面（整轮结束再定性）
-                            onDelta(AppTools.safeStreamText(roundText.toString()))
+                            onDelta(ToolMarkup.safeStreamText(roundText.toString()))
                         }
                         is ChatEvent.ThinkingDelta -> if (thinking != null) {
                             roundThinking.append(ev.text)
@@ -794,7 +763,7 @@ class ChatState {
             }
 
             // 文本形态的工具调用：原生调用优先；没有原生调用时看正文里有没有标记（DSML 泄漏兜底）
-            val (cleanText, textCalls) = AppTools.extractTextCalls(roundText.toString())
+            val (cleanText, textCalls) = ToolMarkup.extractTextCalls(roundText.toString())
             val markupMode = nativeCalls.isEmpty() && textCalls.isNotEmpty()
             val calls = if (nativeCalls.isNotEmpty()) nativeCalls else textCalls
             val answer = if (nativeCalls.isNotEmpty()) roundText.toString() else cleanText
@@ -812,12 +781,12 @@ class ChatState {
             val resultPairs = ArrayList<Pair<String, String>>()
             for (c in calls) {
                 // 授权策略（与宿主路径同一份 pient_gate.json：read/grep/find/ls 默认 ALLOW，write/edit/bash 默认 ASK）
-                val allowed = ctx != null && askInAppPermission(ctx, c.name, c.arguments)
                 onTool(PiAgentEvent.ToolStart(c.id, c.name, c.arguments))
-                val outcome = when {
-                    ctx == null -> AppTools.Outcome("工具不可用：应用上下文缺失", true)
-                    !allowed -> AppTools.Outcome("已拒绝：用户未授权执行「${c.name}」（下次调用会再问一次）", true)
-                    else -> AppTools.run(ctx, c.name, c.arguments)
+                // 执行与授权都交调度器（唯一入口：层路由 → 就绪检查 → 门 → 执行）
+                val outcome = if (ctx == null) {
+                    ToolOutcome.err("工具不可用：应用上下文缺失")
+                } else {
+                    ToolDispatcher.dispatch(ctx, c) { call -> askInAppPermission(ctx, call.name, call.arguments) }
                 }
                 onTool(
                     PiAgentEvent.ToolEnd(c.id, c.name, outcome.output, outcome.isError, outcome.diff),
@@ -841,44 +810,27 @@ class ChatState {
         }
         // 轮数用尽（模型一直在调工具）时把已有内容交出去，不当失败
         val usageTotal = Usage(inTok, outTok, cacheTok, 0.0, cacheWriteTok)
-        val text = if (lastText.isNotBlank()) lastText else streamDraft.trim().ifBlank { "（已达单轮工具调用上限 ${AppTools.MAX_ROUNDS} 轮）" }
+        val text = if (lastText.isNotBlank()) lastText else streamDraft.trim().ifBlank { "（已达单轮工具调用上限 ${ToolDispatcher.MAX_ROUNDS} 轮）" }
         return ChatOutcome(text, usageTotal.takeIf { it.inTokens + it.outTokens > 0 }, streamThinking)
     }
 
     /**
-     * 直连路径执行工具前的授权询问（[ToolPolicy] / `pient_gate.json`，与宿主路径同一份策略）：
-     * `ALLOW` 直接放行、`FORBID` 直接拒、`ASK` 弹**同一个**授权对话框并挂起等待回执。
+     * 直连路径的授权询问（**与宿主路径同一个门**：策略判定已上移到 [ToolDispatcher]，
+     * 走到这里只剩 `ASK` 这一种情况）——弹**同一个**授权对话框并挂起等待回执。
      * 宿主路径的询问来自守门扩展的 `extension_ui_request`，应用内没有 RPC，故用 [inAppAsk] 承接答案。
      */
     private suspend fun askInAppPermission(ctx: Context, name: String, args: String): Boolean {
-        return when (ToolPolicy.policyFor(ctx, name)) {
-            ToolPolicy.ALLOW -> true
-            ToolPolicy.FORBID -> false
-            else -> {
-                val d = CompletableDeferred<String>()
-                inAppAsk = d
-                pendingPermission = PendingPermission(
-                    id = "app:" + System.currentTimeMillis(),
-                    toolName = name,
-                    argsSummary = args.take(400),
-                    dangerous = isDangerousCall(name, args),
-                )
-                val answer = d.await()
-                answer == ToolPolicy.OPT_ONCE || answer == ToolPolicy.OPT_ALWAYS
-            }
-        }
+        val d = CompletableDeferred<String>()
+        inAppAsk = d
+        pendingPermission = PendingPermission(
+            id = "app:" + System.currentTimeMillis(),
+            toolName = name,
+            argsSummary = args.take(400),
+            dangerous = ToolGate.isDangerous(name, args),
+        )
+        val answer = d.await()
+        return answer == ToolGate.OPT_ONCE || answer == ToolGate.OPT_ALWAYS
     }
-
-    /** 高危调用（授权弹窗走破坏色变体）：保守启发式，与宿主守门扩展同类；只看 bash 的破坏性指令 */
-    private fun isDangerousCall(name: String, args: String): Boolean {
-        if (name != "bash") return false
-        val cmd = args.lowercase()
-        return DANGEROUS_SUBSTRINGS.any { cmd.contains(it) }
-    }
-
-    private val DANGEROUS_SUBSTRINGS = listOf(
-        "rm -rf", "rm -fr", "sudo ", "su -", "mkfs", "dd if=", "chmod 777", "> /dev/", "shutdown", "reboot",
-    )
 
     /** 单次请求结果：正文 + usage + 思考文本（思考模式关闭时为空串） */
     private data class ChatOutcome(val text: String, val usage: Usage?, val thinking: String)
@@ -983,16 +935,16 @@ class ChatState {
     fun answerPermission(allowOnce: Boolean = false, always: Boolean = false, deny: Boolean = false) {
         val ask = pendingPermission ?: return
         pendingPermission = null
-        val ctx = PiHost.appContextOrNull()
+        val ctx = AppCtx.get()
         // 直连路径：回执交给等待中的协程（不走 RPC）
         inAppAsk?.let { d ->
-            if (always && ctx != null) ToolPolicy.setToolPolicy(ctx, ask.toolName, ToolPolicy.ALLOW)
+            if (always && ctx != null) ToolGate.setToolPolicy(ctx, ask.toolName, ToolGate.ALLOW)
             inAppAsk = null
             d.complete(
                 when {
-                    always -> ToolPolicy.OPT_ALWAYS
-                    deny -> ToolPolicy.OPT_DENY
-                    allowOnce -> ToolPolicy.OPT_ONCE
+                    always -> ToolGate.OPT_ALWAYS
+                    deny -> ToolGate.OPT_DENY
+                    allowOnce -> ToolGate.OPT_ONCE
                     else -> ""   // 取消
                 },
             )
@@ -1000,18 +952,18 @@ class ChatState {
         }
         when {
             always -> {
-                if (ctx != null) ToolPolicy.setToolPolicy(ctx, ask.toolName, ToolPolicy.ALLOW)
-                PiHost.respondUi(ask.id, value = ToolPolicy.OPT_ALWAYS)
+                if (ctx != null) ToolGate.setToolPolicy(ctx, ask.toolName, ToolGate.ALLOW)
+                PiHost.respondUi(ask.id, value = ToolGate.OPT_ALWAYS)
             }
-            deny -> PiHost.respondUi(ask.id, value = ToolPolicy.OPT_DENY)
-            allowOnce -> PiHost.respondUi(ask.id, value = ToolPolicy.OPT_ONCE)
+            deny -> PiHost.respondUi(ask.id, value = ToolGate.OPT_DENY)
+            allowOnce -> PiHost.respondUi(ask.id, value = ToolGate.OPT_ONCE)
             else -> PiHost.respondUi(ask.id, cancelled = true)
         }
     }
 
-    /** 手动设某工具的策略（工具卡授权按钮 / 后续权限中心；值取 ToolPolicy.ALLOW|ASK|FORBID） */
+    /** 手动设某工具的策略（工具卡授权按钮 / 后续权限中心；值取 ToolGate.ALLOW|ASK|FORBID） */
     fun setToolPolicy(tool: String, policy: String) {
-        PiHost.appContextOrNull()?.let { ToolPolicy.setToolPolicy(it, tool, policy) }
+        AppCtx.get()?.let { ToolGate.setToolPolicy(it, tool, policy) }
     }
 
     /**

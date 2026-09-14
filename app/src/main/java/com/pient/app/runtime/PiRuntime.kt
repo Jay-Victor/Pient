@@ -58,16 +58,18 @@ object PiRuntime {
     /** 系统命令扩展（同上；提供 android_shell 工具，经宿主回桥执行 Shizuku / su 通道的系统命令） */
     private const val PIENT_SYSTEM_ASSET = "pient-system.ts"
 
-    /** 逻辑名 → native lib 文件名（jniLibs 打包规则：二进制改名成 lib*.so） */
+    /**
+     * 逻辑名 → native lib 文件名（jniLibs 打包规则：二进制改名成 lib*.so）。
+     *
+     * **只剩终端层三项**（2026-09-14 宿主冻结）：node / rg / fd 不再随包 —— 内核自研后
+     * pi 宿主不跑，六个文件工具走 Kotlin 原生实现，不再需要 rg/fd 二进制。
+     */
     private val NATIVE_BINARIES = mapOf(
-        "node" to "libpient_node.so",
-        "rg" to "libpient_rg.so",
-        "fd" to "libpient_fd.so",
         // 终端层：PRoot 与它的 ELF loader（两者都要被 execve，只能走 native lib 目录）。
         // loader 也在 bin/ 下留一条软链，PROOT_LOADER 直接指过去（命令行里好写、且随 APK 更新自动重指）。
         "proot" to "libpient_proot.so",
         "proot-loader" to "libpient_proot_loader.so",
-        // pi 的 bash 工具 shellPath（把命令交给 rootfs 里的 GNU bash；见 runtime/terminal/pient-shell.sh）
+        // 终端层入口脚本（AI 的 `terminal` 工具与终端页会话都经它进 Ubuntu）
         "pient-shell" to "libpient_shell.so",
     )
 
@@ -193,12 +195,12 @@ object PiRuntime {
                 Log.i(TAG, "执行环境已写入：$env")
             }
         }.onFailure { Log.w(TAG, "执行环境写入失败：${it.message}") }
+        ensureLinks(context)   // 软链每次进终端页/系统命令页都对一遍（宿主冻结后这里就是唯一维护点）
         ensureRootfsAsync(context)   // 环境按需自补：Operit 口径，无需用户手动点解包（见函数注释）
-        ensureAppRuntimeAsync(context)   // 宿主运行时（pi 包 + npm）同理：装完 APK 首启自己铺好
-        // 宿主回桥尽早起来：系统命令通道（android_shell）与 SAF 文件桥都挂在它上面，
-        // 早于 pi 宿主启动也没关系（幂等）；此前只在宿主 spawn 时才初次创建端点。
+        // 宿主运行时（pi 包 + npm）已冻结：不再解包（2026-09-14 决策，见设计文档「内核自研」节）
+        // 系统命令回桥仍要尽早起来：`shell` 工具经它回到 Kotlin 的系统命令层执行
         runCatching { PiExecServer.ensureStarted(context) }
-            .onFailure { Log.w(TAG, "宿主回桥启动失败：${it.message}") }
+            .onFailure { Log.w(TAG, "系统命令回桥启动失败：${it.message}") }
     }
 
     /** 解包进度/原因的公开快照（页面与终端页都要显示「正在解包 …%」） */
@@ -618,6 +620,15 @@ object PiRuntime {
      */
     fun ensureLinks(context: Context) {
         val nativeDir = context.applicationInfo.nativeLibraryDir
+        // 先清掉「已退场运行时」留下的旧链（2026-09-14 宿主冻结后 node/rg/fd 不再随包；
+        // APK 更新还会让 /data/app 路径变化）——悬空链会让包装脚本 exec 直接失败（实测报
+        // `env: exec …/bin/proot: No such file or directory`），必须在重建前收掉。
+        linkDir(context).listFiles()?.forEach { f ->
+            if (f.name in NATIVE_BINARIES) return@forEach
+            if (runCatching { Os.readlink(f.absolutePath) }.isSuccess) {
+                runCatching { f.delete() }
+            }
+        }
         NATIVE_BINARIES.forEach { (name, fileName) ->
             link(File(nativeDir, fileName), File(linkDir(context), name))
         }

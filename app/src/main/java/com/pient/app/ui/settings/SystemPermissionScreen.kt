@@ -61,14 +61,15 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
-import com.pient.app.data.AndroidShell
+import com.pient.app.tools.system.SystemPart
 import com.pient.app.data.PermissionTier
 import com.pient.app.data.RootGateway
 import com.pient.app.data.SettingsStore
-import com.pient.app.data.ShellTier
+import com.pient.app.tools.system.ShellTier
 import com.pient.app.data.ShizukuGateway
 import com.pient.app.data.SystemPermissions
-import com.pient.app.data.ToolPolicy
+import com.pient.app.tools.ToolGate
+import com.pient.app.tools.ToolRegistry
 import com.pient.app.ui.components.ArcSpinner
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.components.PientSegmented
@@ -409,8 +410,8 @@ fun SystemPermissionScreen(nav: NavController) {
                     )
                     Spacer(Modifier.height(8.dp))
                     CardDivider()
-                    val tiers = remember(shizukuAuthorized, deviceRooted) { AndroidShell.tiers(context) }
-                    val effective = AndroidShell.effectiveTier(context)
+                    val tiers = remember(shizukuAuthorized, deviceRooted) { SystemPart.tiers(context) }
+                    val effective = SystemPart.effectiveTier(context)
                     tiers.forEach { t ->
                         AndroidShellTierRow(
                             title = t.tier.title,
@@ -434,19 +435,19 @@ fun SystemPermissionScreen(nav: NavController) {
             SectionHeader("工具级授权", icon = Icons.Outlined.Shield)
             PermissionCardBox {
                 Column(Modifier.padding(14.dp)) {
-                    var toolDefault by remember { mutableStateOf(ToolPolicy.ASK) }
+                    var toolDefault by remember { mutableStateOf(ToolGate.ASK) }
                     var toolPolicies by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
                     var expandedPolicyKey by remember { mutableStateOf<String?>(null) }
                     fun reloadPolicies() {
-                        val (d, m) = ToolPolicy.snapshot(context)
+                        val (d, m) = ToolGate.snapshot(context)
                         toolDefault = d
                         toolPolicies = m
                     }
                     fun applyToolPolicy(tool: String?, policy: String) {
                         if (tool == null) {
-                            ToolPolicy.setDefault(context, policy)
+                            ToolGate.setDefault(context, policy)
                         } else {
-                            ToolPolicy.setToolPolicy(context, tool, policy)
+                            ToolGate.setToolPolicy(context, tool, policy)
                         }
                         reloadPolicies()
                         expandedPolicyKey = null
@@ -473,7 +474,7 @@ fun SystemPermissionScreen(nav: NavController) {
                         },
                         onPick = { p -> applyToolPolicy(null, p) },
                     )
-                    ToolPolicy.TOOLS.forEach { tool ->
+                    ToolRegistry.names().forEach { tool ->
                         CardDivider()
                         ToolPolicyRow(
                             title = tool,
@@ -888,7 +889,7 @@ private fun WizardStepRow(
 
 private const val KEY_DEFAULT_POLICY = "__default__"
 
-/** 七工具一句话说明（顺序同 ToolPolicy.TOOLS） */
+/** 七工具一句话说明（顺序同 ToolRegistry.names()） */
 private val TOOL_DESCS = mapOf(
     "read" to "读取文件",
     "write" to "写文件",
@@ -900,8 +901,8 @@ private val TOOL_DESCS = mapOf(
 )
 
 private fun policyLabel(policy: String): String = when (policy) {
-    ToolPolicy.ALLOW -> "允许"
-    ToolPolicy.FORBID -> "禁止"
+    ToolGate.ALLOW -> "允许"
+    ToolGate.FORBID -> "禁止"
     else -> "每次询问"
 }
 
@@ -942,8 +943,8 @@ private fun ToolPolicyRow(
                 policyLabel(policy),
                 style = MaterialTheme.typography.labelMedium,
                 color = when (policy) {
-                    ToolPolicy.ALLOW -> MaterialTheme.colorScheme.primary
-                    ToolPolicy.FORBID -> MaterialTheme.colorScheme.error
+                    ToolGate.ALLOW -> MaterialTheme.colorScheme.primary
+                    ToolGate.FORBID -> MaterialTheme.colorScheme.error
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                 },
             )
@@ -955,9 +956,9 @@ private fun ToolPolicyRow(
             )
         }
         if (expanded) {
-            PolicyOptionRow("允许", "直接执行，不再询问", ToolPolicy.ALLOW, policy, onPick)
-            PolicyOptionRow("每次询问", "每次调用都弹授权（默认）", ToolPolicy.ASK, policy, onPick)
-            PolicyOptionRow("禁止", "直接拦下，并把原因回给模型", ToolPolicy.FORBID, policy, onPick)
+            PolicyOptionRow("允许", "直接执行，不再询问", ToolGate.ALLOW, policy, onPick)
+            PolicyOptionRow("每次询问", "每次调用都弹授权（默认）", ToolGate.ASK, policy, onPick)
+            PolicyOptionRow("禁止", "直接拦下，并把原因回给模型", ToolGate.FORBID, policy, onPick)
         }
     }
 }

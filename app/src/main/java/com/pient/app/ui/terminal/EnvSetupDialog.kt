@@ -1,5 +1,7 @@
 package com.pient.app.ui.terminal
 
+import com.pient.app.tools.terminal.TerminalSessions
+import com.pient.app.tools.terminal.UbuntuComponent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,11 +29,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pient.app.PientRuntime
-import com.pient.app.data.ComponentGroups
+import com.pient.app.tools.terminal.ComponentGroups
 import com.pient.app.data.SettingsStore
-import com.pient.app.data.UBUNTU_COMPONENTS
+import com.pient.app.tools.terminal.UBUNTU_COMPONENTS
 import com.pient.app.runtime.EnvProvision
-import com.pient.app.runtime.PiTerminal
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.pient.app.ui.components.PientDialog
@@ -81,7 +82,7 @@ fun EnvSetupDialog(onDone: () -> Unit) {
                 // 勾选集同步给「环境内软件」段（同一份状态，两处一致）
                 SettingsStore.selectedComponents = selected
                 val session = EnvProvision.installInTerminal(context, toInstall)
-                val idx = PiTerminal.sessions.indexOf(session)
+                val idx = TerminalSessions.sessions.indexOf(session)
                 if (idx >= 0) PientRuntime.chatState?.terminalIndex = idx
                 onDone()
             }

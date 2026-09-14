@@ -203,7 +203,7 @@ internal enum class ToolKind { EDIT, EXPLORE, RUN, OTHER }
 internal fun toolKindOf(name: String): ToolKind = when (name) {
     "write", "edit", "patch" -> ToolKind.EDIT
     "read", "grep", "find", "ls" -> ToolKind.EXPLORE
-    "bash" -> ToolKind.RUN
+    "bash", "terminal" -> ToolKind.RUN
     else -> ToolKind.OTHER
 }
 
@@ -248,7 +248,7 @@ private fun baseTitle(name: String, pending: Boolean): String = when (name) {
     "grep" -> if (pending) "正在搜索文件" else "已搜索文件"
     "find" -> if (pending) "正在查找文件" else "已查找文件"
     "ls" -> if (pending) "正在列出文件" else "已列出文件"
-    "bash" -> if (pending) "正在运行命令" else "已运行命令"
+    "bash", "terminal" -> if (pending) "正在运行命令" else "已运行命令"
     else -> if (pending) "正在运行 $name" else "已运行 $name"
 }
 
@@ -276,7 +276,7 @@ internal fun toolRowTitle(call: Msg.ToolCall): String {
     val pending = call.status == ToolStatus.RUNNING
     val verb = { past: String, present: String -> if (pending) present else past }
     return when (call.name) {
-        "bash" -> {
+        "bash", "terminal" -> {
             val cmd = firstArg(call.params, "command")
             if (cmd.isEmpty()) baseTitle(call.name, pending)
             else "${verb("已运行", "正在运行")} ${compact(summarizeCommand(cmd), 160)}"
@@ -529,7 +529,7 @@ private fun ToolGlyph(call: Msg.ToolCall, palette: ToolPalette) {
 private fun toolIconOf(name: String) = when (name) {
     "read" -> Icons.Outlined.Description
     "write", "edit" -> Icons.Outlined.Edit
-    "bash" -> Icons.Outlined.Terminal
+    "bash", "terminal" -> Icons.Outlined.Terminal
     "grep", "find" -> Icons.Outlined.Search
     "ls" -> Icons.Outlined.Folder
     else -> Icons.Outlined.Build

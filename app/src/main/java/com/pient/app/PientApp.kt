@@ -36,7 +36,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.pient.app.data.AiConfigStore
-import com.pient.app.data.APT_MIRRORS
+import com.pient.app.tools.terminal.APT_MIRRORS
 import com.pient.app.data.ChatState
 import com.pient.app.data.ChatStore
 import com.pient.app.data.ModelPricingDefaults
@@ -141,7 +141,13 @@ fun PientApp() {
         ) {
             notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        PiHostService.start(context.applicationContext)
+        // 宿主已冻结（2026-09-14 决策）：不再启动 pi 子进程（见 Docx/Pient 工具层设计.md「内核自研」节）
+        AppCtx.set(context.applicationContext)   // 内核各层（含工具调度）从这里取上下文
+        // 终端层软链尽早对一遍：宿主冻结后，软链维护还在启动路径上留一个兜底点
+        // （见 PiRuntime.ensureLinks 注释：APK 更新会让 /data/app 路径变化）
+        Thread {
+            runCatching { PiRuntime.ensureLinks(context.applicationContext) }
+        }.apply { isDaemon = true; name = "pient-links" }.start()
     }
     val nav = rememberNavController()
 

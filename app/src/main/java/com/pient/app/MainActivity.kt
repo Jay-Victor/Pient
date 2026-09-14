@@ -20,7 +20,7 @@ class MainActivity : ComponentActivity() {
      */
     override fun onStart() {
         super.onStart()
-        PiHostService.start(this)
+        // 宿主已冻结（2026-09-14 决策）：Pient 用自己的内核，不再启动 pi 子进程
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

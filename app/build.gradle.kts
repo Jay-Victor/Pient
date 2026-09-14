@@ -238,7 +238,7 @@ val syncPientRuntimeLibs = tasks.register<Copy>("syncPientRuntimeLibs") {
     // 切 ABI 后残留的老架构库会混进包 → 设备上 node 起不来（真机踩过）
     doFirst {
         pientAssertAbi(
-            listOf(pientRuntimeLibDir, pientRootfsLibDir)
+            listOf(pientRootfsLibDir)
                 .flatMap { dir -> (dir.listFiles() ?: emptyArray()).toList() }
                 .filter { it.name.endsWith(".so") || it.name.contains(".so.") },
             if (pientJniAbi == "arm64-v8a") "aarch64" else "x86_64",
@@ -247,11 +247,8 @@ val syncPientRuntimeLibs = tasks.register<Copy>("syncPientRuntimeLibs") {
                 "fetch_runtime.py --abi $pientRuntimeFetchAbi + fetch_rootfs.py --abi $pientRootfsAbi",
         )
     }
-    from(pientRuntimeLibDir) {
-        include("*.so", "*.so.*")
-        rename { name -> pientJniLibName(name) }
-    }
-    // 终端层的依赖库（PRoot 的 libtalloc / libandroid-shmem）同走这条路
+    // **只带终端层的依赖库**（PRoot 的 libtalloc / libandroid-shmem）：2026-09-14 宿主冻结后
+    // Node 那一套（icu / crypto / libc++ / pcre2，约 100MB）不再随包 —— 它们只为 node 存在。
     from(pientRootfsLibDir) {
         include("*.so", "*.so.*")
         rename { name -> pientJniLibName(name) }
@@ -269,7 +266,7 @@ val writePientRuntimeLibsManifest = tasks.register("writePientRuntimeLibsManifes
     doLast {
         val f = pientRuntimeLibsManifest.get().asFile
         f.parentFile.mkdirs()
-        val libFiles = listOf(pientRuntimeLibDir, pientRootfsLibDir)
+        val libFiles = listOf(pientRootfsLibDir)
             .flatMap { dir -> (dir.listFiles() ?: emptyArray()).toList() }
         val lines = if (libFiles.isNotEmpty()) {
             libFiles
@@ -312,8 +309,13 @@ val syncPientAppArchive = tasks.register<Exec>("syncPientAppArchive") {
 android.sourceSets.getByName("main").jniLibs.srcDir(pientJniRoot)
 android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/pientAssets"))
 tasks.named("preBuild") {
-    dependsOn(syncPientRuntime, syncPientRuntimeLibs, syncPientTerminalBinaries,
-        syncPientRootfsArchive, writePientRuntimeLibsManifest, syncPientAppArchive)
+    // 宿主运行时（node + rg/fd + icu/crypto + pi 官方包 + npm 本体）已冻结：不再打进 APK
+    // （2026-09-14 决策：内核自研；随包只留 终端层 PRoot/loader 与 Ubuntu rootfs）
+    dependsOn(
+        syncPientTerminalBinaries, syncPientRootfsArchive,
+        // 终端层的依赖库 + SONAME 映射表（proot 要 libtalloc.so.2；Node 那套库已不随包）
+        syncPientRuntimeLibs, writePientRuntimeLibsManifest,
+    )
     // 切 ABI 时清掉上一次构建留在 jniLibs 源目录里的另一套 ABI（jniLibs 源是整个
     // build/pientJniLibs，不清就会 fat 出包：实测 arm64 包里混进了 x86_64 的 proot/loader）
     doFirst {

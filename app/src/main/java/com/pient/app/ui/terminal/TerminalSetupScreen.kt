@@ -1,5 +1,6 @@
 package com.pient.app.ui.terminal
 
+import com.pient.app.tools.terminal.TerminalSessions
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
@@ -46,20 +47,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.pient.app.PientRuntime
-import com.pient.app.data.APT_MIRRORS
-import com.pient.app.data.ComponentGroups
-import com.pient.app.data.EnvAction
-import com.pient.app.data.ExecEnv
-import com.pient.app.data.ExecEnvs
-import com.pient.app.data.EnvStatus
+import com.pient.app.tools.terminal.APT_MIRRORS
+import com.pient.app.tools.terminal.ComponentGroups
+import com.pient.app.tools.terminal.EnvAction
+import com.pient.app.tools.terminal.ExecEnv
+import com.pient.app.tools.terminal.ExecEnvs
+import com.pient.app.tools.terminal.EnvStatus
 import com.pient.app.data.Panel
 import com.pient.app.data.RootGateway
 import com.pient.app.data.SettingsStore
-import com.pient.app.data.UBUNTU_COMPONENTS
-import com.pient.app.data.UbuntuComponent
+import com.pient.app.tools.terminal.UBUNTU_COMPONENTS
+import com.pient.app.tools.terminal.UbuntuComponent
 import com.pient.app.runtime.EnvProvision
 import com.pient.app.runtime.PiRuntime
-import com.pient.app.runtime.PiTerminal
 import com.pient.app.ui.components.ArcSpinner
 import com.pient.app.ui.components.DividerLine
 import com.pient.app.ui.components.PientButton
@@ -132,10 +132,10 @@ fun TerminalSetupScreen(nav: NavController) {
      * 切到终端页并选中承载安装的会话（「安装所选」的落点）：
      * 环境配置页是独立路由 → 先 popBackStack 回聊天页，再把面板换成终端。
      */
-    fun openTerminal(session: PiTerminal.Session) {
+    fun openTerminal(session: TerminalSessions.Session) {
         val cs = PientRuntime.chatState
         if (cs != null) {
-            val idx = PiTerminal.sessions.indexOf(session)
+            val idx = TerminalSessions.sessions.indexOf(session)
             if (idx >= 0) cs.terminalIndex = idx
             cs.activePanel = Panel.TERMINAL
         }
@@ -212,7 +212,7 @@ fun TerminalSetupScreen(nav: NavController) {
             if (st?.action == EnvAction.UNPACK_ROOTFS) {
                 PiRuntime.ensureRootfsAsync(context)
                 toast("rootfs 未就绪：已开始自动解包（约 30MB / 1–2 分钟），完成后回来再点「安装所选」")
-                openTerminal(PiTerminal.sessionNamed(PiTerminal.CONFIG_SESSION) ?: PiTerminal.newSession(context))
+                openTerminal(TerminalSessions.sessionNamed(TerminalSessions.CONFIG_SESSION) ?: TerminalSessions.newSession(context))
                 scope.launch {
                     delay(1500)
                     refresh()
@@ -433,7 +433,7 @@ fun TerminalSetupScreen(nav: NavController) {
                     scope.launch { withContext(Dispatchers.IO) { SettingsStore.saveEnvironment(context) } }
                 },
                 onOpenTerminal = {
-                    openTerminal(PiTerminal.sessionNamed(PiTerminal.CONFIG_SESSION) ?: PiTerminal.newSession(context))
+                    openTerminal(TerminalSessions.sessionNamed(TerminalSessions.CONFIG_SESSION) ?: TerminalSessions.newSession(context))
                 },
             )
         }

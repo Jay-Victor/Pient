@@ -1,5 +1,7 @@
 package com.pient.app.data
 
+import com.pient.app.tools.ToolCall
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -32,7 +34,7 @@ sealed class ChatEvent {
     data class UsageEvent(val usage: Usage) : ChatEvent()
 
     /** 本轮模型请求的工具调用（原生 `tool_calls` / Anthropic `tool_use`；可能多个） */
-    data class ToolCallsEvent(val calls: List<AppTools.Call>) : ChatEvent()
+    data class ToolCallsEvent(val calls: List<ToolCall>) : ChatEvent()
     data object Done : ChatEvent()
     data class Failed(val message: String) : ChatEvent()
 }
@@ -40,14 +42,14 @@ sealed class ChatEvent {
 /**
  * 一次请求里的一个回合（比 `List<Pair<role, content>>` 更宽：工具调用与工具结果需要独立字段）。
  * - [Text]：普通文本回合（历史都是这种）；
- * - [Rich]：带**直发附件**的回合（媒体能力开关开启时，[AppTools.mediaParts] 产出内容部件）；
+ * - [Rich]：带**直发附件**的回合（媒体能力开关开启时，[MediaInline.parts] 产出内容部件）；
  * - [AssistantCalls]：模型上一轮回的工具调用（原生协议要求原样带回历史）；
  * - [ToolOutput]：工具执行结果（OpenAI = role:"tool" + tool_call_id；Anthropic = user 里的 tool_result）。
  */
 sealed interface ChatTurn {
     data class Text(val role: String, val content: String) : ChatTurn
     data class Rich(val role: String, val text: String, val parts: List<WirePart>) : ChatTurn
-    data class AssistantCalls(val text: String, val calls: List<AppTools.Call>) : ChatTurn
+    data class AssistantCalls(val text: String, val calls: List<ToolCall>) : ChatTurn
     data class ToolOutput(val callId: String, val name: String, val content: String) : ChatTurn
 }
 
@@ -139,7 +141,7 @@ object AiBackend {
         val usage: Usage?,
         val thinking: String? = null,
         /** 原生工具调用（无工具调用时为空表） */
-        val toolCalls: List<AppTools.Call> = emptyList(),
+        val toolCalls: List<ToolCall> = emptyList(),
     )
 
     suspend fun chat(
@@ -589,16 +591,16 @@ object AiBackend {
     }
 
     /** OpenAI 兼容的 `message.tool_calls` → 调用列表（arguments 是 JSON 字符串，原样带） */
-    private fun openAiToolCalls(message: JSONObject?): List<AppTools.Call> {
+    private fun openAiToolCalls(message: JSONObject?): List<ToolCall> {
         val arr = message?.optJSONArray("tool_calls") ?: return emptyList()
-        val out = ArrayList<AppTools.Call>(arr.length())
+        val out = ArrayList<ToolCall>(arr.length())
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
             val fn = o.optJSONObject("function") ?: continue
             val name = fn.strOrEmpty("name").trim()
             if (name.isEmpty()) continue
             out.add(
-                AppTools.Call(
+                ToolCall(
                     id = o.strOrEmpty("id").ifBlank { "call_${i}" },
                     name = name,
                     arguments = fn.strOrEmpty("arguments").ifBlank { "{}" },
@@ -620,7 +622,7 @@ object AiBackend {
     private fun parseAnthropicFull(root: JSONObject): ChatResult {
         val sb = StringBuilder()
         val thinking = StringBuilder()
-        val calls = ArrayList<AppTools.Call>()
+        val calls = ArrayList<ToolCall>()
         val content = root.optJSONArray("content")
         if (content != null) {
             for (i in 0 until content.length()) {
@@ -634,7 +636,7 @@ object AiBackend {
                         val name = b.strOrEmpty("name").trim()
                         if (name.isNotEmpty()) {
                             calls.add(
-                                AppTools.Call(
+                                ToolCall(
                                     id = b.strOrEmpty("id").ifBlank { "call_$i" },
                                     name = name,
                                     arguments = b.optJSONObject("input")?.toString() ?: "{}",
@@ -708,12 +710,12 @@ object AiBackend {
             (slot[2] as StringBuilder).append(argFragment)
         }
 
-        fun build(): List<AppTools.Call> = order.entries
+        fun build(): List<ToolCall> = order.entries
             .sortedBy { it.key }
             .mapNotNull { (idx, slot) ->
                 val name = (slot[1] as String).trim()
                 if (name.isEmpty()) return@mapNotNull null
-                AppTools.Call(
+                ToolCall(
                     id = (slot[0] as String).ifBlank { "call_$idx" },
                     name = name,
                     arguments = (slot[2] as StringBuilder).toString().ifBlank { "{}" },

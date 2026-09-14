@@ -1,4 +1,4 @@
-package com.pient.app.runtime
+package com.pient.app.tools.terminal
 
 import android.content.Context
 import android.os.Handler
@@ -6,12 +6,14 @@ import android.os.Looper
 import android.util.Log
 import androidx.compose.runtime.mutableStateListOf
 import com.pient.app.data.MockTerminal
+import com.pient.app.runtime.PiRuntime
 import com.pient.app.data.TerminalLine
 import com.pient.app.data.TerminalLineKind
 import java.util.concurrent.TimeUnit
 
 /**
- * 终端页的真实会话引擎（2026-09-12 起，替代原 `MockTerminal.run()` 的假输出）。
+ * **终端层（②）的会话引擎** —— 终端页（用户）与 `bash` 工具（AI）共用这同一批常驻 shell 进程，
+ * 「持久会话、AI 可执行、用户可见」说的就是这里（2026-09-12 起，替代原 `MockTerminal.run()` 的假输出）。
  *
  * 一个会话 = 一个常驻子进程：`<native lib>/libpient_shell.so`（随包分发的包装脚本）→ PRoot →
  * rootfs 里的 GNU bash，stdin/stdout 走管道。因为是**同一个 shell 进程**，`cd` / `export` 在
@@ -20,7 +22,7 @@ import java.util.concurrent.TimeUnit
  * 已知边界（无 PTY，如实说明）：交互式程序（vim / top / apt 的 TUI）与行编辑、Tab 补全不可用；
  * Ctrl+C 也发不出 SIGINT —— [interrupt] 的实现是「结束并重建该会话进程」（cwd 回到 ~）。要真终端需上 PTY。
  */
-object PiTerminal {
+object TerminalSessions {
     private const val TAG = "PiTerminal"
     private const val MAX_LINES = 2000
     private const val INIT_CMD = """cd ~; . /etc/os-release; echo "${'$'}PRETTY_NAME · ${'$'}(uname -sr)""""

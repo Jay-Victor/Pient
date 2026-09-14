@@ -1,5 +1,6 @@
 package com.pient.app.ui.terminal
 
+import com.pient.app.tools.terminal.TerminalSessions
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -62,7 +63,6 @@ import com.pient.app.ui.theme.PientPanel
 import com.pient.app.ui.theme.TerminalDark
 import com.pient.app.ui.theme.TerminalLight
 import com.pient.app.runtime.PiRuntime
-import com.pient.app.runtime.PiTerminal
 import kotlinx.coroutines.launch
 
 /**
@@ -90,8 +90,8 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
 
     // 真实会话引擎：首个会话在首次进入时建立（要起子进程，首帧先渲染空盒）
     val context = LocalContext.current
-    LaunchedEffect(Unit) { PiTerminal.ensure(context) }
-    val session = PiTerminal.sessions.getOrNull(chatState.terminalIndex) ?: PiTerminal.sessions.firstOrNull()
+    LaunchedEffect(Unit) { TerminalSessions.ensure(context) }
+    val session = TerminalSessions.sessions.getOrNull(chatState.terminalIndex) ?: TerminalSessions.sessions.firstOrNull()
 
     // 首启「环境安装」（对齐 Operit 的 SetupScreen：首启弹一次、可跳过）——rootfs 就绪后弹，
     // 首启那 1–2 分钟先在后台自动解包，别让用户在还没就绪的界面上做选择。
@@ -117,7 +117,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
     fun runCommand(cmd: String) {
         if (cmd.isBlank()) return
         session.lines += TerminalLine("~ \$ $cmd", TerminalLineKind.COMMAND)
-        PiTerminal.write(session, cmd)
+        TerminalSessions.write(session, cmd)
         history.add(cmd)
         historyIndex = -1
         input = TextFieldValue("")
@@ -142,7 +142,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                         modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        PiTerminal.sessions.forEachIndexed { i, s ->
+                        TerminalSessions.sessions.forEachIndexed { i, s ->
                             val sel = i == chatState.terminalIndex
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -170,7 +170,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                                 // 仅剩一个会话时不可关闭（Operit 同款约束，防空列表）
-                                if (PiTerminal.sessions.size > 1) {
+                                if (TerminalSessions.sessions.size > 1) {
                                     Icon(
                                         Icons.Outlined.Close, "关闭终端会话",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -189,8 +189,8 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                         modifier = Modifier
                             .size(18.dp)
                             .clickable(onClick = {
-                            PiTerminal.newSession(context)
-                            chatState.terminalIndex = PiTerminal.sessions.lastIndex
+                            TerminalSessions.newSession(context)
+                            chatState.terminalIndex = TerminalSessions.sessions.lastIndex
                         })
                             .padding(2.dp),
                     )
@@ -237,7 +237,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                 ) {
                     QuickKey("Ctrl+C", "中断", termColors) {
-                        PiTerminal.interrupt(context, session)
+                        TerminalSessions.interrupt(context, session)
                     }
                     QuickKey("Ctrl+L", "清屏", termColors) {
                         session.lines.clear()
@@ -368,14 +368,14 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
 
         // ── 会话关闭二次确认（Operit onTabCloseRequest 同款弹窗） ──
         closeConfirmIndex?.let { i ->
-            PiTerminal.sessions.getOrNull(i)?.let { target ->
+            TerminalSessions.sessions.getOrNull(i)?.let { target ->
                 PientDialog(
                     title = "关闭终端会话",
                     onDismiss = { closeConfirmIndex = null },
                     confirmText = "删除",
                     onConfirm = {
-                        PiTerminal.close(target)
-                        if (chatState.terminalIndex >= PiTerminal.sessions.size) {
+                        TerminalSessions.close(target)
+                        if (chatState.terminalIndex >= TerminalSessions.sessions.size) {
                             chatState.terminalIndex = 0
                         }
                         closeConfirmIndex = null

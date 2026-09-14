@@ -1,5 +1,7 @@
 package com.pient.app.data
 
+import com.pient.app.tools.terminal.ExecEnv
+import com.pient.app.tools.terminal.APT_MIRRORS
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue

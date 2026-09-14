@@ -3,7 +3,6 @@ package com.pient.app.runtime
 import android.system.Os
 import android.util.Log
 import com.pient.app.IPientShellService
-import com.pient.app.data.ToolPolicy
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess

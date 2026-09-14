@@ -1,12 +1,13 @@
 package com.pient.app.runtime
 
+import com.pient.app.tools.terminal.TerminalSessions
 import android.content.Context
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import com.pient.app.data.AptMirror
-import com.pient.app.data.UbuntuComponent
+import com.pient.app.tools.terminal.AptMirror
+import com.pient.app.tools.terminal.UbuntuComponent
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -129,14 +130,14 @@ object EnvProvision {
      *
      * @return 承载安装的会话（调用方据此切到终端页并选中这个会话）
      */
-    fun installInTerminal(context: Context, components: List<UbuntuComponent>): PiTerminal.Session {
-        val session = PiTerminal.sessionNamed(PiTerminal.CONFIG_SESSION)
-            ?: PiTerminal.newSession(context, PiTerminal.CONFIG_SESSION)
+    fun installInTerminal(context: Context, components: List<UbuntuComponent>): TerminalSessions.Session {
+        val session = TerminalSessions.sessionNamed(TerminalSessions.CONFIG_SESSION)
+            ?: TerminalSessions.newSession(context, TerminalSessions.CONFIG_SESSION)
         if (components.isEmpty() || running) return session
         running = true
         step = "安装 ${components.size} 个组件"
         lastExitCode = null
-        PiTerminal.runScript(session, labelFor(components), commandsFor(components)) { code ->
+        TerminalSessions.runScript(session, labelFor(components), commandsFor(components)) { code ->
             running = false
             step = ""
             lastExitCode = code

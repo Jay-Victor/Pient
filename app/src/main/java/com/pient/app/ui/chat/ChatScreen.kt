@@ -415,18 +415,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                     attachSheetOpen = false // 切页时收起附件卡片
                 },
             )
-            // pi 宿主未就绪 → **显式降级提示**（2026-09-14）：宿主不在跑时聊天走 Kotlin 直连，
-            // AI 只会回文字、不会调用任何工具。不写清楚的话，用户看到的就是「AI 不调工具」（真机踩过）。
-            val hostState by PiHost.state.collectAsState()
-            if (chatState.aiConfigured && chatState.currentProject != null && hostState !is PiHostState.Running) {
-                HostNotReadyStrip(
-                    state = hostState,
-                    onRetry = {
-                        PientRuntime.hostStarted = false   // 复位标记，强制走一次 ensureStarted
-                        PiHostService.start(context.applicationContext)
-                    },
-                )
-            }
+            // 宿主已冻结（2026-09-14 决策）：Pient 用自己的内核（Kotlin）跑对话与工具，
+            // 「宿主未就绪 → 工具不可用」这条降级提示随之取消（原 HostNotReadyStrip 不再渲染）。
             // 面板内容 + 覆盖其上的输入栏（2026-09-12：输入栏 dock 改为浮层，
             // 面板内容伸到屏幕底部、可从玻璃里透出 —— Operit 输入栏 align(BottomCenter) 同款）
             Box(Modifier.weight(1f).fillMaxWidth()) {
