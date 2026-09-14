@@ -56,6 +56,7 @@ import com.pient.app.ui.settings.ProjectManagementScreen
 import com.pient.app.ui.settings.SettingsScreen
 import com.pient.app.ui.settings.SystemPermissionScreen
 import com.pient.app.ui.settings.ThemeSettingsScreen
+import com.pient.app.ui.settings.ToolsScreen
 import com.pient.app.ui.settings.UsageScreen
 import com.pient.app.ui.skills.SkillSearchScreen
 import com.pient.app.ui.skills.SkillsScreen
@@ -380,6 +381,9 @@ fun PientApp() {
                     }
                     composable("system_permissions") {
                         SystemPermissionScreen(nav = nav)
+                    }
+                    composable("tools") {
+                        ToolsScreen(nav = nav)
                     }
                     composable("about") {
                         AboutScreen(nav = nav)
