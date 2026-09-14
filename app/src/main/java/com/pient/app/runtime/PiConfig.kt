@@ -95,11 +95,26 @@ object PiConfig {
         json.put("shellPath", PiRuntime.shellPath(context).absolutePath)
         val tools = if (selectedConfig()?.toolCallEnabled != false) PIENT_TOOLS else emptyList()
         json.put("defaultTools", JSONArray(tools))
+        // 上下文压缩（2026-09-14 改为 pi 原生 `compaction` 块）：写进 settings.json 才能让
+        // **宿主自己的**自动压缩判定用上 Pient 的配置页数值（pi 在 agent 循环里查
+        // `contextTokens > contextWindow − reserveTokens` 时读的就是它）。
+        // `enabled` 另有官方 RPC `set_auto_compaction` 负责即时切换；这里保证宿主冷启动即正确。
+        val compaction = selectedConfig()?.let { cfg ->
+            JSONObject()
+                .put("enabled", cfg.compactionEnabled)
+                .put("reserveTokens", cfg.reserveTokensValue)
+                .put("keepRecentTokens", cfg.keepRecentTokensValue)
+        }
+        if (compaction != null) json.put("compaction", compaction)
         writeJson(file, json)
         Log.i(
             TAG,
             "pi 设置已写入：shellPath=${PiRuntime.shellPath(context).absolutePath} " +
-                "defaultTools=${tools.size} 个（ToolCall=${selectedConfig()?.toolCallEnabled != false}）",
+                "defaultTools=${tools.size} 个（ToolCall=${selectedConfig()?.toolCallEnabled != false}）" +
+                (compaction?.let {
+                    " compaction(enabled=${it.optBoolean("enabled")}, " +
+                        "keepRecent=${it.optInt("keepRecentTokens")}, reserve=${it.optInt("reserveTokens")})"
+                } ?: ""),
         )
     }
 

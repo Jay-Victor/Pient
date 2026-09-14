@@ -475,95 +475,90 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 placeholder = "64",
                             )
                             DividerLine()
-                            // ── 3.3~3.6 上下文管理（2026-09-13 参考 Operit 的总结式上下文管理）──
-                            // 触发判定与默认值逐值对齐 Operit（见 data/ContextPolicy.kt）；
-                            // 执行走 pi 原生 compact（宿主在跑）/ App 侧摘要（直连路径）。
+                            // ── 3.3~3.5 上下文压缩（**2026-09-14 改为 pi 原生口径**）──
+                            // pi 的触发条件 = contextTokens > contextWindow − reserveTokens；
+                            // 三个旋钮写进 ~/.pi/agent/settings.json 的 compaction 块
+                            // （PiConfig.syncSettings 合并写 → 宿主启动即按它判定），enabled 另有
+                            // 官方 RPC set_auto_compaction 即时切换。App 不判定触发、不生成摘要。
                             ParamBlock(
-                                label = "自动总结上下文",
-                                hint = "对话变长时自动生成摘要，之后的对话从摘要继续（关闭 = 不自动总结）",
-                                enabled = cfg.summaryEnabled,
-                                onToggle = { updateConfig { it.copy(summaryEnabled = !it.summaryEnabled) } },
+                                label = "自动压缩上下文",
+                                hint = "上下文接近上限时由 pi 自动摘要旧内容（关闭后仍可在用量卡手动压缩）",
+                                enabled = cfg.compactionEnabled,
+                                onToggle = { updateConfig { it.copy(compactionEnabled = !it.compactionEnabled) } },
                             )
-                            if (cfg.summaryEnabled) {
-                                ConfigFieldLabel("按用量触发")
-                                FieldHint("上下文占用达到该比例时生成摘要（Operit 默认 0.70）")
+                            if (cfg.compactionEnabled) {
+                                ConfigFieldLabel("为回复预留 Tokens")
+                                FieldHint("已用超过「上下文长度 − 预留」时触发压缩（pi 默认 16384）")
                                 ContextNumberField(
-                                    value = cfg.summaryTokenThreshold,
+                                    value = cfg.reserveTokens,
+                                    onValueChange = { v ->
+                                        updateConfig {
+                                            it.copy(reserveTokens = v.filter { c -> c.isDigit() }.take(7))
+                                        }
+                                    },
+                                    placeholder = "16384",
+                                    suffix = "Tokens",
+                                )
+                                ConfigFieldLabel("保留最近 Tokens")
+                                FieldHint("压缩时最近这一段不摘要、原样保留（pi 默认 20000）")
+                                ContextNumberField(
+                                    value = cfg.keepRecentTokens,
+                                    onValueChange = { v ->
+                                        updateConfig {
+                                            it.copy(keepRecentTokens = v.filter { c -> c.isDigit() }.take(7))
+                                        }
+                                    },
+                                    placeholder = "20000",
+                                    suffix = "Tokens",
+                                )
+                            }
+                            ConfigFieldLabel("压缩指令")
+                            FieldHint("用量卡点「压缩上下文」时交给 pi 的指令；留空 = pi 默认的 Goal / Progress / Next Steps 口径")
+                            PientTextArea(
+                                value = cfg.compactInstructions,
+                                onValueChange = { v -> updateConfig { it.copy(compactInstructions = v) } },
+                                placeholder = "例如：重点保留文件路径与命令；忽略寒暄",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+                            )
+                            ConfigFieldLabel("历史媒体保留")
+                            FieldHint("仅直连路径拼请求时生效：更早回合的图片/音视频替换为「已省略」（默认 2 / 1）")
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+                            ) {
+                                PientInputBox(
+                                    value = cfg.maxImageHistoryTurns,
                                     onValueChange = { v ->
                                         updateConfig {
                                             it.copy(
-                                                summaryTokenThreshold = v.filter { c ->
-                                                    c.isDigit() || c == '.'
-                                                }.take(4),
+                                                maxImageHistoryTurns = v.filter { c -> c.isDigit() }.take(2),
                                             )
                                         }
                                     },
-                                    placeholder = "0.70",
-                                    suffix = "占比",
-                                    decimal = true,
+                                    placeholder = "2",
+                                    number = true,
+                                    suffix = "图片 · 回合",
+                                    modifier = Modifier.weight(1f),
                                 )
-                                ConfigFieldLabel("按消息条数触发")
-                                FieldHint("自上次总结后的用户消息数达到该值时生成摘要（Operit 默认 16）")
-                                ContextNumberField(
-                                    value = cfg.summaryMessageCount,
+                                Spacer(Modifier.width(10.dp))
+                                PientInputBox(
+                                    value = cfg.maxMediaHistoryTurns,
                                     onValueChange = { v ->
                                         updateConfig {
                                             it.copy(
-                                                summaryMessageCount = v.filter { c -> c.isDigit() }.take(3),
+                                                maxMediaHistoryTurns = v.filter { c -> c.isDigit() }.take(2),
                                             )
                                         }
                                     },
-                                    placeholder = "16",
-                                    suffix = "条",
+                                    placeholder = "1",
+                                    number = true,
+                                    suffix = "音视频 · 回合",
+                                    modifier = Modifier.weight(1f),
                                 )
-                                ConfigFieldLabel("自定义总结规则")
-                                FieldHint("追加到摘要提示词末尾；宿主路径下作为 pi compact 的 customInstructions")
-                                PientTextArea(
-                                    value = cfg.summaryCustomRules,
-                                    onValueChange = { v -> updateConfig { it.copy(summaryCustomRules = v) } },
-                                    placeholder = "例如：重点保留文件路径与命令；忽略寒暄",
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
-                                )
-                                ConfigFieldLabel("历史媒体保留")
-                                FieldHint("更早回合的图片/音视频在请求里替换为「已省略」（Operit 默认 2 / 1）")
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
-                                ) {
-                                    PientInputBox(
-                                        value = cfg.maxImageHistoryTurns,
-                                        onValueChange = { v ->
-                                            updateConfig {
-                                                it.copy(
-                                                    maxImageHistoryTurns = v.filter { c -> c.isDigit() }.take(2),
-                                                )
-                                            }
-                                        },
-                                        placeholder = "2",
-                                        number = true,
-                                        suffix = "图片 · 回合",
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    Spacer(Modifier.width(10.dp))
-                                    PientInputBox(
-                                        value = cfg.maxMediaHistoryTurns,
-                                        onValueChange = { v ->
-                                            updateConfig {
-                                                it.copy(
-                                                    maxMediaHistoryTurns = v.filter { c -> c.isDigit() }.take(2),
-                                                )
-                                            }
-                                        },
-                                        placeholder = "1",
-                                        number = true,
-                                        suffix = "音视频 · 回合",
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                }
                             }
                         }
                     }

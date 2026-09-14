@@ -24,8 +24,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.pient.app.data.AiConfigStore
 import com.pient.app.data.ChatState
 import com.pient.app.data.ContextCategory
+import com.pient.app.data.ContextPolicy
+import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.theme.DarkBrandPurple
 import com.pient.app.ui.theme.DarkCategoryConversation
 import com.pient.app.ui.theme.DarkCategoryRules
@@ -56,6 +59,8 @@ import java.util.Locale
 fun ContextUsageCard(
     chatState: ChatState,
     bottomOffset: Dp = 8.dp, // 弹窗底部到屏幕底的距离（锚定到输入栏上缘，与模型选择器同口径）
+    /** 手动压缩上下文（pi `compact`）；null = 不显示该动作 */
+    onCompact: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val categories = chatState.contextCategories
@@ -135,6 +140,45 @@ fun ContextUsageCard(
             ) {
                 categories.forEach { cat ->
                     CategoryRow(cat)
+                }
+            }
+
+            // ⑤ 压缩（2026-09-14 改为 pi 原生口径）：触发线来自 pi 的
+            // `contextTokens > contextWindow − reserveTokens`，这里只做等价换算展示；
+            // 右侧「压缩上下文」= 移动端对 `/compact` 命令的入口（宿主在跑时可用）。
+            val cfg = chatState.selectedModel?.provider?.let { AiConfigStore.configs[it] }
+            val threshold = cfg?.let {
+                ContextPolicy.autoCompactThresholdPercent(
+                    it.reserveTokensValue,
+                    it.ctxLenK.trim().toIntOrNull() ?: 0,
+                )
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp),
+            ) {
+                Text(
+                    when {
+                        cfg == null -> "上下文压缩：未配置服务商"
+                        !cfg.compactionEnabled -> "自动压缩已关闭"
+                        threshold != null -> "自动压缩：已用 ≥ $threshold% 时"
+                        else -> "自动压缩：接近上下文上限时"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    modifier = Modifier.weight(1f),
+                )
+                if (onCompact != null) {
+                    PientButton(
+                        text = if (chatState.compacting) "压缩中…" else "压缩上下文",
+                        onClick = { if (!chatState.compacting) onCompact() },
+                        primary = false,
+                        height = 28,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
                 }
             }
         }

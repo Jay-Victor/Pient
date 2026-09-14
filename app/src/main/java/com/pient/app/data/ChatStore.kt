@@ -268,6 +268,7 @@ object ChatStore {
             .put("tokensBefore", m.tokensBefore)
             .put("saved", m.saved)
             .put("summary", m.summary)
+            .put("reason", m.reason ?: JSONObject.NULL)
     }
 
     private fun deserializeMsg(o: JSONObject): Msg? = try {
@@ -336,6 +337,7 @@ object ChatStore {
                 tokensBefore = o.optInt("tokensBefore"),
                 saved = o.optInt("saved"),
                 summary = o.optString("summary"),
+                reason = if (o.isNull("reason")) null else o.optString("reason"),
             )
             else -> null
         }

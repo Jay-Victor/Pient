@@ -114,6 +114,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import android.widget.Toast
 import com.pient.app.data.Attachment
+import com.pient.app.data.ContextPolicy
 import com.pient.app.data.Msg
 import com.pient.app.data.PendingPermission
 import com.pient.app.data.Quote
@@ -1494,6 +1495,16 @@ private fun CompactionCard(msg: Msg.Compaction) {
                 style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.padding(start = 6.dp),
             )
+            // 压缩原因来自 pi 的 compaction_start/end（manual / threshold / overflow）——
+            // 移动端看不到 pi 的 footer 提示，这行就是「这次为什么压」的答案
+            if (msg.reason != null) {
+                Text(
+                    ContextPolicy.compactReasonLabel(msg.reason),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+            }
             Text(
                 "前 ${tok(msg.tokensBefore)} · 节省 ${tok(msg.saved)}",
                 style = MaterialTheme.typography.labelSmall,

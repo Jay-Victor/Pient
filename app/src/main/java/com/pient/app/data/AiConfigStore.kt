@@ -65,38 +65,34 @@ data class ProviderConfig(
     /** 模型支持视频解析（Operit `enableDirectVideoProcessing`，默认 false） */
     val videoDirectEnabled: Boolean = false,
 
-    // ── 上下文管理（2026-09-13 参考 Operit 的总结式上下文管理；默认值逐值对齐 Operit）──
+    // ── 上下文管理（**2026-09-14 改为 pi 原生口径**；此前 Operit 的总结式那一套已删）──
+    // 依据 pi `~/.pi/agent/settings.json` 的 `compaction` 块（见 data/ContextPolicy.kt 文件头）。
 
-    /** 自动总结上下文（Operit `ModelConfigDefaults.DEFAULT_ENABLE_SUMMARY`） */
-    val summaryEnabled: Boolean = ContextPolicy.DEFAULT_ENABLE_SUMMARY,
-    /** 按用量触发总结的阈值（0~1 占比；Operit `DEFAULT_SUMMARY_TOKEN_THRESHOLD = 0.70`） */
-    val summaryTokenThreshold: String = "0.70",
-    /** 按消息条数触发总结（Operit `DEFAULT_ENABLE_SUMMARY_BY_MESSAGE_COUNT`） */
-    val summaryByMessageCount: Boolean = ContextPolicy.DEFAULT_ENABLE_SUMMARY_BY_MESSAGE_COUNT,
-    /** 自上次总结后的用户消息数阈值（Operit `DEFAULT_SUMMARY_MESSAGE_COUNT_THRESHOLD = 16`） */
-    val summaryMessageCount: String = "16",
-    /**
-     * 自定义总结规则（Operit `summaryCustomRules`）：追加到摘要 system prompt 末尾；
-     * 宿主路径下作为 pi `compact` 命令的 `customInstructions`。
-     */
-    val summaryCustomRules: String = "",
-    /** 历史中保留图片附件的最近用户回合数（Operit `DEFAULT_MAX_IMAGE_HISTORY_USER_TURNS = 2`） */
+    /** 自动压缩上下文（pi `compaction.enabled`，默认 true）；关掉后仍能在用量卡里手动压缩 */
+    val compactionEnabled: Boolean = ContextPolicy.DEFAULT_COMPACTION_ENABLED,
+    /** 摘要后保留的最近 tokens（pi `compaction.keepRecentTokens`，默认 20000） */
+    val keepRecentTokens: String = ContextPolicy.DEFAULT_KEEP_RECENT_TOKENS.toString(),
+    /** 给模型回复预留的 tokens（pi `compaction.reserveTokens`，默认 16384） */
+    val reserveTokens: String = ContextPolicy.DEFAULT_RESERVE_TOKENS.toString(),
+    /** 手动压缩时交给 pi 的指令（pi `compact` 的 `customInstructions`；留空 = pi 默认 checkpoint 口径） */
+    val compactInstructions: String = "",
+    /** 历史中保留图片附件的最近用户回合数（**直连路径拼请求**用；宿主路径由 pi 管会话，不适用） */
     val maxImageHistoryTurns: String = "2",
-    /** 历史中保留音视频附件的最近用户回合数（Operit `DEFAULT_MAX_MEDIA_HISTORY_USER_TURNS = 1`） */
+    /** 历史中保留音视频附件的最近用户回合数（同上） */
     val maxMediaHistoryTurns: String = "1",
 ) {
     val models: List<String>
         get() = modelList.split(";").map { it.trim() }.filter { it.isNotEmpty() }
 
-    /** 生效的用量阈值（非法输入回退 Operit 默认 0.70） */
-    val summaryTokenThresholdValue: Float
-        get() = summaryTokenThreshold.trim().toFloatOrNull()?.coerceIn(0f, 1f)
-            ?: ContextPolicy.DEFAULT_SUMMARY_TOKEN_THRESHOLD
+    /** 生效的「保留最近 tokens」（非法输入回退 pi 默认 20000） */
+    val keepRecentTokensValue: Int
+        get() = keepRecentTokens.trim().toIntOrNull()?.coerceIn(1000, 2_000_000)
+            ?: ContextPolicy.DEFAULT_KEEP_RECENT_TOKENS
 
-    /** 生效的消息数阈值（非法输入回退 Operit 默认 16） */
-    val summaryMessageCountValue: Int
-        get() = summaryMessageCount.trim().toIntOrNull()?.coerceAtLeast(1)
-            ?: ContextPolicy.DEFAULT_SUMMARY_MESSAGE_COUNT_THRESHOLD
+    /** 生效的「为回复预留 tokens」（非法输入回退 pi 默认 16384） */
+    val reserveTokensValue: Int
+        get() = reserveTokens.trim().toIntOrNull()?.coerceIn(1000, 1_000_000)
+            ?: ContextPolicy.DEFAULT_RESERVE_TOKENS
 
     /** 生效的图片保留回合数（非法输入回退 Operit 默认 2） */
     val maxImageHistoryTurnsValue: Int
@@ -204,21 +200,24 @@ object AiConfigStore {
                     imageDirectEnabled = o.optBoolean("imageDirectEnabled", false),
                     audioDirectEnabled = o.optBoolean("audioDirectEnabled", false),
                     videoDirectEnabled = o.optBoolean("videoDirectEnabled", false),
-                    // 上下文管理（2026-09-13）：缺字段 → Operit 默认值（老配置行为不变）
-                    summaryEnabled = o.optBoolean("summaryEnabled", ContextPolicy.DEFAULT_ENABLE_SUMMARY),
-                    summaryTokenThreshold = o.optString(
-                        "summaryTokenThreshold",
-                        "0.70",
+                    // 上下文管理（2026-09-14 pi 原生口径）：老配置的 summaryEnabled /
+                    // summaryCustomRules 迁移到新键（用户此前关掉自动总结 = 现在也关）
+                    compactionEnabled = o.optBoolean(
+                        "compactionEnabled",
+                        o.optBoolean("summaryEnabled", ContextPolicy.DEFAULT_COMPACTION_ENABLED),
                     ),
-                    summaryByMessageCount = o.optBoolean(
-                        "summaryByMessageCount",
-                        ContextPolicy.DEFAULT_ENABLE_SUMMARY_BY_MESSAGE_COUNT,
+                    keepRecentTokens = o.optString(
+                        "keepRecentTokens",
+                        ContextPolicy.DEFAULT_KEEP_RECENT_TOKENS.toString(),
                     ),
-                    summaryMessageCount = o.optString(
-                        "summaryMessageCount",
-                        ContextPolicy.DEFAULT_SUMMARY_MESSAGE_COUNT_THRESHOLD.toString(),
+                    reserveTokens = o.optString(
+                        "reserveTokens",
+                        ContextPolicy.DEFAULT_RESERVE_TOKENS.toString(),
                     ),
-                    summaryCustomRules = o.optString("summaryCustomRules", ""),
+                    compactInstructions = o.optString(
+                        "compactInstructions",
+                        o.optString("summaryCustomRules", ""),
+                    ),
                     maxImageHistoryTurns = o.optString(
                         "maxImageHistoryTurns",
                         ContextPolicy.DEFAULT_MAX_IMAGE_HISTORY_TURNS.toString(),
@@ -260,11 +259,11 @@ object AiConfigStore {
                         .put("imageDirectEnabled", c.imageDirectEnabled)
                         .put("audioDirectEnabled", c.audioDirectEnabled)
                         .put("videoDirectEnabled", c.videoDirectEnabled)
-                        .put("summaryEnabled", c.summaryEnabled)
-                        .put("summaryTokenThreshold", c.summaryTokenThreshold)
-                        .put("summaryByMessageCount", c.summaryByMessageCount)
-                        .put("summaryMessageCount", c.summaryMessageCount)
-                        .put("summaryCustomRules", c.summaryCustomRules)
+                        // 上下文管理（2026-09-14 pi 原生口径）
+                        .put("compactionEnabled", c.compactionEnabled)
+                        .put("keepRecentTokens", c.keepRecentTokens)
+                        .put("reserveTokens", c.reserveTokens)
+                        .put("compactInstructions", c.compactInstructions)
                         .put("maxImageHistoryTurns", c.maxImageHistoryTurns)
                         .put("maxMediaHistoryTurns", c.maxMediaHistoryTurns),
                 )

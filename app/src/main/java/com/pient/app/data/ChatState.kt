@@ -501,8 +501,8 @@ class ChatState {
                     ctx, currentSessionId.orEmpty(), historyBefore, cfg.providerId, effectiveModel,
                 )
             }
-            // 宿主的自动压缩开关跟随配置页（只在值变化时下发）
-            syncAutoCompaction(cfg)
+            // 宿主的自动压缩开关跟随配置页（只在值变化时下发一次 RPC）
+            syncCompactionSettings(cfg)
         }
         // 本轮用户消息的请求文本：附件以「名称 · 路径」附在正文后（本条是最新回合，媒体恒保留）；
         // 宿主路径只发这一条文本，直连路径的整段历史同样由它拼。
@@ -540,10 +540,9 @@ class ChatState {
             appendEntry(Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
             // 用量台账（用量页数据源）：完成即记一笔（usage 为空 = 服务商未返回用量，不记）
             UsageStore.record(cfg.providerId, effectiveModel, outcome.usage)
-            // 触发式上下文总结（2026-09-13 参考 Operit：一轮回答**结束后**判定；
-            // 命中才总结，失败静默降级、不影响本轮对话）
-            runCatching { maybeSummarize(cfg) }
-                .onFailure { Log.w(TAG, "上下文总结异常：${it.message}") }
+            // 压缩设置跟随配置页（pi 原生：App 不判定触发，只把 enabled 下发给宿主）
+            runCatching { syncCompactionSettings(cfg) }
+                .onFailure { Log.w(TAG, "压缩设置下发异常：${it.message}") }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e // abort：保留 abort() 对 draft 的处理
         } catch (e: Exception) {
@@ -622,9 +621,9 @@ class ChatState {
             replaceMessageAt(target, Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
             // 重新生成同样计入用量台账（一次真实请求 = 一笔用量）
             UsageStore.record(cfg.providerId, effectiveModel, outcome.usage)
-            // 与发送路径同口径：重新生成结束后同样做触发式总结判定
-            runCatching { maybeSummarize(cfg) }
-                .onFailure { Log.w(TAG, "上下文总结异常：${it.message}") }
+            // 与发送路径同口径：重新生成同样把压缩设置同步给宿主（App 不判定触发）
+            runCatching { syncCompactionSettings(cfg) }
+                .onFailure { Log.w(TAG, "压缩设置下发异常：${it.message}") }
             null
         } catch (e: kotlinx.coroutines.CancellationException) {
             replaceMessageAt(runInsertAt ?: index, original)   // 中止：恢复原内容
@@ -891,82 +890,70 @@ class ChatState {
         contextPercent = (used * 100f / (limitK * 1000f)).coerceIn(0f, 100f)
     }
 
-    // ─────────────────── 触发式上下文总结（2026-09-13 参考 Operit） ───────────────────
+    // ─────────── 上下文压缩（**2026-09-14 改为 pi 原生口径**） ───────────
 
     /**
-     * 触发式上下文总结 —— Operit `maybeSummarizeAfterGroupRound` 同口径：
-     * **一轮回答结束后**判定（token 占比 ≥ 阈值 或 自上次总结后的用户消息数 ≥ 阈值），
-     * 下一轮请求的上下文才从新摘要起（切片规则见 [ContextPolicy.sliceFromLastCompaction]）。
+     * 把配置页的压缩设置同步给宿主（pi 原生 `compaction`）：
+     * - `enabled` 走官方 RPC `set_auto_compaction`（即时生效；pi 自己也会把它持久化进 settings.json）；
+     * - `keepRecentTokens` / `reserveTokens` 随 [PiConfig.syncSettings] 写进 settings.json
+     *   （pi 读的是文件，改动在宿主下次启动时生效 —— 这两项是"下次压缩的切点/触发线"，不需要热改）。
      *
-     * 执行通道分两条：
-     * - 宿主在跑 → **pi 原生** `compact` 命令（自定义总结规则进 `customInstructions`；
-     *   摘要由 pi 生成并写进 pi 会话文件，条目回执里带 tokensBefore / estimatedTokensAfter）；
-     * - 宿主不可用 → App 用当前模型按 Operit 的摘要提示词自己生成摘要（Operit 的原路径）。
-     *
-     * 失败一律静默降级（摘要失败不该影响正常对话）；命中与结果都打日志便于取证。
+     * **触发与切点都不由 App 判定**：pi 在 agent 循环里自己查
+     * `contextTokens > contextWindow − reserveTokens`，切点按 `keepRecentTokens` 反向累计。
+     * App 只做两件事：把设置摆对、把 `compaction_start/end` 事件落成压缩卡。
      */
-    private suspend fun maybeSummarize(cfg: ProviderConfig) {
-        val limitK = cfg.ctxLenK.trim().toIntOrNull()?.times(1000) ?: 0
-        val trigger = ContextPolicy.shouldSummarize(
-            currentMessages, contextUsedTokens, limitK, cfg,
-        ) ?: return
-        Log.i(TAG, "上下文总结触发：$trigger（used=$contextUsedTokens / limit=$limitK）")
+    private suspend fun syncCompactionSettings(cfg: ProviderConfig) {
+        if (lastAutoCompactionSent == cfg.compactionEnabled) return
+        if (PiChat.setAutoCompaction(cfg.compactionEnabled)) {
+            lastAutoCompactionSent = cfg.compactionEnabled
+            Log.i(TAG, "宿主自动压缩开关已下发：enabled=${cfg.compactionEnabled}")
+        } else {
+            Log.w(TAG, "宿主自动压缩开关下发失败：enabled=${cfg.compactionEnabled}")
+        }
+    }
 
-        if (PiHost.state.value is PiHostState.Running) {
-            val data = PiChat.compact(cfg.summaryCustomRules) ?: run {
-                Log.w(TAG, "宿主 compact 失败（超时/被取消），本轮不总结")
-                return
+    /**
+     * 手动压缩上下文（pi 官方 RPC `compact`，等价于桌面端的 `/compact [instructions]`）。
+     *
+     * 为什么 Pient 需要它：**Android 上没有命令行入口**，而 pi 的手动压缩是 `/compact` 命令 ——
+     * 移动端的等价入口 = 上下文用量卡里的「压缩上下文」动作（用户看得见"什么时候能压、压了什么"）。
+     *
+     * 结果有两条回执：RPC 回执（`summary` / `tokensBefore` / `estimatedTokensAfter`）与
+     * `compaction_end` 事件 —— 按「摘要 + tokensBefore」去重（见 [appendCompactionEntry]），
+     * 所以这里落库与事件落库不会出现两张卡。返回 false = 宿主没跑 / 会话太小 / 失败（调用方提示）。
+     */
+    suspend fun compactNow(): Boolean {
+        if (PiHost.state.value !is PiHostState.Running) return false
+        val cfg = selectedModel?.provider?.let { AiConfigStore.configs[it] } ?: return false
+        if (compacting) return false
+        compacting = true
+        try {
+            val data = PiChat.compact(cfg.compactInstructions.ifBlank { null }) ?: run {
+                Log.w(TAG, "手动压缩未成功（会话太小 / 宿主拒绝）")
+                return false
             }
             appendCompactionEntry(
                 summary = data.optString("summary"),
                 tokensBefore = data.optInt("tokensBefore", contextUsedTokens),
                 estimatedAfter = data.optInt("estimatedTokensAfter", 0),
+                reason = "manual",
             )
-            return
+            return true
+        } finally {
+            compacting = false
         }
-
-        // 直连路径：按 Operit 的摘要请求形态自己生成（system = 摘要提示词 + 自定义规则；
-        // 历史 = 距今的切片（含上一条摘要）；最后一条 user = 「请按照要求总结对话内容」）
-        val slice = ContextPolicy.sliceFromLastCompaction(currentMessages)
-        val previous = (slice.firstOrNull() as? Msg.Compaction)?.summary
-        val windows = ContextPolicy.attachmentWindows(
-            slice, cfg.maxImageHistoryTurnsValue, cfg.maxMediaHistoryTurnsValue,
-        )
-        val turns = mutableListOf<Pair<String, String>>()
-        slice.forEachIndexed { i, m ->
-            when (m) {
-                is Msg.User -> turns += "user" to ContextPolicy.promptTextFor(m, windows[i])
-                is Msg.Assistant -> if (!m.error) turns += "assistant" to m.markdown
-                is Msg.Compaction -> turns += "user" to m.summary
-                else -> Unit
-            }
-        }
-        turns += "user" to ContextPolicy.SUMMARY_USER_MESSAGE
-        val before = ContextPolicy.estimateTokens(turns)
-        val raw = runCatching {
-            AiBackend.chat(
-                cfg,
-                ContextPolicy.buildSummarySystemPrompt(previous, cfg.summaryCustomRules),
-                turns.map { ChatTurn.Text(it.first, it.second) },
-                null,
-            ).text
-        }.getOrElse {
-            Log.w(TAG, "摘要生成失败：${it.message}")
-            return
-        }
-        if (raw.isBlank()) return
-        appendCompactionEntry(
-            summary = ContextPolicy.formatSummary(raw),
-            tokensBefore = before,
-            estimatedAfter = ContextPolicy.estimateTokens(raw),
-        )
     }
 
     /**
      * 压缩条目落库（宿主 RPC 回执与 `compaction_end` 事件是同一次压缩的两个信号 →
      * 按「摘要文本 + tokensBefore」去重，避免重复落卡）。
      */
-    private fun appendCompactionEntry(summary: String, tokensBefore: Int, estimatedAfter: Int) {
+    private fun appendCompactionEntry(
+        summary: String,
+        tokensBefore: Int,
+        estimatedAfter: Int,
+        reason: String? = null,
+    ) {
         if (summary.isBlank()) return
         val last = currentMessages.lastOrNull()
         if (last is Msg.Compaction && last.tokensBefore == tokensBefore && last.summary == summary) return
@@ -975,23 +962,10 @@ class ChatState {
                 tokensBefore = tokensBefore,
                 saved = (tokensBefore - estimatedAfter).coerceAtLeast(0),
                 summary = summary,
+                reason = reason,
             )
         )
-        Log.i(TAG, "上下文已压缩：前 $tokensBefore → 估 ${estimatedAfter}（摘要 ${summary.length} 字）")
-    }
-
-    /**
-     * 宿主的自动压缩开关跟随配置页（Operit 的 `enableSummary` 语义 = 彻底不自动总结）；
-     * 只在值变化时下发一次 RPC，不打扰宿主。
-     */
-    private suspend fun syncAutoCompaction(cfg: ProviderConfig) {
-        if (lastAutoCompactionSent == cfg.summaryEnabled) return
-        if (PiChat.setAutoCompaction(cfg.summaryEnabled)) {
-            lastAutoCompactionSent = cfg.summaryEnabled
-            Log.i(TAG, "宿主自动压缩开关已下发：enabled=${cfg.summaryEnabled}")
-        } else {
-            Log.w(TAG, "宿主自动压缩开关下发失败：enabled=${cfg.summaryEnabled}")
-        }
+        Log.i(TAG, "上下文已压缩（${reason ?: "来源未知"}）：前 $tokensBefore → 估 $estimatedAfter（摘要 ${summary.length} 字）")
     }
 
     /**
@@ -1070,16 +1044,20 @@ class ChatState {
                 appendEntry(Msg.ToolResult(ev.name, ev.output.take(200), ev.output))
             }
 
-            // ── 宿主压缩（2026-09-13）──
-            // 宿主自己触发的压缩（阈值/溢出）与 RPC compact 的事件侧信号都走这里；
-            // 与 RPC 回执按「摘要 + tokensBefore」去重（见 appendCompactionEntry）
-            is PiAgentEvent.CompactionStart -> Log.i(TAG, "宿主压缩开始：${ev.reason}")
+            // ── 宿主压缩（2026-09-14 起 = 上下文管理的**唯一**来源：pi 原生）──
+            // 触发由 pi 判定（阈值/溢出）或用户在用量卡点「压缩上下文」（manual）；
+            // 事件与 RPC 回执按「摘要 + tokensBefore」去重（见 appendCompactionEntry）
+            is PiAgentEvent.CompactionStart -> {
+                compacting = true
+                Log.i(TAG, "宿主压缩开始：${ev.reason}")
+            }
 
             is PiAgentEvent.CompactionEnd -> {
+                compacting = false
                 ev.errorMessage?.let { Log.w(TAG, "宿主压缩失败：$it") }
                 if (ev.aborted) Log.w(TAG, "宿主压缩被中止：${ev.reason}")
                 if (ev.summary != null) {
-                    appendCompactionEntry(ev.summary, ev.tokensBefore, ev.estimatedAfter)
+                    appendCompactionEntry(ev.summary, ev.tokensBefore, ev.estimatedAfter, ev.reason)
                 }
             }
             else -> Unit
@@ -1433,6 +1411,10 @@ class ChatState {
 
     /** 已下发给宿主的自动压缩开关值（null = 尚未下发过；只在变化时发 RPC） */
     private var lastAutoCompactionSent: Boolean? = null
+
+    /** 手动压缩进行中（用量卡的「压缩上下文」动作据此显示进度，避免连点） */
+    var compacting by mutableStateOf(false)
+        private set
 
     /**
      * 本轮运行条目的插入游标（null = 追加到 leaf，发送路径语义）。

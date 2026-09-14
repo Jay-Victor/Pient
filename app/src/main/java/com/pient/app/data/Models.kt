@@ -704,6 +704,8 @@ sealed class Msg {
         val tokensBefore: Int,
         val saved: Int,
         val summary: String,
+        /** pi `compaction_start/end` 的 `reason`：manual / threshold / overflow（老条目为 null） */
+        val reason: String? = null,
     ) : Msg()
 }
 

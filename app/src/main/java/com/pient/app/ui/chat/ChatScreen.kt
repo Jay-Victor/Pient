@@ -638,6 +638,18 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                     chatState = chatState,
                     // 指示器与模型按键同行、上缘相同，复用同一锚定值
                     bottomOffset = modelSheetBottomOffset,
+                    // 手动压缩（移动端对 pi `/compact` 的入口）；结果以压缩卡形式落到聊天页
+                    onCompact = {
+                        scope.launch {
+                            val ok = chatState.compactNow()
+                            Toast.makeText(
+                                context,
+                                if (ok) "已压缩上下文 · 摘要见聊天页的压缩卡"
+                                else "压缩未执行：宿主未运行，或会话太小无可压缩内容",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                    },
                     modifier = Modifier.align(Alignment.BottomEnd),
                 )
             }
