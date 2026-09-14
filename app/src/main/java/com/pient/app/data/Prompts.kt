@@ -18,7 +18,12 @@ object Prompts {
      * @param workspace 工作区绝对路径（相对路径的解析基准、bash 的 cwd）
      * @param nativeTools true = 工具经服务商 API 原生下发（开关开）；false = 用下方标记契约调用（开关关）
      */
-    fun systemPrompt(workspace: String, nativeTools: Boolean): String {
+    fun systemPrompt(
+        workspace: String,
+        nativeTools: Boolean,
+        /** 已启用技能的 available_skills 段（见 [Skills.promptBlock]）；null = 没有技能，不写这一段 */
+        skillsBlock: String? = null,
+    ): String {
         val sb = StringBuilder()
         sb.append("You are Pient's on-device agent, running inside the Pient Android app. ")
         sb.append("The app itself calls the model API (direct-connection mode), and the app executes your tool calls.\n\n")
@@ -48,6 +53,7 @@ object Prompts {
             sb.append("After the tool results come back, continue the task; when you are done, answer normally ")
             sb.append("without any tool markup.\n\n")
         }
+        if (!skillsBlock.isNullOrBlank()) sb.append(skillsBlock).append("\n\n")
         sb.append("Guidelines:\n")
         sb.append("- Work autonomously: break the task into steps, use the tools, verify the result before reporting.\n")
         sb.append("- Never fabricate file contents, command output, or results you did not actually produce.\n")

@@ -837,6 +837,8 @@ data class SkillItem(
     val global: Boolean = true,
     val skillMd: String? = null,   // SKILL.md 文件内容（真实读盘；null = 无此文件）
     val fileTree: String? = null,  // 技能目录 ASCII 树（真实扫描；null = 无目录信息）
+    /** `SKILL.md` 的绝对路径（内核装配技能时写进 available_skills 的 location） */
+    val path: String? = null,
     /** 市场条目的 `owner/repo/slug`（skills.sh 的安装句柄；本地技能为 null） */
     val marketId: String? = null,
     /** 市场条目的安装量（列表展示用；本地技能为 null） */

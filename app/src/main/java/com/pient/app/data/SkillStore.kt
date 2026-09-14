@@ -144,6 +144,7 @@ object SkillStore {
                         global = roots == globalDirs(context),
                         skillMd = text,
                         fileTree = asciiTree(entry),
+                        path = md.absolutePath,
                     )
                 }.onFailure { errs += "${entry.name}：${it.message}" }
             }

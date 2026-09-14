@@ -692,7 +692,10 @@ class ChatState {
         val prompt = Prompts.systemPrompt(
             workspace = ctx?.let { PiRuntime.workspaceDir(it).absolutePath }.orEmpty(),
             nativeTools = nativeTools,
+            // 技能装配（与 pi 同口径）：提示词里只给 name/description/location，正文由模型按需 read
+            skillsBlock = ctx?.let { Skills.promptBlock(Skills.enabled(it)) },
         )
+        systemPrompt = prompt   // 面板显示真实下发内容（含技能段）
         val turns = ArrayList<ChatTurn>(history.size)
         history.forEachIndexed { i, (role, content) ->
             if (i == history.lastIndex && role == "user" && media.isNotEmpty()) {
@@ -1421,20 +1424,9 @@ class ChatState {
     var maxWindowTokens by mutableStateOf(180000)
     var connectionLabel by mutableStateOf("已连接")
     // 系统提示词只读展示（2026-09-01，对齐 pi-web system 面板）：
-    // 真实值 = agent.state.systemPrompt（pi 程序化构建的 base prompt），此处为原型 mock。
-    var systemPrompt by mutableStateOf(
-        "You are Pi, an autonomous agent operating on this device.\n" +
-            "\n" +
-            "You can read, write, and edit files, run shell commands, and search the codebase to complete the user's tasks.\n" +
-            "\n" +
-            "Work autonomously: break complex tasks into steps, execute them with your tools, and verify results before reporting.\n" +
-            "\n" +
-            "Be precise and factual. Never fabricate file contents, command outputs, or results you did not actually produce.\n" +
-            "\n" +
-            "When unsure, say so plainly instead of guessing.\n" +
-            "\n" +
-            "Follow project rules injected as applicable skills and rules. Respect user preferences and local conventions.",
-    )
+    // **真实值 = 内核每次发请求时构造的那一份**（`Prompts.systemPrompt`），由发送路径写入 ——
+    // 面板显示的必须是模型真正收到的内容（含 available_skills 等动态段）。
+    var systemPrompt by mutableStateOf("")
     // 上下文用量分类明细（Hermes 上下文卡片口径；UI 原型 mock，合计 = windowTokens）
     // 分类经 pi-0.84.2 源码核实（2026-08-28）：pi 无语义记忆（memory=会话存储）、
     // fork 子代理定义不进父上下文——「记忆」「子代理」已移除。
