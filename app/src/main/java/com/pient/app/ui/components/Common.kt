@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.Icon
@@ -493,6 +494,45 @@ fun PientDialog(
 //   默认 16dp = 修掉贴边 + 给等宽多按钮行留足余量（3 联按钮行可用显式更小值，见
 //   PluginDetailDialog「检查更新 / 删除 / 关闭」行）。
 // ─────────────────────────────────────────────────────────────
+/**
+ * 「改动需要重启宿主才生效」提示（技能页 / 插件页共用）。
+ *
+ * 为什么需要它：pi 在**启动时**装配技能、扩展与包资源，而官方 RPC 没有 reload 命令
+ * （桌面端的 `/reload` 只存在于交互模式 TUI）——App 侧改完 settings 或落盘新技能后，
+ * 必须让宿主进程重起一次才会被 pi 加载。`/stop` 这类动作在 App 侧就是重起 node 子进程。
+ */
+@Composable
+fun HostRestartHint(text: String, onRestart: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(10.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        Icon(
+            Icons.Outlined.Refresh, null,
+            tint = MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier.size(16.dp),
+        )
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f).padding(start = 8.dp),
+        )
+        PientButton(
+            text = "重启宿主",
+            onClick = onRestart,
+            primary = false,
+            height = 30,
+            modifier = Modifier.padding(start = 8.dp),
+        )
+    }
+}
+
 @Composable
 fun PientButton(
     text: String,

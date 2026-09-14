@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.pient.app.data.SkillItem
+import com.pient.app.data.SkillStore
 import com.pient.app.ui.components.MarkdownText
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.theme.MonoFont
@@ -169,7 +170,7 @@ fun SkillDetailDialog(
                         modifier = Modifier.padding(top = 12.dp),
                     )
                     Text(
-                        skillPath(item),
+                        skillPath(androidx.compose.ui.platform.LocalContext.current, item),
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFont),
                         color = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier.padding(top = 4.dp),
@@ -229,7 +230,13 @@ fun SkillDetailDialog(
     }
 }
 
-/** 技能目录路径：全局 ~/.pi/agent/skills/<name>/；项目 .pi/skills/<name>/ */
-private fun skillPath(item: SkillItem): String =
-    if (item.global) "~/.pi/agent/skills/${item.name}/"
-    else ".pi/skills/${item.name}/"
+/** 技能目录路径：真实落点（装了就从盘上取，显示成 ~/… 的宿主视角） */
+private fun skillPath(context: android.content.Context, item: SkillItem): String {
+    val dir = SkillStore.dirOf(context, item) ?: return skillMdPathFallback(item)
+    val home = com.pient.app.runtime.PiRuntime.homeDir(context).absolutePath
+    val shown = dir.absolutePath.removePrefix(home).let { if (it != dir.absolutePath) "~$it" else it }
+    return "$shown/"
+}
+
+private fun skillMdPathFallback(item: SkillItem): String =
+    if (item.global) "~/.pi/agent/skills/${item.name}/" else ".pi/skills/${item.name}/"

@@ -34,9 +34,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.LaunchedEffect
 import androidx.navigation.NavController
-import com.pient.app.data.MockStore
 import com.pient.app.data.SkillItem
+import com.pient.app.data.SkillStore
+import com.pient.app.runtime.PiHostService
+import com.pient.app.ui.components.HostRestartHint
 import com.pient.app.ui.components.PientSegmented
 import com.pient.app.ui.theme.MonoFont
 
@@ -52,6 +55,8 @@ fun SkillsScreen(nav: NavController) {
     var importOpen by remember { mutableStateOf(false) }
     var detailFor by remember { mutableStateOf<SkillItem?>(null) }
     val context = LocalContext.current
+    // 真实数据：进页面即扫盘（全局 = ~/.pi/agent/skills 等；项目 = 工作区 .pi/skills）
+    LaunchedEffect(Unit) { SkillStore.refresh(context) }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -85,14 +90,22 @@ fun SkillsScreen(nav: NavController) {
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             )
             Text(
-                if (segment == 0) "~/.pi/agent/skills/" else "当前项目 .pi/skills/",
+                if (segment == 0) "~/.pi/agent/skills/ · ~/.agents/skills/" else "当前项目 .pi/skills/ · .agents/skills/",
                 style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFont),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
             )
 
-            // 技能列表
-            val list = if (segment == 0) MockStore.globalSkills else MockStore.projectSkills
+            // 改了技能/装完新技能 → pi 要重启才会重新装配（提示 + 一键重启）
+            if (SkillStore.needsHostRestart) {
+                HostRestartHint("技能改动需重启宿主后才被 pi 加载") {
+                    PiHostService.restart(context)
+                    SkillStore.markHostRestarted()
+                }
+            }
+
+            // 技能列表（真实扫描结果）
+            val list = if (segment == 0) SkillStore.global else SkillStore.project
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
@@ -100,7 +113,34 @@ fun SkillsScreen(nav: NavController) {
                 ),
             ) {
                 items(list.size, key = { i -> list[i].name }) { i ->
-                    SkillRow(list[i], onClick = { detailFor = list[i] })
+                    SkillRow(
+                        list[i],
+                        onClick = { detailFor = list[i] },
+                        onToggle = { on -> SkillStore.setEnabled(context, list[i], on) },
+                    )
+                }
+                if (list.isEmpty() && !SkillStore.loading) {
+                    item {
+                        Text(
+                            if (segment == 0)
+                                "未发现全局技能。点右下「导入」新建，或用「搜索」从 skills.sh 安装。"
+                            else
+                                "当前项目没有技能。项目技能放在工作区的 .pi/skills/（pi 侧需项目被信任才加载）。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                }
+                SkillStore.lastError?.let { err ->
+                    item {
+                        Text(
+                            "诊断：$err",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
                 }
             }
         }
@@ -140,9 +180,9 @@ fun SkillsScreen(nav: NavController) {
             global = segment == 0,
             onDismiss = { importOpen = false },
             onImported = { name, desc, md ->
-                val item = SkillItem(name, desc, enabled = true, global = segment == 0, skillMd = md)
-                if (segment == 0) MockStore.globalSkills.add(0, item)
-                else MockStore.projectSkills.add(0, item)
+                // 真实落盘：写 <全局|项目> 技能目录下的 <name>/SKILL.md，然后重扫
+                val ok = SkillStore.createSkill(context, name, desc, md, globalScope = segment == 0)
+                toast(context, if (ok) "已导入技能 $name" else "导入失败：写入技能目录失败")
                 importOpen = false
             },
         )
@@ -154,9 +194,8 @@ fun SkillsScreen(nav: NavController) {
             item = item,
             onDismiss = { detailFor = null },
             onDelete = {
-                if (item.global) MockStore.globalSkills.remove(item)
-                else MockStore.projectSkills.remove(item)
-                toast(context, "已删除技能 ${item.name}")
+                val ok = SkillStore.delete(context, item)
+                toast(context, if (ok) "已删除技能 ${item.name}" else "删除失败：技能目录不可写")
                 detailFor = null
             },
         )
@@ -164,8 +203,7 @@ fun SkillsScreen(nav: NavController) {
 }
 
 @Composable
-private fun SkillRow(item: SkillItem, onClick: () -> Unit) {
-    var enabled by remember(item.name) { mutableStateOf(item.enabled) }
+private fun SkillRow(item: SkillItem, onClick: () -> Unit, onToggle: (Boolean) -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -183,7 +221,7 @@ private fun SkillRow(item: SkillItem, onClick: () -> Unit) {
             Text(
                 item.name,
                 style = MaterialTheme.typography.labelLarge.copy(fontFamily = MonoFont),
-                color = if (enabled) MaterialTheme.colorScheme.onBackground
+                color = if (item.enabled) MaterialTheme.colorScheme.onBackground
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
@@ -197,8 +235,8 @@ private fun SkillRow(item: SkillItem, onClick: () -> Unit) {
         // 注意：不能用 Modifier.size() 压缩 Switch——内部轨道仍按默认 52dp 绘制并居中
         // 溢出，会向左侵入内容文字造成视觉重叠（实测溢出 ~10dp）
         Switch(
-            checked = enabled,
-            onCheckedChange = { enabled = it },
+            checked = item.enabled,
+            onCheckedChange = onToggle,
             colors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary),
         )
     }

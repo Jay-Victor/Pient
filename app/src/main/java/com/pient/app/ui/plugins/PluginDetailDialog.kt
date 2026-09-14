@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pient.app.data.PluginItem
+import com.pient.app.data.PluginStore
 import com.pient.app.data.PluginResource
 import com.pient.app.data.PluginResourceKind
 import com.pient.app.data.PluginStatus
@@ -253,7 +254,7 @@ fun PluginDetailDialog(
                         modifier = Modifier.padding(top = 12.dp),
                     )
                     Text(
-                        pluginPath(item),
+                        pluginRealPath(item),
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFont),
                         color = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier.padding(top = 4.dp),
@@ -449,6 +450,23 @@ private fun kindLabel(kind: PluginResourceKind): String = when (kind) {
     PluginResourceKind.SKILL -> "技能"
     PluginResourceKind.PROMPT -> "提示词"
     PluginResourceKind.THEME -> "主题"
+}
+
+/**
+ * 安装路径：**装了就以盘上的真实位置为准**（`~` 相对宿主 HOME 显示），
+ * 没装则退回 pi 的落盘规则推导（告诉用户它会去哪）。
+ */
+@Composable
+private fun pluginRealPath(item: PluginItem): String {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val dir = PluginStore.installDir(context, item)
+    if (dir.isDirectory) {
+        val home = com.pient.app.runtime.PiRuntime.homeDir(context).absolutePath
+        val abs = dir.absolutePath
+        val shown = abs.removePrefix(home).let { if (it != abs) "~$it" else abs }
+        return "$shown/"
+    }
+    return pluginPath(item)
 }
 
 /**

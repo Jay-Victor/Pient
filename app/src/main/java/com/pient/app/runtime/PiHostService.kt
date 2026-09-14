@@ -140,7 +140,20 @@ class PiHostService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val ACTION_STOP = "com.pient.app.action.STOP_HOST"
 
+        /**
+         * 重启宿主进程：App 侧改了技能/包配置后用 —— pi 在**启动时**装配技能/扩展/包资源，
+         * 官方 RPC 没有 reload 命令（`/reload` 只存在于交互模式 TUI）。
+         * **必须先 stop**：`PiHost.ensureStarted` 见到 node 子进程还活着会直接返回 true，
+         * 不 stop 就等于「什么都没发生」（配置改了但 pi 没重新读）。
+         */
+        fun restart(context: Context) {
+            com.pient.app.PientRuntime.hostStarted = false
+            PiHost.stop()
+            start(context)
+        }
+
         /** 拉起前台服务（幂等：已在跑时只是重投 onStartCommand） */
+
         fun start(context: Context) {
             val intent = Intent(context, PiHostService::class.java)
             runCatching {

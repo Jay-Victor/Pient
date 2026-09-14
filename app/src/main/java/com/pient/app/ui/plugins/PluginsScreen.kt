@@ -26,6 +26,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -36,7 +37,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
-import com.pient.app.data.MockStore
+import com.pient.app.data.PluginStore
+import com.pient.app.runtime.PiHostService
+import com.pient.app.ui.components.HostRestartHint
 import com.pient.app.data.PluginItem
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.components.PientDialog
@@ -58,6 +61,9 @@ fun PluginsScreen(nav: NavController) {
     var installOpen by remember { mutableStateOf(false) }
     var detailFor by remember { mutableStateOf<PluginItem?>(null) }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // 真实数据：读 ~/.pi/agent/settings.json 与 <workspace>/.pi/settings.json 的 packages
+    LaunchedEffect(Unit) { PluginStore.refresh(context) }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -95,15 +101,46 @@ fun PluginsScreen(nav: NavController) {
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
             )
 
-            val list = if (segment == 0) MockStore.globalPlugins else MockStore.projectPlugins
+            // 改了插件配置/装完新包 → 同上：pi 要重启才会重新装配
+            if (PluginStore.needsHostRestart) {
+                HostRestartHint("插件改动需重启宿主后才被 pi 加载") {
+                    PiHostService.restart(context)
+                    PluginStore.markHostRestarted()
+                }
+            }
+
+            val list = if (segment == 0) PluginStore.global else PluginStore.project
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
                     start = 16.dp, end = 16.dp, top = 4.dp, bottom = 90.dp,
                 ),
             ) {
-                items(list.size, key = { i -> list[i].name }) { i ->
+                items(list.size, key = { i -> list[i].source }) { i ->
                     PluginRow(list[i], onClick = { detailFor = list[i] })
+                }
+                if (list.isEmpty() && !PluginStore.loading) {
+                    item {
+                        Text(
+                            if (segment == 0)
+                                "还没有配置任何插件。点右下 + 安装（npm: / git: / 本地路径）。"
+                            else
+                                "当前项目没有插件。项目插件写在工作区的 .pi/settings.json（pi install -l）。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                }
+                PluginStore.lastError?.let { err ->
+                    item {
+                        Text(
+                            "诊断：$err",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
                 }
             }
         }
@@ -127,10 +164,17 @@ fun PluginsScreen(nav: NavController) {
             global = segment == 0,
             onDismiss = { installOpen = false },
             onInstalled = { source ->
-                val name = parsePluginName(source)
-                val item = PluginItem(name, source, enabled = true, global = segment == 0)
-                if (segment == 0) MockStore.globalPlugins.add(0, item)
-                else MockStore.projectPlugins.add(0, item)
+                // 真实安装：跑 pi CLI（`node cli.js install <source>`），输出原样回传
+                scope.launch {
+                    val r = PluginStore.install(context, source, globalScope = segment == 0)
+                    toast(
+                        context,
+                        r.fold(
+                            onSuccess = { "已安装：${parsePluginName(source)}" },
+                            onFailure = { "安装失败：${it.message?.take(120)}" },
+                        ),
+                    )
+                }
                 installOpen = false
             },
         )
@@ -142,22 +186,25 @@ fun PluginsScreen(nav: NavController) {
             item = item,
             onDismiss = { detailFor = null },
             onDelete = {
-                if (item.global) MockStore.globalPlugins.remove(item)
-                else MockStore.projectPlugins.remove(item)
-                toast(context, "已删除插件 ${item.name}")
+                val ok = PluginStore.remove(context, item)
+                toast(context, if (ok) "已移除插件 ${item.name}" else "移除失败：settings.json 不可写")
                 detailFor = null
             },
             onUpdate = {
-                // 更新完成（原型）：把 mock 的已安装版本抬到最新，并刷新弹窗持有的实例——
-                // 否则弹窗「版本」行还是旧值、再点「检查更新」又会报有更新
-                val list = if (item.global) MockStore.globalPlugins else MockStore.projectPlugins
-                val i = list.indexOfFirst { it.name == item.name }
-                if (i >= 0) {
-                    val bumped = list[i].copy(version = list[i].latestVersion ?: list[i].version)
-                    list[i] = bumped
-                    detailFor = bumped
+                // 真实更新：pi CLI `update --extension <source>`
+                scope.launch {
+                    val r = PluginStore.update(context, item)
+                    toast(
+                        context,
+                        r.fold(
+                            onSuccess = { "已更新 ${item.name}" },
+                            onFailure = { "更新失败：${it.message?.take(120)}" },
+                        ),
+                    )
+                    detailFor = PluginStore.global.firstOrNull { it.source == item.source }
+                        ?: PluginStore.project.firstOrNull { it.source == item.source }
+                        ?: item
                 }
-                toast(context, "已更新插件 ${item.name}")
             },
         )
     }

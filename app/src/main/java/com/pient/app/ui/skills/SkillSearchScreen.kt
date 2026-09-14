@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -38,7 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
-import com.pient.app.data.MockStore
+import com.pient.app.data.SkillStore
 import com.pient.app.data.SkillItem
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.theme.MonoFont
@@ -56,12 +57,27 @@ fun SkillSearchScreen(nav: NavController) {
     var searched by remember { mutableStateOf("") }
     var installing by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
-    val marketResults = MockStore.marketSkills.filter {
-        searched.isNotBlank() &&
-            (it.name.contains(searched, ignoreCase = true) || it.desc.contains(searched, ignoreCase = true))
+    // 市场结果：真实请求 skills.sh（pi-web 的 `/api/skills/search` 等价物，去掉它的 npx 回退）
+    var marketResults by remember { mutableStateOf<List<SkillItem>>(emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(searched) {
+        if (searched.isBlank()) {
+            marketResults = emptyList()
+            note = null
+            return@LaunchedEffect
+        }
+        searching = true
+        val r = SkillStore.searchMarket(searched)
+        marketResults = r
+        note = if (r.isEmpty()) "没有匹配的技能（或市场不可达）" else null
+        searching = false
     }
-    val localResults = (MockStore.globalSkills + MockStore.projectSkills).filter {
+
+    val localResults = (SkillStore.global + SkillStore.project).filter {
         searched.isNotBlank() && it.name.contains(searched, ignoreCase = true)
     }
 
@@ -155,20 +171,42 @@ fun SkillSearchScreen(nav: NavController) {
                     )
                 }
             }
+            if (searching) {
+                item {
+                    Text(
+                        "正在搜索 skills.sh…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            note?.let { text ->
+                item {
+                    Text(
+                        text,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
             if (marketResults.isNotEmpty()) {
                 item {
                     Text("市场结果（skills.sh）：", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                 }
-                items(marketResults, key = { it.name }) { skill ->
+                items(marketResults, key = { it.marketId ?: it.name }) { skill ->
                     MarketSkillRow(
                         skill = skill,
                         installing = installing == skill.name,
                         onInstall = {
                             installing = skill.name
                             scope.launch {
-                                delay(1200)
-                                MockStore.globalSkills.add(0, skill.copy(enabled = true, global = true))
+                                // 真实安装：拉 skills.sh 的 /api/download 逐文件写进 ~/.agents/skills
+                                val r = SkillStore.install(context, skill, globalScope = true)
                                 installing = null
+                                note = r.fold(
+                                    onSuccess = { it },
+                                    onFailure = { "安装失败：${it.message?.take(140)}" },
+                                )
                             }
                         },
                     )
@@ -178,7 +216,7 @@ fun SkillSearchScreen(nav: NavController) {
                 item {
                     Text("已安装（本地匹配）：", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                 }
-                items(localResults, key = { "l-${it.name}" }) { skill ->
+                items(localResults, key = { "l-${it.global}-${it.name}" }) { skill ->
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
