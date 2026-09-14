@@ -194,6 +194,7 @@ object PiRuntime {
             }
         }.onFailure { Log.w(TAG, "执行环境写入失败：${it.message}") }
         ensureRootfsAsync(context)   // 环境按需自补：Operit 口径，无需用户手动点解包（见函数注释）
+        ensureAppRuntimeAsync(context)   // 宿主运行时（pi 包 + npm）同理：装完 APK 首启自己铺好
         // 宿主回桥尽早起来：系统命令通道（android_shell）与 SAF 文件桥都挂在它上面，
         // 早于 pi 宿主启动也没关系（幂等）；此前只在宿主 spawn 时才初次创建端点。
         runCatching { PiExecServer.ensureStarted(context) }
@@ -245,6 +246,12 @@ object PiRuntime {
     /** 随包的 rootfs 归档（assets；构建期由 syncPientRootfsArchive 放进来） */
     private const val ROOTFS_ARCHIVE_ASSET = "pient-rootfs.tgz"   // 见 build.gradle：别用 .gz 后缀
 
+    /** 随包的**宿主运行时**归档（pi 官方包 + npm 本体；构建期由 syncPientAppArchive 生成） */
+    private const val APP_ARCHIVE_ASSET = "pient-app.tgz"
+
+    /** npm 本体（纯 JS，随包）：pi 的包管理器经 settings 的 `npmCommand` 指到它 */
+    fun npmCli(context: Context): File = File(root(context), "npm/bin/npm-cli.js")
+
     /**
      * **本 APK 是否内置了 rootfs 归档**。
      *
@@ -261,6 +268,69 @@ object PiRuntime {
     private var unpacking = false
 
     fun isUnpacking(): Boolean = unpacking
+
+    /** 宿主运行时解包中（与 rootfs 分开计数：两件事可以并行） */
+    @Volatile
+    private var appUnpacking = false
+
+    fun isAppUnpacking(): Boolean = appUnpacking
+
+    /** 本 APK 是否内置了宿主运行时归档（pi 包 + npm） */
+    fun appArchiveAvailable(context: Context): Boolean =
+        runCatching { context.assets.list("")?.contains(APP_ARCHIVE_ASSET) == true }.getOrDefault(false)
+
+    /** 宿主运行时是否就绪（pi 官方包入口 + npm 本体都在） */
+    fun appRuntimeReady(context: Context): Boolean = rpcEntry(context).isFile && npmCli(context).isFile
+
+    /**
+     * **按需解包宿主运行时**（pi 官方包 + npm 本体）：`assets/pient-app.tgz` → `files/pient-rt/`。
+     *
+     * 为什么要有它：此前 pi 包只能靠 `deploy_app_runtime.sh` 用 adb 推到设备——用户没有 adb，
+     * 「装完 APK 就能起宿主」不成立。这里复用 rootfs 那条链路（AssetManager → 私有目录 →
+     * toybox `gunzip | tar`，见 [extractRootfs]），一口气把 pi 包与 npm 都铺好。
+     */
+    fun ensureAppRuntimeAsync(context: Context): Boolean {
+        if (appRuntimeReady(context) || appUnpacking) return false
+        if (!appArchiveAvailable(context)) {
+            Log.w(TAG, "宿主运行时未就绪，且 APK 未内置 $APP_ARCHIVE_ASSET（构建时未生成归档）")
+            return false
+        }
+        Thread {
+            appUnpacking = true
+            try {
+                val root = root(context)
+                root.mkdirs()
+                val tar = File(tmpDir(context), APP_ARCHIVE_ASSET)
+                tar.parentFile?.mkdirs()
+                Log.i(TAG, "宿主运行时解包开始（随包归档，首启一次性）")
+                context.assets.open(APP_ARCHIVE_ASSET).use { input ->
+                    tar.outputStream().use { input.copyTo(it) }
+                }
+                val mb = tar.length() / 1048576
+                val cmd = "cd ${root.absolutePath} && gunzip -c ${tar.absolutePath} | tar -x"
+                val proc = ProcessBuilder("/system/bin/sh", "-c", cmd)
+                    .redirectErrorStream(true)
+                    .start()
+                val tail = proc.inputStream.bufferedReader().readText()
+                val code = proc.waitFor()
+                if (code != 0) Log.w(TAG, "宿主运行时解包退出码 $code：${tail.takeLast(300)}")
+                Log.i(
+                    TAG,
+                    "宿主运行时解包完成（归档 $mb MB）：rpc-entry=${rpcEntry(context).isFile} " +
+                        "npm=${npmCli(context).isFile}",
+                )
+                runCatching { tar.delete() }
+            } catch (e: Exception) {
+                Log.w(TAG, "宿主运行时解包异常：${e.message}")
+            } finally {
+                appUnpacking = false
+            }
+        }.apply {
+            isDaemon = true
+            name = "pient-app-unpack"
+        }.start()
+        return true
+    }
 
     /**
      * rootfs 是否已解包且**架构正确**（终端可用性的判据）。
@@ -457,6 +527,8 @@ object PiRuntime {
         /** 本 APK 实际带了哪些 ABI 的 pi 运行时（只在不就绪时才去读，见 [check]） */
         val apkAbis: List<String> = emptyList(),
         val deviceAbi: String = "",
+        /** 首启场景：APK 里带了宿主运行时归档、但还没解包完（此时「重试启动」等一会儿就好） */
+        val firstRunUnpack: Boolean = false,
     ) {
         /**
          * 设备 ABI 与 APK 内运行时 ABI 不符 —— 单 ABI 出包的必然产物：模拟器构建（x86_64）
@@ -474,6 +546,7 @@ object PiRuntime {
                 abiMismatch -> "此安装包只含 ${apkAbis.joinToString(" / ")} 的 pi 运行时，" +
                     "本机是 $deviceAbi：架构不符，node 宿主起不来。" +
                     "请改用 $deviceAbi 的安装包（构建时加 -PpientRuntimeAbi=arm64-v8a 或 x86_64）"
+                firstRunUnpack -> "宿主运行时正在随包解包（首装一次性，几秒）——完成后点「重试启动」即可"
                 else -> "缺少：" + missing.joinToString("、")
             }
     }
@@ -510,6 +583,10 @@ object PiRuntime {
             missing = missing,
             apkAbis = apkRuntimeAbis(context),
             deviceAbi = Build.SUPPORTED_ABIS.firstOrNull().orEmpty(),
+            // 首启（或换包）时 pi 包还没铺开：归档在手 → 说「正在解包」，别报「缺少一大堆文件」。
+            // 注意**不要**在这里排除「解包进行中」：解包就 1~2 秒，排除掉反而会让提示条在那个窗口
+            // 里退回「缺少：…rpc-entry.js」（实测过一次，看着像装坏了）
+            firstRunUnpack = !rpcEntry(context).exists() && appArchiveAvailable(context),
         )
     }
 

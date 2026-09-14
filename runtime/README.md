@@ -54,7 +54,9 @@ packaging { jniLibs { useLegacyPackaging = true; keepDebugSymbols += setOf("**/l
 
 ## 目录形态
 
-**打包形态 = 混合（2026-09-12 拍板）**：随包带 node + 核心库（离线即可起宿主），pi npm 包按需部署/更新。
+**打包形态 = 随包（2026-09-14 起）**：node + 核心库 + **pi 官方包与 npm 本体**全部随 APK 分发，
+首启解包到私有目录（`assets/pient-app.tgz`，见 `scripts/pack_app_runtime.py`）——**装完 APK 即可起宿主，
+不再需要 adb 部署**；`deploy_app_runtime.sh` 只留给开发期快速换包用。
 
 ```
 APK 内（jniLibs，随包分发、安装时解压）
@@ -74,7 +76,10 @@ APK 内（jniLibs，随包分发、安装时解压）
   usr/lib/<SONAME>    → 软链到 native lib 里的 libpient_*.so（App 每次启动重建，见 PiRuntime.ensureLinks；
                         不重建就会在 APK 更新后悬空——/data/app 路径会变）；
                         LD_LIBRARY_PATH 指向该目录（子进程环境变量里生效，实测有效）
-  app/node_modules/…  pi 官方包（按需部署/更新：deploy_app_runtime.sh）
+  app/node_modules/…  pi 官方包（**随 APK 分发**，首启由 assets/pient-app.tgz 解包；开发期可用
+                      deploy_app_runtime.sh 快速替换）
+  npm/                npm 本体（纯 JS，随包）—— pi 的包管理器经 settings 的 `npmCommand`
+                      指到 `[node 二进制, npm/bin/npm-cli.js]`，用它装 npm 源插件
   rootfs/             Ubuntu 24.04.3 用户空间（约 97MB；GNU bash/coreutils/apt，首启解包，待做）
   bin/{node,rg,fd}    指向 native lib 二进制的符号链接（PATH 用；pi 的 grep/find 按名字找 rg/fd）
   home/  tmp/         HOME / TMPDIR

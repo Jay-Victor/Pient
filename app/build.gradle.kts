@@ -282,11 +282,38 @@ val writePientRuntimeLibsManifest = tasks.register("writePientRuntimeLibsManifes
     }
 }
 
+// 宿主运行时归档随包（2026-09-14）：pi 官方包 + npm 本体 → assets/pient-app.tgz，首启解包。
+// 为什么：此前 pi 包只能靠 deploy_app_runtime.sh 用 adb 推（用户没有 adb），npm 完全没有；
+// 打归档复用 rootfs 那条「assets 归档 + toybox 解包」链路（见 PiRuntime.ensureAppRuntimeAsync）。
+val syncPientAppArchive = tasks.register<Exec>("syncPientAppArchive") {
+    description = "把 pi 官方包与 npm 本体打成 assets 归档（首启解包，替代 adb 部署）"
+    val appCache = rootProject.layout.projectDirectory.dir("runtime/cache/app").asFile
+    val npmCache = rootProject.layout.projectDirectory.dir("runtime/cache/npm/node_modules/npm").asFile
+    val outFile = layout.buildDirectory.file("generated/pientAssets/pient-app.tgz").get().asFile
+    inputs.dir(appCache)
+    inputs.dir(npmCache)
+    outputs.file(outFile)
+    doFirst {
+        if (!appCache.isDirectory || !File(npmCache, "bin/npm-cli.js").isFile) {
+            throw GradleException(
+                "宿主运行时缓存缺失：${appCache.absolutePath} / ${npmCache.absolutePath}\n" +
+                    "  先拉取：python runtime/scripts/fetch_runtime.py --abi $pientRuntimeFetchAbi",
+            )
+        }
+        logger.lifecycle("打包宿主运行时归档 → ${outFile.name}")
+    }
+    commandLine(
+        "python",
+        rootProject.layout.projectDirectory.file("runtime/scripts/pack_app_runtime.py").asFile.absolutePath,
+        "--out", outFile.absolutePath,
+    )
+}
+
 android.sourceSets.getByName("main").jniLibs.srcDir(pientJniRoot)
 android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/pientAssets"))
 tasks.named("preBuild") {
     dependsOn(syncPientRuntime, syncPientRuntimeLibs, syncPientTerminalBinaries,
-        syncPientRootfsArchive, writePientRuntimeLibsManifest)
+        syncPientRootfsArchive, writePientRuntimeLibsManifest, syncPientAppArchive)
     // 切 ABI 时清掉上一次构建留在 jniLibs 源目录里的另一套 ABI（jniLibs 源是整个
     // build/pientJniLibs，不清就会 fat 出包：实测 arm64 包里混进了 x86_64 的 proot/loader）
     doFirst {

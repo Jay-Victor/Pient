@@ -185,6 +185,19 @@ def extract(abi: str, skip_npm: bool) -> None:
         )
         log(f"pi 包就绪: {os.path.join(app_dir, 'node_modules')}")
 
+        # npm 本体（纯 JS）也随包分发：宿主侧 pi 的包管理器要一个「npm 命令」，
+        # 而 Android 上私有目录的脚本不能 execve —— 所以走 settings 的 npmCommand
+        # 指到 [node 二进制, 本文件]（见 pack_app_runtime.py 与 PiConfig.syncSettings）。
+        npm_dir = os.path.join(CACHE, "npm")
+        npm_cli = os.path.join(npm_dir, "node_modules", "npm", "bin", "npm-cli.js")
+        if not os.path.isfile(npm_cli):
+            log("npm install npm@11（随包分发的 npm 本体）")
+            subprocess.run(
+                ["npm", "i", "--silent", "--no-audit", "--no-fund", "--prefix", npm_dir, "npm@11"],
+                check=True, shell=(os.name == "nt"),
+            )
+        log(f"npm 本体就绪: {os.path.dirname(npm_cli)}")
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()
