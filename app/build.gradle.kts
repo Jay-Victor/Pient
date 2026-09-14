@@ -109,6 +109,27 @@ fun pientElfMachine(file: File): String? = runCatching {
     }
 }.getOrNull()
 
+/**
+ * 构建期 ABI 校验：这批 ELF 必须全部是 [expected]（`x86_64` / `aarch64`）。
+ *
+ * **连依赖库一起验**，不只可执行文件：`runtime/cache/usr` 不带 ABI 路径（最后一次拉取生效），
+ * 而 usr/lib 里的 SONAME 别名（libz.so.1 / libicu*.so.78 / libsqlite3.so…）在 fetch_runtime.py
+ * 里是「目标已存在就跳过」——切 ABI 后残留的老架构别名会**静默混进新包**，直到设备上 node
+ * 起不来才现形（真机实测：`libpient_libz_so_1.so is for EM_X86_64 instead of EM_AARCH64`，
+ * 表现就是「宿主异常退出 exit=1」）。宁可构建失败，也不出「能装、跑不起来」的包。
+ */
+fun pientAssertAbi(files: List<File>, expected: String, hint: String) {
+    val wrong = files.filter { it.isFile }
+        .map { it to pientElfMachine(it) }
+        .filter { (_, m) -> m != null && m != expected }
+    if (wrong.isNotEmpty()) {
+        throw GradleException(
+            "以下二进制的 ABI 与目标（$expected）不符：\n  " +
+                wrong.joinToString("\n  ") { (f, m) -> "${f.name}=$m" } + "\n  " + hint,
+        )
+    }
+}
+
 // ABI 策略（2026-09-12 拍板，与 Operit 同口径）：**单 ABI 出包**——运行时 260MB，
 // fat APK 会翻倍；ABI 切分（AAB）只在走 Play 分发时才有意义。默认 x86_64 供模拟器开发，
 // 真机/release 必须显式 -PpientRuntimeAbi=arm64-v8a（漏了直接构建失败，别出无声的错包）。
@@ -141,18 +162,12 @@ val syncPientRuntime = tasks.register<Copy>("syncPientRuntimeBinaries") {
             )
         }
         val expect = if (pientJniAbi == "arm64-v8a") "aarch64" else "x86_64"
-        val wrong = listOf("node", "rg", "fd")
-            .map { File(pientRuntimeCacheDir, it) }
-            .filter { it.isFile }
-            .filter { pientElfMachine(it) != null && pientElfMachine(it) != expect }
-        if (wrong.isNotEmpty()) {
-            throw GradleException(
-                "运行时二进制 ABI 与目标不符（目标 $expect）：" +
-                    wrong.joinToString("、") { "${it.name}=${pientElfMachine(it)}" } +
-                    "\n  先重拉：python runtime/scripts/fetch_runtime.py --abi $pientRuntimeFetchAbi" +
-                    "\n  （runtime/cache/usr 不带 ABI 路径，切 ABI 必须重拉）",
-            )
-        }
+        pientAssertAbi(
+            listOf("node", "rg", "fd").map { File(pientRuntimeCacheDir, it) },
+            expect,
+            "先重拉：python runtime/scripts/fetch_runtime.py --abi $pientRuntimeFetchAbi" +
+                "（runtime/cache/usr 不带 ABI 路径，切 ABI 必须重拉）",
+        )
     }
     from(pientRuntimeCacheDir) {
         include("node", "rg", "fd")
@@ -170,7 +185,14 @@ val syncPientRuntime = tasks.register<Copy>("syncPientRuntimeBinaries") {
 val syncPientTerminalBinaries = tasks.register<Copy>("syncPientTerminalBinaries") {
     description = "把 PRoot 与 loader 以 lib*.so 形式放入 jniLibs 目录"
     // 缺缓存 = 这个包一定是坏的（终端跑不起来），出声失败而不是静默跳过
-    doFirst { if (!File(pientRootfsCacheDir, "bin/proot").isFile) throw GradleException(pientRootfsCacheError(" PRoot（bin/proot）")) }
+    doFirst {
+        if (!File(pientRootfsCacheDir, "bin/proot").isFile) throw GradleException(pientRootfsCacheError(" PRoot（bin/proot）"))
+        pientAssertAbi(
+            listOf(File(pientRootfsCacheDir, "bin/proot"), File(pientRootfsCacheDir, "libexec/proot/loader")),
+            if (pientRootfsAbi == "aarch64") "aarch64" else "x86_64",
+            "先重拉：python runtime/scripts/fetch_rootfs.py --abi $pientRootfsAbi",
+        )
+    }
     from(File(pientRootfsCacheDir, "bin/proot")) { rename { "libpient_proot.so" } }
     from(File(pientRootfsCacheDir, "libexec/proot/loader")) { rename { "libpient_proot_loader.so" } }
     // pi 的 bash 工具要一个「shellPath」：shebang 脚本在私有目录同样不能 exec（实测 EACCES），
@@ -212,6 +234,19 @@ val syncPientRootfsArchive = tasks.register<Copy>("syncPientRootfsArchive") {
 val syncPientRuntimeLibs = tasks.register<Copy>("syncPientRuntimeLibs") {
     description = "把 Node 动态依赖以 libpient_*.so 形式放入 jniLibs 目录"
     onlyIf { pientRuntimeLibDir.isDirectory }
+    // 依赖库也逐个验 ABI：别名（libz.so.1 等）在 fetch 脚本里「已存在就跳过」，
+    // 切 ABI 后残留的老架构库会混进包 → 设备上 node 起不来（真机踩过）
+    doFirst {
+        pientAssertAbi(
+            listOf(pientRuntimeLibDir, pientRootfsLibDir)
+                .flatMap { dir -> (dir.listFiles() ?: emptyArray()).toList() }
+                .filter { it.name.endsWith(".so") || it.name.contains(".so.") },
+            if (pientJniAbi == "arm64-v8a") "aarch64" else "x86_64",
+            "usr/lib 里的 SONAME 别名是「已存在就跳过」，切 ABI 时残留的老架构库会混进包 —— " +
+                "删掉 runtime/cache/usr/lib 与 runtime/cache/rootfs-*/usr/lib 后重跑 " +
+                "fetch_runtime.py --abi $pientRuntimeFetchAbi + fetch_rootfs.py --abi $pientRootfsAbi",
+        )
+    }
     from(pientRuntimeLibDir) {
         include("*.so", "*.so.*")
         rename { name -> pientJniLibName(name) }

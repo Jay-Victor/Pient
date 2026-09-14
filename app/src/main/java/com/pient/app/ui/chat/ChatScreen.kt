@@ -827,7 +827,10 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
 @Composable
 private fun HostNotReadyStrip(state: PiHostState, onRetry: () -> Unit) {
     val (title, detail) = when (state) {
-        is PiHostState.MissingRuntime -> "pi 运行时未部署" to state.summary
+        is PiHostState.MissingRuntime ->
+            // 架构不符 = 换包才能解决，标题就直说（别再让用户以为「重试一下就好」）
+            if (state.abiMismatch) "安装包与设备架构不符" to state.summary
+            else "pi 运行时未部署" to state.summary
         PiHostState.MissingModel -> "没有可用的服务商 / 模型" to
             "去「模型配置」填好服务商与模型，宿主才有模型可跑 agent 循环"
         PiHostState.Starting -> "pi 宿主启动中…" to "正在拉起 node 宿主（首次约数秒），完成后工具即可用"
@@ -862,13 +865,17 @@ private fun HostNotReadyStrip(state: PiHostState, onRetry: () -> Unit) {
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
-        PientButton(
-            text = if (state is PiHostState.Starting) "检测中" else "重试启动",
-            onClick = onRetry,
-            primary = false,
-            height = 30,
-            modifier = Modifier.padding(start = 8.dp),
-        )
+        // 架构不符时「重试启动」不可能成功（每次都查同一批不存在的文件）→ 不摆这个键，
+        // 免得用户以为点一下就好
+        if (state !is PiHostState.MissingRuntime || !state.abiMismatch) {
+            PientButton(
+                text = if (state is PiHostState.Starting) "检测中" else "重试启动",
+                onClick = onRetry,
+                primary = false,
+                height = 30,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
     }
 }
 

@@ -26,8 +26,12 @@ sealed class PiHostState {
     /** 宿主未启动 */
     data object Stopped : PiHostState()
 
-    /** 运行时未部署到设备（缺 Node / RPC 入口 / rg / fd） */
-    data class MissingRuntime(val summary: String) : PiHostState()
+    /**
+     * 运行时未就绪（缺 Node / RPC 入口 / rg / fd）。
+     * [abiMismatch] = 设备与安装包的架构不符（单 ABI 出包装错机器）——**点「重试启动」不会好**，
+     * 只能换对应架构的安装包，UI 据此不显示重试键（见 ChatScreen.HostNotReadyStrip）。
+     */
+    data class MissingRuntime(val summary: String, val abiMismatch: Boolean = false) : PiHostState()
 
     /** 宿主在跑，但没有任何服务商/模型配置（agent 循环不可用） */
     data object MissingModel : PiHostState()
@@ -89,7 +93,7 @@ class PiRpcClient(private val context: Context) {
         process?.let { if (it.isAlive) return true }
         val readiness = PiRuntime.check(context)
         if (!readiness.ready) {
-            _state.value = PiHostState.MissingRuntime(readiness.summary)
+            _state.value = PiHostState.MissingRuntime(readiness.summary, readiness.abiMismatch)
             Log.w(TAG, "运行时未就绪：${readiness.summary}")
             return false
         }

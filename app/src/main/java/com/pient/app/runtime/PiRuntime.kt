@@ -7,6 +7,7 @@ import com.pient.app.data.SettingsStore
 import android.system.Os
 import android.util.Log
 import java.io.File
+import java.util.zip.ZipFile
 
 /**
  * pi 宿主运行时（工具层）在设备上的落点与就绪判定。
@@ -222,6 +223,14 @@ object PiRuntime {
             return false
         }
         Thread {
+            // 遗留的异构 rootfs（换包/换架构）与上次中断的半成品：**先清空再解**，
+            // 别往一棵架构不对的树里覆盖写（会留下混合内容，最难查）。只有「归档在手」才会走到这。
+            val dir = rootfsDir(context)
+            if (dir.isDirectory) {
+                Log.w(TAG, "rootfs 不可用（bash 架构 ${elfMachine(rootfsBash(context))} ≠ 本机 ${hostMachine()}）→ 清空重解")
+                runCatching { dir.deleteRecursively() }
+                    .onFailure { Log.w(TAG, "清空 rootfs 失败：${it.message}") }
+            }
             Log.i(TAG, "自动解包开始（后台，无需用户操作）")
             val ok = extractRootfs(context) { pct, text -> unpackNote = "${(pct * 100).toInt()}% · $text" }
             unpackNote = if (ok) "" else unpackNote
@@ -253,8 +262,38 @@ object PiRuntime {
 
     fun isUnpacking(): Boolean = unpacking
 
-    /** rootfs 是否已解包（终端可用性的判据） */
-    fun rootfsReady(context: Context): Boolean = rootfsBash(context).isFile
+    /**
+     * rootfs 是否已解包且**架构正确**（终端可用性的判据）。
+     *
+     * 只判 `/bin/bash` 存在是不够的：单 ABI 出包装错机器时，解出来的 rootfs 是**另一个架构**的
+     * （实测：x86_64 包装到 arm64 真机 → `rootfs/bin/bash` 是 x86_64 ELF，83MB 都在、bash 也在），
+     * 于是 App 认为「已解包」永不重解，直到终端里出现 exec 格式错误。所以连 ELF 架构一起判，
+     * 换包后自动重解（见 [ensureRootfsAsync]）。
+     */
+    fun rootfsReady(context: Context): Boolean =
+        rootfsBash(context).isFile && elfMachine(rootfsBash(context)) == hostMachine()
+
+    /** 本机跑得动的 ELF 架构（Debian 口径，与 `fetch_rootfs.py --abi` 一致） */
+    fun hostMachine(): String = when (Build.SUPPORTED_ABIS.firstOrNull()) {
+        "arm64-v8a", "arm64" -> "aarch64"
+        "x86_64" -> "x86_64"
+        "armeabi-v7a", "armeabi" -> "armhf"
+        else -> Build.SUPPORTED_ABIS.firstOrNull().orEmpty()
+    }
+
+    /** ELF 的 e_machine（小端，偏移 18）：0x3E = x86_64、0xB7 = aarch64、0x28 = armhf；读不到返回 null */
+    fun elfMachine(file: File): String? = runCatching {
+        java.io.RandomAccessFile(file, "r").use { raf ->
+            val head = ByteArray(20)
+            raf.readFully(head)
+            when (head[18].toInt() and 0xff) {
+                0x3e -> "x86_64"
+                0xb7 -> "aarch64"
+                0x28 -> "armhf"
+                else -> null
+            }
+        }
+    }.getOrNull()
 
     /** ubuntu-base 的顶层目录（解包是流式的：这些目录按序出现，可当进度刻度） */
     private val ROOTFS_TOP_ENTRIES = listOf(
@@ -323,6 +362,12 @@ object PiRuntime {
                 Log.w(TAG, "解包退出码 $code（多半只是硬链接被拒）：${tail.take(200)}")
             }
             val ok = rootfsReady(context)
+            // 留一条可核对的证据行：终端层出问题时先看它（架构不符 / 半成品都在这里现形）
+            Log.i(
+                TAG,
+                "解包结果 ok=$ok bash=${rootfsBash(context).isFile} " +
+                    "arch=${elfMachine(rootfsBash(context))}（本机 ${hostMachine()}）",
+            )
             onProgress(1f, if (ok) "解包完成" else "解包后仍未找到 /bin/bash")
             return ok
         } catch (e: Exception) {
@@ -340,7 +385,8 @@ object PiRuntime {
         val rootfs = rootfsDir(context)
         val bash = rootfsBash(context)
         return listOf(
-            "Ubuntu rootfs（${abiLabel()}，已解包）" to (bash.isFile && File(rootfs, "etc/os-release").exists()),
+            "Ubuntu rootfs（${abiLabel()}，已解包）" to
+                (rootfsReady(context) && File(rootfs, "etc/os-release").exists()),
             "GNU bash + coreutils（minbase）" to (bash.isFile && File(rootfs, "usr/bin/env").isFile),
             "PRoot 运行时（proot + ELF loader）" to (prootBinary(context).isFile && prootLoader(context).isFile),
             "shell 包装脚本（随 APK 分发）" to shellPath(context).isFile,
@@ -405,9 +451,31 @@ object PiRuntime {
         }
     }
 
-    data class Readiness(val ready: Boolean, val missing: List<String>) {
+    data class Readiness(
+        val ready: Boolean,
+        val missing: List<String>,
+        /** 本 APK 实际带了哪些 ABI 的 pi 运行时（只在不就绪时才去读，见 [check]） */
+        val apkAbis: List<String> = emptyList(),
+        val deviceAbi: String = "",
+    ) {
+        /**
+         * 设备 ABI 与 APK 内运行时 ABI 不符 —— 单 ABI 出包的必然产物：模拟器构建（x86_64）
+         * 装到 arm64 真机上时，Android 只解压与设备 ABI 匹配的原生库目录，pi 的
+         * node/rg/fd/… 一个都不落盘，**文件清单看起来和「真没部署」一模一样**，
+         * 但点「重试启动」永远不会成功（每次都查同一批不存在的文件）。
+         */
+        val abiMismatch: Boolean
+            get() = !ready && apkAbis.isNotEmpty() &&
+                deviceAbi.isNotEmpty() && deviceAbi !in apkAbis
+
         val summary: String
-            get() = if (ready) "就绪" else "缺少：" + missing.joinToString("、")
+            get() = when {
+                ready -> "就绪"
+                abiMismatch -> "此安装包只含 ${apkAbis.joinToString(" / ")} 的 pi 运行时，" +
+                    "本机是 $deviceAbi：架构不符，node 宿主起不来。" +
+                    "请改用 $deviceAbi 的安装包（构建时加 -PpientRuntimeAbi=arm64-v8a 或 x86_64）"
+                else -> "缺少：" + missing.joinToString("、")
+            }
     }
 
     /** 运行时库映射（APK assets 里的表；缺失时返回空表——退回「自己往 usr/lib 部署」的旧路径） */
@@ -431,9 +499,39 @@ object PiRuntime {
         val libsMissing = libs.count { !File(libDir, it.second).exists() }
         if (libsMissing > 0) missing += "随包运行时库缺 $libsMissing 个"
         if (!rpcEntry(context).exists()) missing += "app/$RPC_ENTRY"
-        if (missing.isEmpty()) ensureLinks(context)
-        return Readiness(missing.isEmpty(), missing)
+        if (missing.isEmpty()) {
+            ensureLinks(context)
+            return Readiness(true, emptyList())
+        }
+        // 失败路径上才读 APK 条目：区分「真没部署」与「装错了架构」（后者重试无用，见 Readiness.abiMismatch）。
+        // 列 zip 条目只读中央目录，不读内容，成本可忽略；但不放在成功热路径上。
+        return Readiness(
+            ready = false,
+            missing = missing,
+            apkAbis = apkRuntimeAbis(context),
+            deviceAbi = Build.SUPPORTED_ABIS.firstOrNull().orEmpty(),
+        )
     }
+
+    /**
+     * 本 APK 带了哪些 ABI 的 pi 运行时（读 APK 里 `lib/<abi>/libpient_node.so` 条目）。
+     * 模拟器包只会有 `x86_64`、真机包只会有 `arm64-v8a`（单 ABI 出包，见 build.gradle.kts）。
+     */
+    fun apkRuntimeAbis(context: Context): List<String> = runCatching {
+        val prefix = "lib/"
+        val nodeLib = NATIVE_BINARIES.getValue("node")
+        ZipFile(context.applicationInfo.sourceDir).use { zip ->
+            val abis = linkedSetOf<String>()
+            val entries = zip.entries()
+            while (entries.hasMoreElements()) {
+                val name = entries.nextElement().name
+                if (name.startsWith(prefix) && name.endsWith("/$nodeLib")) {
+                    abis += name.removePrefix(prefix).substringBefore('/')
+                }
+            }
+            abis.toList()
+        }
+    }.getOrDefault(emptyList())
 
     /**
      * 建/更新软链（幂等；**每次启动重指一遍**——APK 更新后 /data/app 路径会变，旧链会悬空）：
