@@ -1,19 +1,16 @@
 package com.pient.app.data
 
-import com.pient.app.tools.terminal.TerminalSessions
 import androidx.compose.runtime.mutableStateListOf
 
 // ─────────────────────────────────────────────────────────────
-// UI 原型 mock 数据。红线：仅演示 UI 交互，不替代 pi 官方接口；
-// 接入运行时后由 get_available_models / SessionManager 等官方机制替换。
-// 2026-09-08：mock 项目/会话/聊天消息/文件树已全部移除——初次进入无项目，
-// 聊天页显示创建项目（绑定文件夹）与配置 AI 引导；项目/会话/文件均真实数据。
-// 2026-09-09：mock 模型/MockReplies 移除——AI 对话走真实服务商 API（AiBackend），
-// 模型来自已配置服务商（AiConfigStore）。剩余 mock：技能/插件/终端。
+// 占位数据（UI 壳专用）。2026-09-14 用户拍板：技能页 / 插件页 / 终端页的功能整体移除，
+// 保留 UI 设计与交互 —— 三处的列表、开关、弹窗内容改由本文件的占位数据渲染
+// （只在内存里读写、重启即重置，不落盘）。
+// 其余数据均真实：项目 / 会话 / 文件（ProjectFiles）、AI 对话（AiBackend）、模型（AiConfigStore）。
 // ─────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────
-// 技能 / 插件（mock；分段切换 = 全局 ~/.pi/agent/skills、项目 .pi/skills）
+// 技能 / 插件占位数据（分段切换 = 全局 / 项目；字段沿用 pi 的概念口径）
 // ─────────────────────────────────────────────────────────────
 object MockStore {
     // ── SKILL.md mock 内容（须声明在 globalSkills 之前，保证对象初始化顺序） ──
@@ -281,6 +278,6 @@ object MockTerminal {
         add(TerminalLine(">> Your private local terminal environment on Android <<", TerminalLineKind.SLOGAN))
     }
 
-    // 会话与命令执行已改为真实实现：见 runtime/PiTerminal（每会话一个经 PRoot 落到 rootfs 的
-    // GNU bash 子进程）。本对象只保留品牌常量（Logo / 横幅），供终端首屏与关于页共用。
+    // 会话与命令执行链路已移除（2026-09-14）：本对象只保留品牌常量（Logo / 横幅），
+    // 供终端页首屏（TerminalShell）与关于页共用。
 }

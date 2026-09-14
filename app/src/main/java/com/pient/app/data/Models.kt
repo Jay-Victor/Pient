@@ -1,7 +1,5 @@
 package com.pient.app.data
 
-import com.pient.app.tools.terminal.ExecEnv
-import com.pient.app.tools.terminal.APT_MIRRORS
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -112,12 +110,10 @@ object SettingsStore {
     //   首启引导页「系统权限选项页」选定、设置页「系统权限设置」页可改；语义见 data/SystemPermissions.kt
     var permissionTier by mutableStateOf(PermissionTier.STANDARD)
 
-    // ── 执行环境（2026-09-14）：AI 的工具（bash 与 ! 命令）跑在哪个环境 ──
-    //   三种落点见 data/ExecEnvs.kt；选择由 PiRuntime.prepareTerminal 写进 <pient-rt>/exec_env，
-    //   随包包装脚本每次被执行时现读。与权限档位相互独立（档位管系统能力，环境管命令落点）。
+    // ── 执行环境（环境配置页的界面选择；2026-09-14 执行链路移除后仅作界面状态保存）──
     var execEnv by mutableStateOf(ExecEnv.UBUNTU)
 
-    // ── 环境内软件（Ubuntu）：apt 镜像源 + 待/已安装组件（勾选集合，id 见 data/ExecEnvs.kt）──
+    // ── 环境内软件（Ubuntu）：apt 镜像源 + 组件勾选（id 见 data/EnvCatalog.kt；仅界面状态）──
     var aptMirror by mutableStateOf(APT_MIRRORS[0].name)
     var selectedComponents by mutableStateOf(setOf("ca", "git", "curl"))
 
@@ -837,7 +833,7 @@ data class SkillItem(
     val global: Boolean = true,
     val skillMd: String? = null,   // SKILL.md 文件内容（真实读盘；null = 无此文件）
     val fileTree: String? = null,  // 技能目录 ASCII 树（真实扫描；null = 无目录信息）
-    /** `SKILL.md` 的绝对路径（内核装配技能时写进 available_skills 的 location） */
+    /** `SKILL.md` 的绝对路径（真实数据层时期使用；现为占位字段） */
     val path: String? = null,
     /** 市场条目的 `owner/repo/slug`（skills.sh 的安装句柄；本地技能为 null） */
     val marketId: String? = null,
@@ -903,7 +899,7 @@ class FileNode(
 }
 
 // ─────────────────────────────────────────────────────────────
-// 终端（多会话，Ubuntu 24.04 ARM64 rootfs —— 唯一终端环境）
+// 终端（多会话；执行链路已移除，仅界面态数据）
 // ─────────────────────────────────────────────────────────────
 data class TerminalLine(
     val text: String,

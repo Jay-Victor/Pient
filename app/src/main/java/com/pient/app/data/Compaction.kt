@@ -88,7 +88,7 @@ never invent facts that are not in the conversation. Answer in the same language
         val turns = prefix.map { (role, text) -> ChatTurn.Text(role, text) }
         val extra = instructions?.trim()?.takeIf { it.isNotEmpty() }
         val prompt = if (extra == null) CHECKPOINT_PROMPT else "$CHECKPOINT_PROMPT\n\n额外要求：$extra"
-        val res = runCatching { AiBackend.chat(cfg, prompt, turns, null, null) }.getOrNull() ?: return null
+        val res = runCatching { AiBackend.chat(cfg, prompt, turns, null) }.getOrNull() ?: return null
         return res.text.trim().takeIf { it.isNotEmpty() }
     }
 }

@@ -1,26 +1,49 @@
-package com.pient.app.tools.terminal
+package com.pient.app.data
 
 /**
- * **环境内软件（终端层的数据面）** —— 装进 Ubuntu 里的东西：apt 镜像源与常用组件清单。
+ * **环境配置相关的静态数据**（2026-09-14 用户拍板：终端执行链路整体移除后，
+ * 环境配置页已改为空白占位页 —— 原「执行环境二选一 / 镜像源 / 组件勾选」页面不再渲染本文件的清单）。
  *
- * 纯数据 + 两条命令生成（见 `runtime/EnvProvision.kt`）：这一层不执行安装，只声明「装什么、
- * 怎么检测、用什么命令装」；安装动作走终端层的会话（用户可见）。
- *
- * 从 `data/ExecEnvs.kt` 拆出（2026-09-14）：那份文件同时装着「执行环境落点」「系统命令档位」
- * 「环境内软件」三件事，边界糊在一起。
+ * 现存用途只剩两处：
+ * - [ExecEnv] —— 设置项 `exec_env` 的界面语义（`SettingsStore` 仍持有该字段，仅作界面状态）；
+ * - [AptMirror] / [APT_MIRRORS]、[ComponentGroups] / [UBUNTU_COMPONENTS] —— 首启「环境安装」弹窗
+ *   （`EnvSetupDialog`）仍在用（UI 壳，不真正安装）。
  */
-
-// ─────────────────────────────────────────────────────────────
-// 环境内软件（Ubuntu）：apt 镜像源 + 常用组件
-// ─────────────────────────────────────────────────────────────
 
 /**
- * apt 镜像源（改写 rootfs 里的 `/etc/apt/sources.list.d/ubuntu.sources`，deb822 格式）。
- *
- * **一律用 http**：ubuntu-base rootfs 里没有 `ca-certificates`（实测：切到 https 镜像后
- * `Certificate verification failed: The certificate is NOT trusted` + `Unable to locate package`，
- * 索引一条都拉不下来）。想用 https 源，先在「环境内软件」里勾装 CA 证书。
+ * 执行环境（终端层的落点）——界面语义保留：AI 的 shell 命令曾经跑在哪一个环境里。
+ * 当前版本不连接执行环境，选择只作为界面状态保存。
  */
+enum class ExecEnv(
+    val id: String,          // prefs 存储值
+    val title: String,
+    val desc: String,
+    val badge: String,       // 卡片右侧徽标（推荐 / 需 Root）
+) {
+    UBUNTU(
+        id = "ubuntu",
+        title = "Ubuntu 24.04（PRoot）",
+        desc = "GNU 用户空间：bash + coreutils + apt，可 apt 装任意软件；无需 Root，命令经 PRoot 运行",
+        badge = "推荐",
+    ),
+    UBUNTU_CHROOT(
+        id = "ubuntu-chroot",
+        title = "Ubuntu 24.04（chroot）",
+        desc = "同一个 rootfs，但以 su + chroot 运行：真 uid 0、零模拟开销，可改系统、绑特权端口；需设备已 Root",
+        badge = "需 Root",
+    );
+
+    companion object {
+        fun fromId(id: String?): ExecEnv =
+            entries.firstOrNull { it.id == id } ?: UBUNTU
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 环境内软件（Ubuntu）：apt 镜像源 + 常用组件（纯数据，首启弹窗展示用）
+// ─────────────────────────────────────────────────────────────
+
+/** apt 镜像源（展示名 + 源地址） */
 data class AptMirror(val name: String, val uri: String)
 
 val APT_MIRRORS = listOf(
@@ -54,15 +77,14 @@ object ComponentGroups {
 /**
  * 可勾选安装的组件（装进 Ubuntu 环境里）。
  *
- * - [probe]：默认检测用的**命令名**（`command -v <probe>`）；
- * - [detectCmd]：自定义检测命令（装了但版本不对、或没有可执行文件时用，如 Node 要求 v24+、
- *   openssh-server 只有守护进程没有命令）；
+ * - [probe]：检测用的**命令名**（`command -v <probe>`）；
+ * - [detectCmd]：自定义检测命令（装了但版本不对、或没有可执行文件时用）；
  * - [installCmd]：自定义安装命令（不走 apt 单包，如 NodeSource / npm 全局包 / rustup）；
  * - [group]：见 [ComponentGroups]；
- * - [heavy]：体积/耗时明显更大的项（页面上给一枚「大」标记，让用户知道要等）。
+ * - [heavy]：体积/耗时明显更大的项（页面上给一枚「大」标记）。
  *
  * **清单顺序即安装顺序**（自定义命令按此逐条执行）：node 必须在 pnpm/typescript 之前、
- * pip 必须在 uv 之前 —— 别随手重排。
+ * pip 必须在 uv 之前 —— 别随手重排。当前版本不实际执行安装，清单供界面展示。
  */
 data class UbuntuComponent(
     val id: String,
@@ -150,4 +172,3 @@ val UBUNTU_COMPONENTS = listOf(
         detectCmd = "dpkg -s openssh-server",
     ),
 )
-

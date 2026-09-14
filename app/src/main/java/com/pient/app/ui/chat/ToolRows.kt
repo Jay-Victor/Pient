@@ -383,7 +383,6 @@ private fun stripExitNote(text: String): String =
 internal fun ToolRow(
     call: Msg.ToolCall,
     result: Msg.ToolResult?,
-    onPermissionDemo: (() -> Unit)? = null,
 ) {
     var open by remember(call.name, call.params) { mutableStateOf(false) }
     val p = toolPalette()
@@ -407,13 +406,6 @@ internal fun ToolRow(
                 verticalArrangement = Arrangement.spacedBy(ToolRowGap),
             ) {
                 ToolBody(call = call, output = output, palette = p)
-                if (onPermissionDemo != null && call.detail != null) {
-                    Text(
-                        "演示：权限请求弹窗 →",
-                        style = toolStyle(ToolSectionLabelSize).copy(color = p.accent),
-                        modifier = Modifier.clickable(onClick = onPermissionDemo),
-                    )
-                }
                 ToolPayloadDisclosure(call = call, result = result, palette = p)
             }
         }
@@ -1047,7 +1039,6 @@ internal fun ToolRunGroup(
     calls: List<Msg.ToolCall>,
     results: List<Msg.ToolResult?>,
     live: Boolean,
-    onPermissionDemo: ((Msg.ToolCall) -> Unit)? = null,
 ) {
     var expanded by remember(calls.size, calls.firstOrNull()?.params) { mutableStateOf(false) }
     val p = toolPalette()
@@ -1097,7 +1088,6 @@ internal fun ToolRunGroup(
                     ToolRow(
                         call = call,
                         result = results.getOrNull(i),
-                        onPermissionDemo = onPermissionDemo?.let { demo -> { demo(call) } },
                     )
                 }
             }

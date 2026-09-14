@@ -39,7 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
-import com.pient.app.data.SkillStore
+import com.pient.app.data.MockStore
 import com.pient.app.data.SkillItem
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.theme.MonoFont
@@ -47,9 +47,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * 技能搜索页（设计计划第 4 章，pi-web SkillsConfig /api/skills/search 同款）：
- * 结果分两组：市场结果（skills.sh）+ 本地已安装匹配。
- * 安装 = 宿主侧 npx skills add --agent pi（严禁走 Ubuntu bash 通道）；原型 mock。
+ * 技能搜索页（**UI 壳**，2026-09-14：市场请求 / 安装链路已移除）：
+ * 结果分两组：市场结果（占位数据，原 skills.sh 形态）+ 本地已安装匹配（[MockStore]）。
+ * 「安装」只把条目标记为已安装（内存态），不写盘、不联网。
  */
 @Composable
 fun SkillSearchScreen(nav: NavController) {
@@ -57,12 +57,12 @@ fun SkillSearchScreen(nav: NavController) {
     var searched by remember { mutableStateOf("") }
     var installing by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    val context = androidx.compose.ui.platform.LocalContext.current
 
-    // 市场结果：真实请求 skills.sh（pi-web 的 `/api/skills/search` 等价物，去掉它的 npx 回退）
+    // 市场结果：占位数据按关键词过滤（原 skills.sh 请求已移除）
     var marketResults by remember { mutableStateOf<List<SkillItem>>(emptyList()) }
-    var searching by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<String?>(null) }
+    // 本页内「已安装」集合（把市场条目标记为已安装；内存态，重启即重置）
+    var installedNames by remember { mutableStateOf(setOf<String>()) }
 
     LaunchedEffect(searched) {
         if (searched.isBlank()) {
@@ -70,14 +70,12 @@ fun SkillSearchScreen(nav: NavController) {
             note = null
             return@LaunchedEffect
         }
-        searching = true
-        val r = SkillStore.searchMarket(searched)
+        val r = MockStore.marketSkills.filter { it.name.contains(searched, ignoreCase = true) }
         marketResults = r
-        note = if (r.isEmpty()) "没有匹配的技能（或市场不可达）" else null
-        searching = false
+        note = if (r.isEmpty()) "没有匹配的技能（占位数据里没有）" else null
     }
 
-    val localResults = (SkillStore.global + SkillStore.project).filter {
+    val localResults = (MockStore.globalSkills + MockStore.projectSkills).filter {
         searched.isNotBlank() && it.name.contains(searched, ignoreCase = true)
     }
 
@@ -171,15 +169,6 @@ fun SkillSearchScreen(nav: NavController) {
                     )
                 }
             }
-            if (searching) {
-                item {
-                    Text(
-                        "正在搜索 skills.sh…",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
             note?.let { text ->
                 item {
                     Text(
@@ -197,16 +186,15 @@ fun SkillSearchScreen(nav: NavController) {
                     MarketSkillRow(
                         skill = skill,
                         installing = installing == skill.name,
+                        installed = skill.name in installedNames,
                         onInstall = {
                             installing = skill.name
                             scope.launch {
-                                // 真实安装：拉 skills.sh 的 /api/download 逐文件写进 ~/.agents/skills
-                                val r = SkillStore.install(context, skill, globalScope = true)
+                                // 占位安装：模拟一次进度，然后标记「已安装」（不写盘、不联网）
+                                delay(700)
+                                installedNames = installedNames + skill.name
                                 installing = null
-                                note = r.fold(
-                                    onSuccess = { it },
-                                    onFailure = { "安装失败：${it.message?.take(140)}" },
-                                )
+                                note = "已安装「${skill.name}」（占位数据，仅界面演示）"
                             }
                         },
                     )
@@ -260,6 +248,7 @@ fun SkillSearchScreen(nav: NavController) {
 private fun MarketSkillRow(
     skill: SkillItem,
     installing: Boolean,
+    installed: Boolean,
     onInstall: () -> Unit,
 ) {
     Row(
@@ -279,10 +268,22 @@ private fun MarketSkillRow(
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
-        if (installing) {
-            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-        } else {
-            Row(
+        when {
+            installing -> CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            installed -> {
+                Icon(
+                    Icons.Outlined.Check, null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp),
+                )
+                Text(
+                    "已安装",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp),
+                )
+            }
+            else -> Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))

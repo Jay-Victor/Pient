@@ -54,18 +54,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import com.pient.app.runtime.PiRuntime
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
-import com.pient.app.tools.system.SystemPart
 import com.pient.app.data.PermissionTier
 import com.pient.app.data.RootGateway
 import com.pient.app.data.SettingsStore
-import com.pient.app.tools.system.ShellTier
 import com.pient.app.data.ShizukuGateway
 import com.pient.app.data.SystemPermissions
 import com.pient.app.ui.components.ArcSpinner
@@ -185,9 +182,6 @@ fun SystemPermissionScreen(nav: NavController) {
 
     fun setActiveTier(tier: PermissionTier) {
         SettingsStore.permissionTier = tier
-        // 档位只管「能拿到什么系统能力」；命令跑在哪由「环境配置」页的执行环境决定，
-        // 这里仍调一次 prepareTerminal 让 DNS / 执行环境文件保持最新（幂等）。
-        PiRuntime.prepareTerminal(context)
         val hint = when {
             tierReady(tier, status, shizukuInstalled, shizukuRunning, shizukuAuthorized, deviceRooted, rootGranted) -> null
             tier == PermissionTier.DEBUGGER -> "需先完成 Shizuku 安装与授权"
@@ -399,33 +393,11 @@ fun SystemPermissionScreen(nav: NavController) {
             PermissionCardBox {
                 Column(Modifier.padding(14.dp)) {
                     Text(
-                        "AI 的 android_shell 工具（am / pm / dumpsys / getprop / settings …）走哪条通道。" +
-                            "bash 工具只在 Ubuntu 里跑，与这里无关。三档按权限从高到低自动选：有 Root 走 su，" +
-                            "有 Shizuku 走 ADB 级（uid 2000），都没有就在标准档以应用身份执行——**标准档永远可用**，" +
-                            "只是系统命令多数会被拒（报错原样回给模型）。",
+                        "原「系统命令执行通道」条目随工具层整体移除（2026-09-14）：当前版本不执行任何 AI 工具命令，" +
+                            "本区块仅保留界面位置。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(Modifier.height(8.dp))
-                    CardDivider()
-                    val tiers = remember(shizukuAuthorized, deviceRooted) { SystemPart.tiers(context) }
-                    val effective = SystemPart.effectiveTier(context)
-                    tiers.forEach { t ->
-                        AndroidShellTierRow(
-                            title = t.tier.title,
-                            desc = t.detail.ifBlank { t.tier.desc },
-                            ready = t.ready,
-                            current = t.tier == effective,
-                            // 设备不支持（未 Root 设备上的 Root 档）→ 不给任何入口
-                            supported = t.supported,
-                            onAction = when {
-                                !t.supported -> null
-                                t.tier == ShellTier.ADB && !t.ready -> ({ grantShizuku() })
-                                t.tier == ShellTier.ROOT && !t.ready -> ({ requestRoot() })
-                                else -> null
-                            },
-                        )
-                    }
                 }
             }
 
@@ -721,7 +693,7 @@ private fun RootWizard(
         },
     )
     Text(
-        "Pient 通过 su 通道获得最高级系统能力（chroot 终端环境、系统级文件操作）。首次请求会由 Root 管理器（Magisk / KernelSU / APatch）弹出授权框；未 Root 的设备可继续使用标准 / 调试权限。",
+        "Pient 通过 su 通道获得最高级系统能力（系统级文件操作与特权能力）。首次请求会由 Root 管理器（Magisk / KernelSU / APatch）弹出授权框；未 Root 的设备可继续使用标准 / 调试权限。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 6.dp),

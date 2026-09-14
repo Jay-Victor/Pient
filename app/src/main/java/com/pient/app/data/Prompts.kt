@@ -1,82 +1,20 @@
 package com.pient.app.data
 
-import com.pient.app.tools.ToolRegistry
-import com.pient.app.tools.ToolSpec
-import org.json.JSONObject
-
 /**
- * **系统提示词（提示层）** —— 直连路径的提示词（宿主路径的提示词由 pi 自己构建，与此无关）。
+ * **系统提示词（提示层）** —— 对话请求里下发的 system prompt。
  *
- * 与工具层的关系（2026-09-14 拆开）：提示词里列出的工具**必须来自 [ToolRegistry]**，
- * 不再手写一份清单 —— 旧实现把工具说明抄在 `AppTools.systemPrompt` 里，与下发/执行处的
- * 清单各写一遍，一旦加工具就漏（用户报过的「回答里直接输出命令」正是「提示词说有的工具、
- * 请求里没带」这类不一致的下游后果之一）。
+ * 2026-09-14 用户拍板：工具能力整体移除（不再有 read / write / bash 等工具，技能装配也一并移除），
+ * 提示词随之收敛为一段简短的助手身份说明。「系统提示词」面板显示的仍是这里构造的真实内容
+ * （由发送路径写入 `ChatState.systemPrompt`，见 ChatState.runChat）。
  */
 object Prompts {
 
-    /**
-     * @param workspace 工作区绝对路径（相对路径的解析基准、bash 的 cwd）
-     * @param nativeTools true = 工具经服务商 API 原生下发（开关开）；false = 用下方标记契约调用（开关关）
-     */
-    fun systemPrompt(
-        workspace: String,
-        nativeTools: Boolean,
-        /** 已启用技能的 available_skills 段（见 [Skills.promptBlock]）；null = 没有技能，不写这一段 */
-        skillsBlock: String? = null,
-        /** 可用工具目录（[ToolRegistry.specs] 的结果）——标记模式下要逐条列给模型 */
-        toolCatalog: List<ToolSpec> = emptyList(),
-    ): String {
-        val sb = StringBuilder()
-        sb.append("You are Pient's on-device agent, running inside the Pient Android app. ")
-        sb.append("The app itself calls the model API (direct-connection mode), and the app executes your tool calls.\n\n")
-        sb.append("Environment:\n")
-        sb.append("- OS: Android (app sandbox). Shell commands run inside the bundled Ubuntu workspace.\n")
-        sb.append("- Working directory (workspace): ").append(workspace).append('\n')
-        sb.append("- Relative paths are resolved against the workspace; bash starts there.\n")
-        sb.append("- Files outside the workspace and the app's own directory are not reachable in this mode.\n\n")
-        if (nativeTools) {
-            sb.append("Tools are declared through the provider's native tool-calling API — call them the normal way. ")
-            sb.append("read/write/edit/ls/find/grep run in the app; bash runs in the Ubuntu workspace.\n\n")
-        } else {
-            sb.append("Tools are NOT declared through the API. To use a tool, output one or more blocks in exactly ")
-            sb.append("this form (the app runs them and sends the results back as a user message):\n\n")
-            sb.append("<tool_call>\n")
-            sb.append("<invoke name=\"read\"><parameter name=\"path\">notes.md</parameter></invoke>\n")
-            sb.append("</tool_call>\n\n")
-            sb.append("Available tools:\n")
-            for (t in toolCatalog) {
-                sb.append("- ").append(t.name)
-                val params = paramList(t)
-                if (params.isNotEmpty()) sb.append(": ").append(params)
-                sb.append(" — ").append(oneLine(t))
-                sb.append('\n')
-            }
-            sb.append('\n')
-            sb.append("After the tool results come back, continue the task; when you are done, answer normally ")
-            sb.append("without any tool markup.\n\n")
-        }
-        if (!skillsBlock.isNullOrBlank()) sb.append(skillsBlock).append("\n\n")
-        sb.append("Guidelines:\n")
-        sb.append("- Work autonomously: break the task into steps, use the tools, verify the result before reporting.\n")
-        sb.append("- Never fabricate file contents, command output, or results you did not actually produce.\n")
-        sb.append("- Match the user's language in your replies.")
-        return sb.toString()
-    }
-
-    /** 参数清单（`path, offset?, limit?`）——必填不加后缀、可选加 `?`，从 schema 现推、不另写一份 */
-    private fun paramList(spec: ToolSpec): String {
-        val props = spec.parameters.optJSONObject("properties") ?: JSONObject()
-        val required = spec.parameters.optJSONArray("required")?.let { arr ->
-            (0 until arr.length()).map { arr.optString(it) }
-        }.orEmpty()
-        return props.keys().asSequence().toList()
-            .joinToString(", ") { if (it in required) it else "$it?" }
-    }
-
-    /** 一句话描述（取到第一个句号为止，别把整段截断口径塞进提示词） */
-    private fun oneLine(spec: ToolSpec): String {
-        val d = spec.description
-        val cut = d.indexOf(". ")
-        return if (cut > 0) d.substring(0, cut + 1) else d
+    fun systemPrompt(): String = buildString {
+        append("You are Pient, an AI assistant running inside the Pient Android app. ")
+        append("The app calls the model API directly on the device and shows your replies in a chat UI.\n\n")
+        append("Guidelines:\n")
+        append("- Reply directly and helpfully; answers are rendered as Markdown, so structure longer replies with it.\n")
+        append("- Never claim to have executed commands, accessed files, or produced results you did not actually produce.\n")
+        append("- Match the user's language in your replies.")
     }
 }

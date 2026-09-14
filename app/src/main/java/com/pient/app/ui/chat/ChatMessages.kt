@@ -98,7 +98,6 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -116,14 +115,11 @@ import android.widget.Toast
 import com.pient.app.data.Attachment
 import com.pient.app.data.ContextPolicy
 import com.pient.app.data.Msg
-import com.pient.app.tools.PendingPermission
 import com.pient.app.data.Quote
 import com.pient.app.data.SettingsStore
-import com.pient.app.tools.ToolGate
 import com.pient.app.data.ToolStatus
 import com.pient.app.data.markdownToPlainText
 import com.pient.app.ui.components.MarkdownText
-import com.pient.app.ui.components.PermissionRequestDialog
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.components.PientSegmented
 import com.pient.app.ui.theme.LocalPientIsDark
@@ -166,24 +162,8 @@ fun ChatMessages(
     onShowEarlier: () -> Int = { 0 },
     onOpenLocator: () -> Unit,
     onMessageLongPress: ((Int, Rect) -> Unit)? = null,
-    /** 待回答的工具授权询问（权限守门扩展抛上来的）——非空时必须给结果（见 ChatState.answerPermission） */
-    pendingPermission: PendingPermission? = null,
-    onPermOnce: () -> Unit = {},
-    onPermAlways: () -> Unit = {},
-    onPermDeny: () -> Unit = {},
-    /** 工具卡授权按钮：给该工具写策略（ToolGate.ALLOW / FORBID） */
-    onPolicySet: (String, String) -> Unit = { _, _ -> },
 ) {
     val scope = rememberCoroutineScope()
-    // 工具卡「授权」按钮的手动策略设置（工具名 → 参数摘要）
-    var manualPolicyAsk by remember { mutableStateOf<Pair<String, String>?>(null) }
-
-    // 权限弹窗打开时**收起键盘**：弹窗底部按键会被 IME 盖住（实测：点「拒绝」落到 Gboard 上、
-    // 还往输入框打进了字符）——弹窗期间用户唯一该做的事就是回答它。
-    val keyboard = LocalSoftwareKeyboardController.current
-    LaunchedEffect(pendingPermission?.id) {
-        if (pendingPermission != null) keyboard?.hide()
-    }
 
     // 进入会话（首次组合 / 切换会话 / 分支换叶）默认落在消息最底部。
     //
@@ -341,7 +321,6 @@ fun ChatMessages(
                             calls = item.indices.map { messages[it] as Msg.ToolCall },
                             results = item.indices.map { idx -> messages.getOrNull(idx + 1) as? Msg.ToolResult },
                             live = item.live,
-                            onPermissionDemo = { call -> manualPolicyAsk = call.name to call.params },
                         )
                     }
                     return@items
@@ -395,10 +374,6 @@ fun ChatMessages(
                         // 展开初值：刚流式完的思考块（本运行内的 live preview）保持展开，历史载入的收起
                         thinkingExpandedDefault = (thinkingIdx >= 0 && thinkingIdx == liveThinkingIndex) ||
                             (msg is Msg.Thinking && idx == liveThinkingIndex),
-                        onRequestPermission = {
-                            val call = msg as? Msg.ToolCall
-                            manualPolicyAsk = (call?.name ?: "") to (call?.params ?: "")
-                        },
                         standaloneThinking = standaloneThinking,
                     )
                 }
@@ -507,42 +482,6 @@ fun ChatMessages(
         }
     }
 
-    // 工具级授权（开发计划 §6.3）：权限守门扩展在工具**执行前**问上来的（宿主正阻塞等待回答）
-    // ——点外关闭按「拒绝」处理，绝不能只关弹窗不回话（否则要等到扩展的 5 分钟超时）。
-    pendingPermission?.let { ask ->
-        Box(Modifier.fillMaxSize()) {
-            PermissionRequestDialog(
-                toolName = ask.toolName,
-                paramSummary = ask.argsSummary,
-                dangerous = ask.dangerous,
-                onAllowOnce = onPermOnce,
-                onAlwaysAllow = onPermAlways,
-                onDeny = onPermDeny,
-                onDismiss = onPermDeny,
-            )
-        }
-    }
-
-    // 工具卡「授权」按钮：手动给该工具设策略（调用已发生过，所以「仅本次允许」只关弹窗）
-    manualPolicyAsk?.let { (tool, args) ->
-        Box(Modifier.fillMaxSize()) {
-            PermissionRequestDialog(
-                toolName = tool,
-                paramSummary = args,
-                dangerous = false,
-                onAllowOnce = { manualPolicyAsk = null },
-                onAlwaysAllow = {
-                    onPolicySet(tool, ToolGate.ALLOW)
-                    manualPolicyAsk = null
-                },
-                onDeny = {
-                    onPolicySet(tool, ToolGate.FORBID)
-                    manualPolicyAsk = null
-                },
-                onDismiss = { manualPolicyAsk = null },
-            )
-        }
-    }
 }
 
 // ───────────────────────────── 消息定位弹窗 ─────────────────────────────
@@ -820,7 +759,6 @@ private fun MessageCard(
     toolResult: Msg.ToolResult? = null,
     thinking: Msg.Thinking? = null,
     thinkingExpandedDefault: Boolean = false,
-    onRequestPermission: () -> Unit,
     /** 思考块与回答之间隔着工具卡：就地渲染（无卡片外框，与流式期间同一形态） */
     standaloneThinking: Boolean = false,
 ) {
@@ -828,7 +766,7 @@ private fun MessageCard(
         is Msg.User -> UserBubble(msg)
         is Msg.Assistant -> AssistantCard(msg, thinking, thinkingExpandedDefault)
         is Msg.Thinking -> ThinkingCard(msg, thinkingExpandedDefault, boxed = !standaloneThinking)
-        is Msg.ToolCall -> ToolRow(msg, toolResult, onPermissionDemo = onRequestPermission)
+        is Msg.ToolCall -> ToolRow(msg, toolResult)
         // 未成对的结果（理论上不该出现）：合成一行同款工具行，不再另设结果卡
         is Msg.ToolResult -> ToolRow(
             call = Msg.ToolCall(msg.toolName, "", ToolStatus.DONE, detail = msg.full ?: msg.preview),

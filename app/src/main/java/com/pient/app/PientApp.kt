@@ -1,15 +1,10 @@
 package com.pient.app
 
-import android.Manifest
 import android.app.Activity
 import android.content.Context
-import android.content.pm.PackageManager
 import android.graphics.drawable.ColorDrawable
-import android.os.Build
 import android.widget.Toast
 import android.os.SystemClock
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
@@ -30,21 +25,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
-import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.pient.app.data.AiConfigStore
-import com.pient.app.tools.terminal.APT_MIRRORS
 import com.pient.app.data.ChatState
 import com.pient.app.data.ChatStore
 import com.pient.app.data.ModelPricingDefaults
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ThemeMode
 import com.pient.app.data.UsageStore
-import com.pient.app.runtime.EnvProvision
-import com.pient.app.runtime.PiRuntime
 import com.pient.app.ui.chat.ChatScreen
 import com.pient.app.ui.onboarding.OnboardingScreen
 import com.pient.app.ui.plugins.PluginsScreen
@@ -56,7 +47,6 @@ import com.pient.app.ui.settings.ProjectManagementScreen
 import com.pient.app.ui.settings.SettingsScreen
 import com.pient.app.ui.settings.SystemPermissionScreen
 import com.pient.app.ui.settings.ThemeSettingsScreen
-import com.pient.app.ui.settings.ToolsScreen
 import com.pient.app.ui.settings.UsageScreen
 import com.pient.app.ui.skills.SkillSearchScreen
 import com.pient.app.ui.skills.SkillsScreen
@@ -65,7 +55,6 @@ import com.pient.app.ui.terminal.TerminalSetupScreen
 import com.pient.app.ui.theme.AppBackgroundLayer
 import com.pient.app.ui.theme.PientGlassProvisioning
 import com.pient.app.ui.theme.PientTheme
-import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -125,28 +114,10 @@ fun PientApp() {
         ready = true
     }
 
-    // pi 宿主（工具层底座）：数据加载完成后交给**前台服务**托管（开发计划 §6.4 保活）——
-    // 常驻通知「Agent 运行中」+ START_STICKY，宿主（Node 子进程）随服务存活；
-    // 服务内部做模型接线（需要服务商/模型配置，所以不能放在 Activity.onCreate）。
-    val notifPermLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { }
+    // 应用上下文注入（内核各层从这里取 context；对话 / 压缩等都要它）
     LaunchedEffect(ready) {
         if (!ready) return@LaunchedEffect
-        // Android 13+：没通知权限时前台服务照常跑，但用户看不到「Agent 运行中」→ 顺手要一次
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        // 宿主已冻结（2026-09-14 决策）：不再启动 pi 子进程（见 Docx/Pient 工具层设计.md「内核自研」节）
-        AppCtx.set(context.applicationContext)   // 内核各层（含工具调度）从这里取上下文
-        // 终端层软链尽早对一遍：宿主冻结后，软链维护还在启动路径上留一个兜底点
-        // （见 PiRuntime.ensureLinks 注释：APK 更新会让 /data/app 路径变化）
-        Thread {
-            runCatching { PiRuntime.ensureLinks(context.applicationContext) }
-        }.apply { isDaemon = true; name = "pient-links" }.start()
+        AppCtx.set(context.applicationContext)
     }
     val nav = rememberNavController()
 
@@ -179,18 +150,6 @@ fun PientApp() {
             .collect { SettingsStore.saveDrawerMode(context) }
     }
 
-    // 当前项目 → agent 工作区（bash 工具的 cwd 与 Ubuntu 里的 /workspace 同一处）。
-    // 2026-09-14 用户拍板：移除 SAF「选择本地文件夹」整条链路 → 项目一律是应用私有目录下的真路径，
-    // 物化副本 / 回写那套（SafWorkspace）随之作废。
-    LaunchedEffect(ready) {
-        if (!ready) return@LaunchedEffect
-        snapshotFlow { chatState.currentProject to chatState.projects.toList() }
-            .collect { (name, projects) ->
-                val proj = projects.firstOrNull { it.name == name }
-                PiRuntime.setWorkspace(context, proj?.let { File(it.path) })
-            }
-    }
-
     // 权限档位持久化（系统权限设置页 / 首启引导页选定），重启后保持
     LaunchedEffect(Unit) {
         snapshotFlow { SettingsStore.permissionTier }
@@ -202,15 +161,6 @@ fun PientApp() {
         snapshotFlow {
             Triple(SettingsStore.execEnv, SettingsStore.aptMirror, SettingsStore.selectedComponents)
         }.collect { SettingsStore.saveEnvironment(context) }
-    }
-
-    // apt 镜像源落到 rootfs（选定即生效；rootfs 未就绪时静默跳过，解包后靠下次启动对齐）
-    LaunchedEffect(Unit) {
-        snapshotFlow { SettingsStore.aptMirror }
-            .collect { name ->
-                val mirror = APT_MIRRORS.firstOrNull { it.name == name } ?: return@collect
-                withContext(Dispatchers.IO) { EnvProvision.applyMirror(context, mirror) }
-            }
     }
 
     // 开屏设置持久化（行为设置：是否播放开屏加载动画），重启后保持
@@ -382,9 +332,6 @@ fun PientApp() {
                     composable("system_permissions") {
                         SystemPermissionScreen(nav = nav)
                     }
-                    composable("tools") {
-                        ToolsScreen(nav = nav)
-                    }
                     composable("about") {
                         AboutScreen(nav = nav)
                     }
@@ -407,9 +354,6 @@ fun PientApp() {
 internal object PientRuntime {
     var chatState: ChatState? = null
     var dataLoaded = false
-
-    /** pi 宿主是否已拉起过（进程级；Activity 重建不重复拉起） */
-    var hostStarted = false
 }
 
 /** 开屏加载页最短展示时长（读盘过快时避免「闪一下」） */

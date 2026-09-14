@@ -219,8 +219,6 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
     var lastBackPress by remember { mutableStateOf(0L) }
     BackHandler {
         when {
-            // 工具授权弹窗在最上层：返回键 = 拒绝（必须回话，否则宿主阻塞到扩展的 5 分钟超时）
-            chatState.pendingPermission != null -> chatState.answerPermission(deny = true)
             locatorOpen -> locatorOpen = false
             copyCardText != null -> copyCardText = null
             forkMenuTarget != null -> forkMenuTarget = null
@@ -412,8 +410,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                     attachSheetOpen = false // 切页时收起附件卡片
                 },
             )
-            // 宿主已冻结（2026-09-14 决策）：Pient 用自己的内核（Kotlin）跑对话与工具，
-            // 「宿主未就绪 → 工具不可用」这条降级提示随之取消（原 HostNotReadyStrip 不再渲染）。
+            // 工具能力已整体移除（2026-09-14）：「宿主未就绪 → 工具不可用」这类降级提示不存在
+            // （原 HostNotReadyStrip 早已删除）。
             // 面板内容 + 覆盖其上的输入栏（2026-09-12：输入栏 dock 改为浮层，
             // 面板内容伸到屏幕底部、可从玻璃里透出 —— Operit 输入栏 align(BottomCenter) 同款）
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -987,11 +985,5 @@ private fun MessagesPanel(
         },
         onOpenLocator = onOpenLocator,
         onMessageLongPress = onMessageLongPress,
-        // 工具级授权：权限守门扩展的询问 → 三选弹窗 → 回 extension_ui_response
-        pendingPermission = chatState.pendingPermission,
-        onPermOnce = { chatState.answerPermission(allowOnce = true) },
-        onPermAlways = { chatState.answerPermission(always = true) },
-        onPermDeny = { chatState.answerPermission(deny = true) },
-        onPolicySet = { tool, policy -> chatState.setToolPolicy(tool, policy) },
     )
 }

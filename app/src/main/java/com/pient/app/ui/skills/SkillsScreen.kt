@@ -34,19 +34,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.runtime.LaunchedEffect
 import androidx.navigation.NavController
+import com.pient.app.data.MockStore
 import com.pient.app.data.SkillItem
-import com.pient.app.data.SkillStore
-import com.pient.app.ui.components.HostRestartHint
 import com.pient.app.ui.components.PientSegmented
 import com.pient.app.ui.theme.MonoFont
 
 /**
- * 技能管理（P7，设计计划第 4 章，pi-web SkillsConfig 参考）：
- * 全局/项目分段（~/.pi/agent/skills/ ↔ .pi/skills/）；列表 = 名称+描述+开关
- * （disable-model-invocation 外科手术式修改）；右下双 FAB：搜索 + 导入。
- * 2026-09-06：点击技能卡片弹出详情弹窗（SKILL.md 内容/路径/删除+关闭）。
+ * 技能管理（**UI 壳**，2026-09-14 用户拍板：技能功能（扫盘 / 市场 / 安装 / 停用写 settings）
+ * 整体移除，保留 UI 设计与交互）：
+ * 全局/项目分段；列表 = 名称+描述+开关（读 [MockStore] 占位数据，只在内存里改）；
+ * 右下双 FAB：搜索 + 导入（动作同样只作用于占位数据）。
  */
 @Composable
 fun SkillsScreen(nav: NavController) {
@@ -54,8 +52,6 @@ fun SkillsScreen(nav: NavController) {
     var importOpen by remember { mutableStateOf(false) }
     var detailFor by remember { mutableStateOf<SkillItem?>(null) }
     val context = LocalContext.current
-    // 真实数据：进页面即扫盘（全局 = ~/.pi/agent/skills 等；项目 = 工作区 .pi/skills）
-    LaunchedEffect(Unit) { SkillStore.refresh(context) }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -95,15 +91,8 @@ fun SkillsScreen(nav: NavController) {
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
             )
 
-            // 改了技能/装完新技能 → pi 要重启才会重新装配（提示 + 一键重启）
-            if (SkillStore.needsHostRestart) {
-                HostRestartHint("技能改动已保存（内核装配技能在自研清单 N1 里）") {
-                    SkillStore.markHostRestarted()
-                }
-            }
-
-            // 技能列表（真实扫描结果）
-            val list = if (segment == 0) SkillStore.global else SkillStore.project
+            // 技能列表（占位数据；开关只在内存里改）
+            val list = if (segment == 0) MockStore.globalSkills else MockStore.projectSkills
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
@@ -114,29 +103,19 @@ fun SkillsScreen(nav: NavController) {
                     SkillRow(
                         list[i],
                         onClick = { detailFor = list[i] },
-                        onToggle = { on -> SkillStore.setEnabled(context, list[i], on) },
+                        onToggle = { on -> list[i] = list[i].copy(enabled = on) },
                     )
                 }
-                if (list.isEmpty() && !SkillStore.loading) {
+                if (list.isEmpty()) {
                     item {
                         Text(
                             if (segment == 0)
-                                "未发现全局技能。点右下「导入」新建，或用「搜索」从 skills.sh 安装。"
+                                "还没有全局技能。点右下「导入」新建，或用「搜索」查看技能市场。"
                             else
-                                "当前项目没有技能。项目技能放在工作区的 .pi/skills/（pi 侧需项目被信任才加载）。",
+                                "当前项目没有技能。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 8.dp),
-                        )
-                    }
-                }
-                SkillStore.lastError?.let { err ->
-                    item {
-                        Text(
-                            "诊断：$err",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.padding(top = 6.dp),
                         )
                     }
                 }
@@ -178,9 +157,22 @@ fun SkillsScreen(nav: NavController) {
             global = segment == 0,
             onDismiss = { importOpen = false },
             onImported = { name, desc, md ->
-                // 真实落盘：写 <全局|项目> 技能目录下的 <name>/SKILL.md，然后重扫
-                val ok = SkillStore.createSkill(context, name, desc, md, globalScope = segment == 0)
-                toast(context, if (ok) "已导入技能 $name" else "导入失败：写入技能目录失败")
+                // 占位数据：往当前分段的列表里加一条（内存态；不写盘）
+                val body = md?.takeIf { it.isNotBlank() } ?: "# $name\n\n$desc"
+                val skillMd = "---\nname: $name\ndescription: $desc\n---\n\n$body"
+                val target = if (segment == 0) MockStore.globalSkills else MockStore.projectSkills
+                target.add(
+                    0,
+                    SkillItem(
+                        name = name,
+                        desc = desc,
+                        enabled = true,
+                        global = segment == 0,
+                        skillMd = skillMd,
+                        fileTree = "$name/\n└── SKILL.md",
+                    ),
+                )
+                toast(context, "已导入技能 $name")
                 importOpen = false
             },
         )
@@ -192,8 +184,9 @@ fun SkillsScreen(nav: NavController) {
             item = item,
             onDismiss = { detailFor = null },
             onDelete = {
-                val ok = SkillStore.delete(context, item)
-                toast(context, if (ok) "已删除技能 ${item.name}" else "删除失败：技能目录不可写")
+                val target = if (item.global) MockStore.globalSkills else MockStore.projectSkills
+                target.removeAll { it.name == item.name }
+                toast(context, "已删除技能 ${item.name}")
                 detailFor = null
             },
         )

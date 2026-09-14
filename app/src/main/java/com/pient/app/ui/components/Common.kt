@@ -494,45 +494,6 @@ fun PientDialog(
 //   默认 16dp = 修掉贴边 + 给等宽多按钮行留足余量（3 联按钮行可用显式更小值，见
 //   PluginDetailDialog「检查更新 / 删除 / 关闭」行）。
 // ─────────────────────────────────────────────────────────────
-/**
- * 「改动需要重启宿主才生效」提示（技能页 / 插件页共用）。
- *
- * 为什么需要它：pi 在**启动时**装配技能、扩展与包资源，而官方 RPC 没有 reload 命令
- * （桌面端的 `/reload` 只存在于交互模式 TUI）——App 侧改完 settings 或落盘新技能后，
- * 必须让宿主进程重起一次才会被 pi 加载。`/stop` 这类动作在 App 侧就是重起 node 子进程。
- */
-@Composable
-fun HostRestartHint(text: String, onRestart: () -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp)
-            .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(10.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-    ) {
-        Icon(
-            Icons.Outlined.Refresh, null,
-            tint = MaterialTheme.colorScheme.tertiary,
-            modifier = Modifier.size(16.dp),
-        )
-        Text(
-            text,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f).padding(start = 8.dp),
-        )
-        PientButton(
-            text = "重启宿主",
-            onClick = onRestart,
-            primary = false,
-            height = 30,
-            modifier = Modifier.padding(start = 8.dp),
-        )
-    }
-}
-
 @Composable
 fun PientButton(
     text: String,
@@ -739,93 +700,6 @@ fun SectionHeader(text: String, modifier: Modifier = Modifier, icon: ImageVector
             color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.SemiBold,
         )
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-// 权限请求弹窗（三选：仅本次允许 / 始终允许 / 拒绝；高危 = 红色破坏变体）
-// ─────────────────────────────────────────────────────────────
-@Composable
-fun PermissionRequestDialog(
-    toolName: String,
-    paramSummary: String,
-    dangerous: Boolean = false,
-    onAllowOnce: () -> Unit,
-    onAlwaysAllow: () -> Unit,
-    onDeny: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val accent = if (dangerous) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.scrim)
-            .clickable(onClick = onDismiss),
-        contentAlignment = Alignment.Center,
-    ) {
-        PientPanel(
-            modifier = Modifier
-                .widthIn(max = 400.dp)
-                .padding(horizontal = 24.dp),
-            shape = MaterialTheme.shapes.medium,
-        ) {
-        Column(
-            modifier = Modifier
-                .padding(20.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(34.dp)
-                        .background(accent.copy(alpha = 0.14f), CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(if (dangerous) "⚠" else "🔧", fontSize = 16.sp)
-                }
-                Column(Modifier.padding(start = 12.dp)) {
-                    Text(
-                        "权限请求",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = if (dangerous) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onBackground,
-                    )
-                    Text(
-                        "工具 $toolName 请求执行权限",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            Text(
-                paramSummary,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = com.pient.app.ui.theme.MonoFont,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp)
-                    .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(8.dp))
-                    .padding(10.dp),
-            )
-            if (dangerous) {
-                Text(
-                    "高危操作：可能修改系统状态，请确认参数无误",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(top = 10.dp),
-                )
-            }
-            Column(Modifier.padding(top = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                PientButton("仅本次允许", onClick = onAllowOnce, modifier = Modifier.fillMaxWidth())
-                PientButton("始终允许（写入例外组）", onClick = onAlwaysAllow, primary = false, modifier = Modifier.fillMaxWidth())
-                PientButton(
-                    "拒绝",
-                    onClick = onDeny,
-                    primary = false,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-        }
     }
 }
 

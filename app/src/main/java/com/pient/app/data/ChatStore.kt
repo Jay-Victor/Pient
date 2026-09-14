@@ -115,7 +115,7 @@ object ChatStore {
                     // （没有物化副本、也没有 ContentResolver 通路）：这里直接跳过，别让它以坏状态出现在列表里。
                     if (!uri.isNullOrEmpty()) {
                         android.util.Log.i(
-                            "PiHost",
+                            "Pient",
                             "跳过遗留的 SAF 项目「${p.optString("name")}」（SAF 支持已移除）",
                         )
                         continue

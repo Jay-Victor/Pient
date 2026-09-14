@@ -17,7 +17,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.BarChart
-import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Info
@@ -25,7 +24,6 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Security
-import com.pient.app.tools.ToolRegistry
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.TouchApp
@@ -33,9 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
@@ -54,9 +50,6 @@ import com.pient.app.ui.components.SettingsRow
  */
 @Composable
 fun SettingsScreen(nav: NavController) {
-    // 工具数（组合期读一次：包装载有缓存，属只读快照）
-    val ctx = LocalContext.current
-    val toolCount = remember { ToolRegistry.specs(ctx).size }
     Column(Modifier.fillMaxSize()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -119,15 +112,8 @@ fun SettingsScreen(nav: NavController) {
                 )
             }
 
-            // ── 分组 3：数据与权限（2026-09-01 新增；三行均为原型占位，后续迭代接入） ──
+            // ── 分组 3：数据与权限（三行均为真实页面） ──
             SettingsGroup("数据与权限", Icons.Outlined.Security) {
-                SettingsRow(
-                    icon = Icons.Outlined.Build,
-                    title = "工具",
-                    subtitle = "$toolCount 个工具 · 层 · 包 · 调用策略",
-                    onClick = { nav.navigate("tools") },
-                )
-                DividerLine()
                 SettingsRow(
                     icon = Icons.Outlined.AdminPanelSettings,
                     title = "系统权限设置",

@@ -405,39 +405,31 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                 }
             }
 
-            // ── ②b 模型能力（2026-09-14 照 Operit 全量对齐：ToolCall + 三个媒体 direct-processing 开关）──
-            // ToolCall = 请求怎么发（原生工具调用 / 软件内标记调用）；
-            // 媒体三开关 = 该类型媒体直发还是「摘链接换占位」（关掉不拦消息，模型可用工具去读）。
+            // ── ②b 模型能力（2026-09-14 照 Operit 对齐：三个媒体 direct-processing 开关；
+            //     工具能力已整体移除，原 ToolCall 开关随之下线）──
+            // 媒体三开关 = 该类型媒体直发还是「摘链接换占位」（关掉不拦消息）。
             if (provider != null && cfg != null) {
                 item {
                     Column {
                         SectionHeader("模型能力", icon = Icons.Outlined.Extension)
                         ConfigCard {
                             ParamBlock(
-                                label = "模型支持ToolCall",
-                                hint = "关闭时，会使用软件内工具调用机制，也可以完成工具调用。" +
-                                    "开启后，将会使用API的专用接口进行原生工具调用（需要模型支持）",
-                                enabled = cfg.toolCallEnabled,
-                                onToggle = { updateConfig { it.copy(toolCallEnabled = !it.toolCallEnabled) } },
-                            )
-                            DividerLine()
-                            ParamBlock(
                                 label = "模型支持识图",
-                                hint = "启用后，图片将直接发送给AI处理，而不是让AI用工具（read / bash）去读",
+                                hint = "启用后，图片将直接发送给AI处理；关闭时仅发送一行省略占位",
                                 enabled = cfg.imageDirectEnabled,
                                 onToggle = { updateConfig { it.copy(imageDirectEnabled = !it.imageDirectEnabled) } },
                             )
                             DividerLine()
                             ParamBlock(
                                 label = "模型支持音频解析",
-                                hint = "启用后，音频将直接发送给AI处理，而不是让AI用工具自行转写 / 描述",
+                                hint = "启用后，音频将直接发送给AI处理；关闭时仅发送一行省略占位",
                                 enabled = cfg.audioDirectEnabled,
                                 onToggle = { updateConfig { it.copy(audioDirectEnabled = !it.audioDirectEnabled) } },
                             )
                             DividerLine()
                             ParamBlock(
                                 label = "模型支持视频解析",
-                                hint = "启用后，视频将直接发送给AI处理，而不是让AI用工具（bash + ffmpeg）抽帧 / 分析",
+                                hint = "启用后，视频将直接发送给AI处理；关闭时仅发送一行省略占位",
                                 enabled = cfg.videoDirectEnabled,
                                 onToggle = { updateConfig { it.copy(videoDirectEnabled = !it.videoDirectEnabled) } },
                             )
@@ -475,11 +467,9 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 placeholder = "64",
                             )
                             DividerLine()
-                            // ── 3.3~3.5 上下文压缩（**2026-09-14 改为 pi 原生口径**）──
-                            // pi 的触发条件 = contextTokens > contextWindow − reserveTokens；
-                            // 三个旋钮写进 ~/.pi/agent/settings.json 的 compaction 块
-                            // （PiConfig.syncSettings 合并写 → 宿主启动即按它判定），enabled 另有
-                            // 官方 RPC set_auto_compaction 即时切换。App 不判定触发、不生成摘要。
+                            // ── 3.3~3.5 上下文压缩（内核自实现，pi 口径）──
+                            // 触发条件 = 估算 tokens > 上下文窗口 − reserveTokens；三个旋钮直接由
+                            // 内核读取（见 data/Compaction.kt）。
                             ParamBlock(
                                 label = "自动压缩上下文",
                                 hint = "上下文接近上限时由 pi 自动摘要旧内容（关闭后仍可在用量卡手动压缩）",

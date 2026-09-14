@@ -1,29 +1,24 @@
 package com.pient.app.data
 
 /**
- * 上下文管理策略（**2026-09-14 改为 pi 原生口径**；此前的 Operit 总结式管线已移除）。
+ * 上下文管理策略（**内核自实现，采用 pi 的压缩口径**）。
  *
- * 依据 = pi 自己的机制（`Refences/pi-0.85.1/packages/coding-agent/docs/compaction.md`）：
+ * 口径参照 pi 的压缩机制（`Refences/pi-0.85.1/packages/coding-agent/docs/compaction.md`），
+ * 具体实现在 [Compaction]：
  *
- * | 轴 | pi 原生 | Pient 的位置 |
+ * | 轴 | pi 口径 | Pient 的位置 |
  * | --- | --- | --- |
- * | 触发 | `contextTokens > contextWindow − reserveTokens`（默认 16384） | **不由 App 判定**：pi 在 agent 循环里自己查阈值，另支持手动 `compact` |
- * | 切片 | 从最新往回累计到 `keepRecentTokens`（默认 20000）处切，切点写 `firstKeptEntryId` | **不由 App 切片**：pi 用摘要 + `firstKeptEntryId` 之后的消息重建上下文 |
- * | 摘要 | pi 的结构化 checkpoint（Goal / Constraints / Progress / Key Decisions / Next Steps / Critical Context）+ `<read-files>` / `<modified-files>` | 摘要文本原样进卡展示，**App 不再自己生成摘要** |
- * | 配置 | `~/.pi/agent/settings.json` 的 `compaction: {enabled, reserveTokens, keepRecentTokens}` | 配置页三旋钮 → [PiConfig.syncSettings] 合并写；`enabled` 另经官方 RPC `set_auto_compaction` 即时生效 |
- * | 手动 | `/compact [instructions]`（命令行） | **Android 没有命令行** → 上下文用量卡里的「压缩上下文」动作（RPC `compact{customInstructions}`） |
- * | 事件 | `compaction_start/end`（`reason` = manual / threshold / overflow） | 直接落成聊天页的压缩卡（含原因），不再由 App 造条目 |
+ * | 触发 | `contextTokens > contextWindow − reserveTokens`（默认 16384） | [Compaction.shouldCompact]：发送前估算，逼近上限才动手 |
+ * | 切片 | 从最新往回累计到 `keepRecentTokens`（默认 20000）处切 | [Compaction.prefixToSummarize]：切点之前进摘要、之后原样保留 |
+ * | 摘要 | 结构化 checkpoint（Goal / Constraints / Progress / Key Decisions / Next Steps / Critical Context） | [Compaction.CHECKPOINT_PROMPT] 生成，原文落成压缩卡展示 |
+ * | 配置 | `compaction: {enabled, reserveTokens, keepRecentTokens}` | 配置页三旋钮由内核直接读取（App 判定触发） |
+ * | 手动 | `/compact [instructions]`（命令行） | **Android 没有命令行** → 上下文用量卡里的「压缩上下文」动作 |
  *
- * 为什么删掉 Operit 那套（0.70 占比阈值 / 16 条阈值 / Operit 摘要提示词 / App 侧生成摘要）：
- * ① pi 的上下文是"会话对象内的原生机制"，App 侧再造一套必然会与 pi 的切点/格式打架（两套真相）；
- * ② 那套阈值属于 Operit 的产品形态，与 pi 的 `contextWindow − reserveTokens` 不是同一个口径，
- *    同时存在时用户看到的"何时压缩"取决于谁先命中，不可解释；
- * ③ 项目红线①要求 pi 原生机制优先，摘要格式也以 pi 的 checkpoint 为准（用户要别的规则用
- *    [ProviderConfig.compactInstructions]，它进 pi 的 `customInstructions`）。
+ * 历史沿革：Operit 总结式管线（0.70 占比阈值 / 16 条阈值）与宿主时代的 pi 原生
+ * `firstKeptEntryId` 机制都已下线 —— 现在只有这一套内核实现。
  *
- * 保留下来的两部分**不是上下文管理**，而是「直连路径拼请求文本」必须自己做的事
- * （宿主路径由 pi 管会话，用不上）：历史切片入口 [sliceFromLastCompaction]、媒体保留窗口
- * [attachmentWindows] / [promptTextFor]。
+ * 保留下来的两部分**不是上下文管理**，而是「拼请求文本」必须自己做的事：
+ * 历史切片入口 [sliceFromLastCompaction]、媒体保留窗口 [attachmentWindows] / [promptTextFor]。
  */
 object ContextPolicy {
 
@@ -64,19 +59,19 @@ object ContextPolicy {
         else -> "上下文压缩"
     }
 
-    // ─────────── 请求上下文切片（只在没有 pi 的直连路径上用） ───────────
+    // ─────────── 请求上下文切片 ───────────
 
     /**
      * 请求上下文切片：最后一条压缩摘要（**含**）之后的全部条目。
-     * 直连路径没有 pi 管会话，但历史里可能有**宿主时代**留下的压缩条目（`Msg.Compaction`）——
-     * 那条摘要代表 pi 已经不再发送的原文，所以拼请求时必须从它起算，否则等于把摘要又展开一遍。
+     * 历史里可能存在早前留下的压缩条目（`Msg.Compaction`，含宿主时代的记录）——那条摘要代表
+     * 已被压缩掉的原文，所以拼请求时必须从它起算，否则等于把摘要又展开一遍。
      */
     fun sliceFromLastCompaction(messages: List<Msg>): List<Msg> {
         val last = messages.indexOfLast { it is Msg.Compaction }
         return if (last < 0) messages else messages.subList(last, messages.size)
     }
 
-    // ─────────── 历史媒体裁剪（同上：只作用于直连路径的请求文本） ───────────
+    // ─────────── 历史媒体裁剪（只作用于拼请求文本） ───────────
 
     /**
      * 每个用户回合的附件可见性：只有最近 N 个用户回合保留图片/音视频，更早的在请求文本里
@@ -104,7 +99,7 @@ object ContextPolicy {
     }
 
     /**
-     * 用户消息的请求文本：正文 + 附件清单（附件以「名称 · 路径」进请求，pi 的 read 工具据此打开文件），
+     * 用户消息的请求文本：正文 + 附件清单（附件以「名称 · 路径」进请求），
      * 历史回合的媒体按 [window] 替换为占位文案。
      */
     fun promptTextFor(msg: Msg.User, window: Pair<Boolean, Boolean>): String {

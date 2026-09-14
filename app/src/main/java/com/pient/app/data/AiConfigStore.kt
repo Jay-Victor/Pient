@@ -36,19 +36,6 @@ data class ProviderConfig(
      */
     val reasoningFormat: ReasoningFormat = ReasoningFormat.AUTO,
 
-    // ── 模型能力（2026-09-14 参考 Operit 的能力开关；默认值逐值对齐）──
-
-    /**
-     * 模型支持 ToolCall（Operit `DEFAULT_ENABLE_TOOL_CALL = true`）：
-     * 开启 = 用服务商 API 的专用接口做**原生工具调用**（请求带 `tools`，回包解析 `tool_calls`）；
-     * 关闭 = 走**软件内工具调用机制**（工具说明写进系统提示，模型用标记调用，App 解析执行）。
-     * 两条路都落到同一套应用内工具执行器（[AppTools]），关掉不等于没有工具。
-     *
-     * 媒体（图片 / 音频 / 视频）**不做开关、也不直发给模型**：用户发这类附件时直接提示报错
-     * （用户 2026-09-14 口径），要 AI 处理文件就用「@ 引用文件」把路径交给它（有工具时它会自己读）。
-     */
-    val toolCallEnabled: Boolean = true,
-
     // ── 媒体能力（照 Operit 的三个 direct-processing 开关；默认关 = 不直发）──
     //
     // 口径（2026-09-14 用户拍板「照 Operit 全量对齐」）：
@@ -56,7 +43,7 @@ data class ProviderConfig(
     //   视频 `video_url`，Operit `OpenAIProvider.buildContentField` 同形）；
     // - **关** = 不直发，附件行后跟一行 Operit 原文占位「图片内容已省略，当前模型不支持图片处理」
     //   （音视频同款文案），**消息照常发送**——不拦用户（Operit 从不因媒体阻断对话）；
-    //   与 Operit 的差别：Pient 的附件有真实路径，占位旁边仍保留「名称 · 路径」，模型可以自己用工具读。
+    //   与 Operit 的差别：Pient 的附件有真实路径，占位旁边仍保留「名称 · 路径」。
 
     /** 模型支持识图（Operit `enableDirectImageProcessing`，默认 false） */
     val imageDirectEnabled: Boolean = false,
@@ -76,7 +63,7 @@ data class ProviderConfig(
     val reserveTokens: String = ContextPolicy.DEFAULT_RESERVE_TOKENS.toString(),
     /** 手动压缩时交给 pi 的指令（pi `compact` 的 `customInstructions`；留空 = pi 默认 checkpoint 口径） */
     val compactInstructions: String = "",
-    /** 历史中保留图片附件的最近用户回合数（**直连路径拼请求**用；宿主路径由 pi 管会话，不适用） */
+    /** 历史中保留图片附件的最近用户回合数（请求侧附件裁剪用） */
     val maxImageHistoryTurns: String = "2",
     /** 历史中保留音视频附件的最近用户回合数（同上） */
     val maxMediaHistoryTurns: String = "1",
@@ -195,8 +182,7 @@ object AiConfigStore {
                         // 已知服务商一律采用服务商目录里的预设写法，自定义服务商才留在 AUTO
                         ?: ProviderCatalog.byId[id]?.reasoningFormat
                         ?: ReasoningFormat.AUTO,
-                    // 模型能力（2026-09-14）：老配置缺字段 → Operit 默认值（ToolCall 开、媒体三关）
-                    toolCallEnabled = o.optBoolean("toolCallEnabled", true),
+                    // 媒体能力（2026-09-14）：老配置缺字段 → Operit 默认值（三关）
                     imageDirectEnabled = o.optBoolean("imageDirectEnabled", false),
                     audioDirectEnabled = o.optBoolean("audioDirectEnabled", false),
                     videoDirectEnabled = o.optBoolean("videoDirectEnabled", false),
@@ -254,8 +240,7 @@ object AiConfigStore {
                         .put("topPEnabled", c.topPEnabled)
                         .put("topPValue", c.topPValue)
                         .put("reasoningFormat", c.reasoningFormat.name)
-                        // 模型能力（2026-09-14）：ToolCall + 媒体三开关（Operit 同款四字段）
-                        .put("toolCallEnabled", c.toolCallEnabled)
+                        // 媒体能力（2026-09-14）：三个 direct-processing 开关（Operit 同款）
                         .put("imageDirectEnabled", c.imageDirectEnabled)
                         .put("audioDirectEnabled", c.audioDirectEnabled)
                         .put("videoDirectEnabled", c.videoDirectEnabled)

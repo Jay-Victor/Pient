@@ -1,6 +1,6 @@
 package com.pient.app.ui.terminal
 
-import com.pient.app.tools.terminal.TerminalSessions
+import com.pient.app.data.TerminalShell
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -62,7 +62,6 @@ import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
 import com.pient.app.ui.theme.TerminalDark
 import com.pient.app.ui.theme.TerminalLight
-import com.pient.app.runtime.PiRuntime
 import kotlinx.coroutines.launch
 
 /**
@@ -88,23 +87,16 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
     val history = remember { mutableStateListOf<String>() }
     var historyIndex by remember { mutableIntStateOf(-1) }
 
-    // 真实会话引擎：首个会话在首次进入时建立（要起子进程，首帧先渲染空盒）
+    // 界面态会话（占位，2026-09-14）：首个会话在首次进入时建立；命令只回显、不连接任何真实进程
     val context = LocalContext.current
-    LaunchedEffect(Unit) { TerminalSessions.ensure(context) }
-    val session = TerminalSessions.sessions.getOrNull(chatState.terminalIndex) ?: TerminalSessions.sessions.firstOrNull()
+    LaunchedEffect(Unit) { TerminalShell.ensure() }
+    val session = TerminalShell.sessions.getOrNull(chatState.terminalIndex) ?: TerminalShell.sessions.firstOrNull()
 
-    // 首启「环境安装」（对齐 Operit 的 SetupScreen：首启弹一次、可跳过）——rootfs 就绪后弹，
-    // 首启那 1–2 分钟先在后台自动解包，别让用户在还没就绪的界面上做选择。
+    // 首启「环境安装」（对齐 Operit 的 SetupScreen：首启弹一次、可跳过）——执行链路已移除，
+    // 弹窗只保留界面与勾选交互（安装动作不会真正执行）。
     var showEnvSetup by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        if (SettingsStore.envSetupDone) return@LaunchedEffect
-        repeat(240) {
-            if (PiRuntime.rootfsReady(context)) {
-                showEnvSetup = true
-                return@LaunchedEffect
-            }
-            kotlinx.coroutines.delay(1000)
-        }
+        if (!SettingsStore.envSetupDone) showEnvSetup = true
     }
 
     if (session == null) return Box(Modifier.fillMaxSize())
@@ -116,8 +108,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
 
     fun runCommand(cmd: String) {
         if (cmd.isBlank()) return
-        session.lines += TerminalLine("~ \$ $cmd", TerminalLineKind.COMMAND)
-        TerminalSessions.write(session, cmd)
+        TerminalShell.submit(session, cmd)
         history.add(cmd)
         historyIndex = -1
         input = TextFieldValue("")
@@ -142,7 +133,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                         modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        TerminalSessions.sessions.forEachIndexed { i, s ->
+                        TerminalShell.sessions.forEachIndexed { i, s ->
                             val sel = i == chatState.terminalIndex
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -170,7 +161,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                                 // 仅剩一个会话时不可关闭（Operit 同款约束，防空列表）
-                                if (TerminalSessions.sessions.size > 1) {
+                                if (TerminalShell.sessions.size > 1) {
                                     Icon(
                                         Icons.Outlined.Close, "关闭终端会话",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -189,8 +180,8 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                         modifier = Modifier
                             .size(18.dp)
                             .clickable(onClick = {
-                            TerminalSessions.newSession(context)
-                            chatState.terminalIndex = TerminalSessions.sessions.lastIndex
+                            TerminalShell.newSession()
+                            chatState.terminalIndex = TerminalShell.sessions.lastIndex
                         })
                             .padding(2.dp),
                     )
@@ -237,10 +228,10 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                 ) {
                     QuickKey("Ctrl+C", "中断", termColors) {
-                        TerminalSessions.interrupt(context, session)
+                        TerminalShell.interrupt(session)
                     }
                     QuickKey("Ctrl+L", "清屏", termColors) {
-                        session.lines.clear()
+                        TerminalShell.clear(session)
                     }
                     Spacer(Modifier.weight(1f))
                     QuickKey("环境配置", null, termColors, primary = true) {
@@ -368,14 +359,14 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
 
         // ── 会话关闭二次确认（Operit onTabCloseRequest 同款弹窗） ──
         closeConfirmIndex?.let { i ->
-            TerminalSessions.sessions.getOrNull(i)?.let { target ->
+            TerminalShell.sessions.getOrNull(i)?.let { target ->
                 PientDialog(
                     title = "关闭终端会话",
                     onDismiss = { closeConfirmIndex = null },
                     confirmText = "删除",
                     onConfirm = {
-                        TerminalSessions.close(target)
-                        if (chatState.terminalIndex >= TerminalSessions.sessions.size) {
+                        TerminalShell.close(target)
+                        if (chatState.terminalIndex >= TerminalShell.sessions.size) {
                             chatState.terminalIndex = 0
                         }
                         closeConfirmIndex = null

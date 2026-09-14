@@ -26,7 +26,6 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,8 +36,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
-import com.pient.app.data.PluginStore
-import com.pient.app.ui.components.HostRestartHint
+import com.pient.app.data.MockStore
 import com.pient.app.data.PluginItem
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.components.PientDialog
@@ -48,11 +46,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * 插件管理（P6，设计计划第 5 章，pi-web PluginsConfig 参考）：
- * 全局/项目分段（~/.pi/agent/settings.json ↔ .pi/settings.json，pi install -l
- * 语义）；列表 = 名称+来源+开关；FAB 安装弹窗：安装源输入框
- * （npm:/git:/https:/本地路径，兼容 pi install 前缀）+ 官方市场说明。
- * 安装走宿主侧（严禁走 Ubuntu bash 通道）；原型 mock。
+ * 插件管理（**UI 壳**，2026-09-14 用户拍板：插件功能（读 settings.packages / 安装 / 更新 /
+ * 移除）整体移除，保留 UI 设计与交互）：
+ * 全局/项目分段；列表 = 名称+来源+开关（读 [MockStore] 占位数据，只在内存里改）；
+ * FAB 安装弹窗：安装源输入框 + 官方市场说明；安装 / 更新 / 删除只作用于占位数据。
  */
 @Composable
 fun PluginsScreen(nav: NavController) {
@@ -61,8 +58,6 @@ fun PluginsScreen(nav: NavController) {
     var detailFor by remember { mutableStateOf<PluginItem?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // 真实数据：读 ~/.pi/agent/settings.json 与 <workspace>/.pi/settings.json 的 packages
-    LaunchedEffect(Unit) { PluginStore.refresh(context) }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -100,14 +95,8 @@ fun PluginsScreen(nav: NavController) {
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
             )
 
-            // 改了插件配置/装完新包 → 同上：pi 要重启才会重新装配
-            if (PluginStore.needsHostRestart) {
-                HostRestartHint("插件改动已保存（内核装配插件在自研清单 N1 里）") {
-                    PluginStore.markHostRestarted()
-                }
-            }
-
-            val list = if (segment == 0) PluginStore.global else PluginStore.project
+            // 插件列表（占位数据；开关只在内存里改）
+            val list = if (segment == 0) MockStore.globalPlugins else MockStore.projectPlugins
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
@@ -117,26 +106,16 @@ fun PluginsScreen(nav: NavController) {
                 items(list.size, key = { i -> list[i].source }) { i ->
                     PluginRow(list[i], onClick = { detailFor = list[i] })
                 }
-                if (list.isEmpty() && !PluginStore.loading) {
+                if (list.isEmpty()) {
                     item {
                         Text(
                             if (segment == 0)
                                 "还没有配置任何插件。点右下 + 安装（npm: 包 / 本地路径）。"
                             else
-                                "当前项目没有插件。项目插件写在工作区的 .pi/settings.json（pi install -l）。",
+                                "当前项目没有插件。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 8.dp),
-                        )
-                    }
-                }
-                PluginStore.lastError?.let { err ->
-                    item {
-                        Text(
-                            "诊断：$err",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.padding(top = 6.dp),
                         )
                     }
                 }
@@ -162,17 +141,23 @@ fun PluginsScreen(nav: NavController) {
             global = segment == 0,
             onDismiss = { installOpen = false },
             onInstalled = { source ->
-                // 真实安装：跑 pi CLI（`node cli.js install <source>`），输出原样回传
-                scope.launch {
-                    val r = PluginStore.install(context, source, globalScope = segment == 0)
-                    toast(
-                        context,
-                        r.fold(
-                            onSuccess = { "已安装：${parsePluginName(source)}" },
-                            onFailure = { "安装失败：${it.message?.take(120)}" },
+                // 占位安装：往当前分段的列表里加一条（内存态；不跑 pi CLI）
+                val name = parsePluginName(source)
+                val target = if (segment == 0) MockStore.globalPlugins else MockStore.projectPlugins
+                if (target.none { it.source == source }) {
+                    target.add(
+                        0,
+                        PluginItem(
+                            name = name,
+                            source = source,
+                            enabled = true,
+                            global = segment == 0,
+                            desc = "（占位数据）由安装弹窗添加",
+                            version = "1.0.0",
                         ),
                     )
                 }
+                toast(context, "已安装：$name")
                 installOpen = false
             },
         )
@@ -184,25 +169,21 @@ fun PluginsScreen(nav: NavController) {
             item = item,
             onDismiss = { detailFor = null },
             onDelete = {
-                val ok = PluginStore.remove(context, item)
-                toast(context, if (ok) "已移除插件 ${item.name}" else "移除失败：settings.json 不可写")
+                (if (item.global) MockStore.globalPlugins else MockStore.projectPlugins)
+                    .removeAll { it.source == item.source }
+                toast(context, "已移除插件 ${item.name}")
                 detailFor = null
             },
             onUpdate = {
-                // 真实更新：pi CLI `update --extension <source>`
-                scope.launch {
-                    val r = PluginStore.update(context, item)
-                    toast(
-                        context,
-                        r.fold(
-                            onSuccess = { "已更新 ${item.name}" },
-                            onFailure = { "更新失败：${it.message?.take(120)}" },
-                        ),
-                    )
-                    detailFor = PluginStore.global.firstOrNull { it.source == item.source }
-                        ?: PluginStore.project.firstOrNull { it.source == item.source }
-                        ?: item
-                }
+                // 占位更新：把版本对齐到「最新版本」（内存态）
+                val oldList = if (item.global) MockStore.globalPlugins else MockStore.projectPlugins
+                val idx = oldList.indexOfFirst { it.source == item.source }
+                val updated = if (idx >= 0) {
+                    oldList[idx] = oldList[idx].copy(version = oldList[idx].latestVersion ?: oldList[idx].version)
+                    oldList[idx]
+                } else item
+                toast(context, "已更新 ${item.name}")
+                detailFor = updated
             },
         )
     }
@@ -339,7 +320,7 @@ private fun InstallPluginDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    "安装目标：${if (global) "全局" else "项目"}（宿主侧执行，不走 Ubuntu bash 通道）",
+                    "安装目标：${if (global) "全局" else "项目"}（当前版本为界面演示，不会真正安装）",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp),

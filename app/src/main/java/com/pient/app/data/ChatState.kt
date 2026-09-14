@@ -2,12 +2,6 @@ package com.pient.app.data
 
 import com.pient.app.AppCtx
 
-import com.pient.app.tools.PendingPermission
-import com.pient.app.tools.ToolCall
-import com.pient.app.tools.ToolDispatcher
-import com.pient.app.tools.ToolGate
-import com.pient.app.tools.ToolOutcome
-import com.pient.app.tools.ToolRegistry
 import android.content.Context
 import android.util.Log
 import androidx.compose.runtime.getValue
@@ -19,9 +13,6 @@ import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
-import com.pient.app.runtime.PiAgentEvent
-import com.pient.app.runtime.PiRuntime
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -52,7 +43,7 @@ private const val WINDOW_MIN_MESSAGES = 6
 /** 剩余更早内容估算不足这么多屏时直接全显（按钮不出现，避免「点一下没变化」） */
 private const val WINDOW_TAIL_SCREENS = 0.5f
 
-/** 单个工具结果进入对话历史时的字符上限（同轮回灌用 6000，历史里按「够模型接着推理」收窄） */
+/** 旧会话里的单个工具结果进入对话历史时的字符上限（按「够模型接着推理」收窄） */
 private const val TOOL_HISTORY_CHARS = 2000
 
 /**
@@ -95,8 +86,8 @@ fun estimatedMessageHeightDp(msg: Msg): Float = when (msg) {
 class ChatState {
 
     private companion object {
-        /** 日志 tag（上下文总结/压缩的取证日志与运行时同用 PiHost，便于 logcat 一条命令过滤） */
-        const val TAG = "PiHost"
+        /** 日志 tag（上下文压缩等取证日志，便于 logcat 一条命令过滤） */
+        const val TAG = "Pient"
     }
 
     // ── 会话 ──────────────────────────────────────────────
@@ -320,7 +311,6 @@ class ChatState {
         messagesBySession.remove(id)
         entriesBySession.remove(id)
         leafBySession.remove(id)
-        forgetPiSession(id)
         if (currentSessionId == id) currentSessionId = sessionsFor(proj).firstOrNull()?.id
         // 删除最后一个会话后自动新建（2026-09-09 用户定：侧边栏会话列表恒有会话）
         if (sessionsFor(proj).isEmpty()) newSession()
@@ -334,18 +324,9 @@ class ChatState {
         messagesBySession.remove(id)
         entriesBySession.remove(id)
         leafBySession.remove(id)
-        forgetPiSession(id)
         if (currentSessionId == id) {
             currentSessionId = sessionsFor(currentProject ?: "").firstOrNull()?.id
         }
-    }
-
-    /**
-     * 会话删除：宿主已冻结（2026-09-14），pi 侧不再有映射项与会话文件需要清理。
-     * 走 IO 线程、失败只记日志 —— 删除动作本身不等任何外部进程回答（UI 立即反馈）。
-     */
-    private fun forgetPiSession(id: String) {
-        val ctx = AppCtx.get() ?: return
     }
 
     /** 置顶/取消置顶会话 */
@@ -417,7 +398,6 @@ class ChatState {
             messagesBySession.remove(s.id)
             entriesBySession.remove(s.id)
             leafBySession.remove(s.id)
-            forgetPiSession(s.id)   // 项目连带的会话一并清理 pi 侧（2026-09-13）
         }
         if (currentProject == name) {
             currentProject = projects.firstOrNull()?.name
@@ -450,15 +430,6 @@ class ChatState {
     var liveThinkingIndex by mutableStateOf(-1)
     var streamJob: Job? = null
 
-    /** 待回答的工具授权询问（权限守门扩展经扩展 UI 子协议抛上来的；null = 无） */
-    var pendingPermission by mutableStateOf<PendingPermission?>(null)
-
-    /**
-     * 直连路径（应用内工具）的授权询问回执通道：宿主路径走 RPC 的 `extension_ui_request`，
-     * 应用内没有 RPC，用这个 deferred 承接**同一个对话框**的答案（[pendingPermission] 也是同一个状态）。
-     */
-    private var inAppAsk: CompletableDeferred<String>? = null
-
     /**
      * 发送消息并请求 AI 回复：历史重建 = 当前会话的 User/Assistant（跳过错误消息与
      * 思考/工具条目），system prompt 走 ChatState.systemPrompt；思考级别/流式开关/
@@ -469,10 +440,9 @@ class ChatState {
         streamDraft = ""
         streamThinking = ""
         streamThinkingStartedAt = 0L
-        hostThinkingFlushed = false   // 落库标记按轮复位（上一轮中止/重新生成留下的标记不得吞掉本轮思考）
         // ★ 历史快照必须先于消息上屏：buildApiHistory 读 currentMessages，
         //   上屏后再取会把本条用户消息算进历史、又被末尾显式追加一次 = 重复（2026-09-09 修复）
-        // 内核自实现的自动压缩（宿主冻结后取代 pi 原生 compaction）：逼近上限时先把老消息压成摘要卡，
+        // 内核自实现的自动压缩（2026-09-14 取代随宿主冻结的 pi 原生 compaction）：逼近上限时先把老消息压成摘要卡，
         // 这样紧接着构建的 history 就是压缩后的形态。失败只记日志，绝不阻断发送。
         selectedModel?.provider?.let { AiConfigStore.configs[it] }?.let { c ->
             runCatching { maybeAutoCompact(c) }
@@ -505,10 +475,8 @@ class ChatState {
             ?: cfg.models.firstOrNull().orEmpty()
 
         // 引用消息：正文以 markdown 块引用注入（Quote.toPrompt；UI 仍只显示用户正文）
-        // 宿主已冻结（2026-09-14）：不再有「把会话切到 pi 侧」这回事
-        // 宿主已冻结（2026-09-14）：不再需要把会话切到 pi 侧，也不再下发宿主压缩设置
         // 本轮用户消息的请求文本：附件以「名称 · 路径」附在正文后（本条是最新回合，媒体恒保留）；
-        // 宿主路径只发这一条文本，直连路径的整段历史同样由它拼。
+        // 该条文本随后与历史一起拼成整段请求。
         // 附件直发（2026-09-14 照 Operit 的三个媒体开关）：开启的类别把文件本体转成内容部件随请求发出，
         // 已直发的附件不再重复列路径（Operit 的「移除链接」）；关闭的类别**不拦消息**，
         // 只追加一行 Operit 原文占位（「图片内容已省略，当前模型不支持图片处理」）。
@@ -535,17 +503,13 @@ class ChatState {
                 history = trimmedHistory,
                 onDelta = { draft -> streamDraft = draft },
                 onThinking = { noteThinkingDelta(it) },
-                onTool = ::handleToolEvent,
                 media = inline.parts,
             )
             // 思考先于回答落库：条目顺序 = [思考, 回答]，列表层把思考并入紧随其后的回答卡
-            if (hostThinkingFlushed) hostThinkingFlushed = false else appendThinkingEntry(outcome)
+            appendThinkingEntry(outcome)
             appendEntry(Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
             // 用量台账（用量页数据源）：完成即记一笔（usage 为空 = 服务商未返回用量，不记）
             UsageStore.record(cfg.providerId, effectiveModel, outcome.usage)
-            // 压缩设置跟随配置页（pi 原生：App 不判定触发，只把 enabled 下发给宿主）
-            runCatching { syncCompactionSettings(cfg) }
-                .onFailure { Log.w(TAG, "压缩设置下发异常：${it.message}") }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e // abort：保留 abort() 对 draft 的处理
         } catch (e: Exception) {
@@ -589,17 +553,11 @@ class ChatState {
         val effectiveModel = model.name.takeIf { cfg.models.contains(it) }
             ?: cfg.models.firstOrNull().orEmpty()
 
-        // 宿主在跑：与发送路径同一口径——先把宿主切到本会话对应的 pi 会话。
-        // 宿主不会随抽屉切会话自动跟随（ensure 只在发消息时调），应用重启后宿主也是新会话，
-        // 少了这一步「重新生成」会打到别的会话上下文上
-        // 宿主已冻结（2026-09-14）：不再需要把会话切到 pi 侧，也不再下发宿主压缩设置
         isStreaming = true
         streamDraft = ""
         streamThinking = ""
         streamThinkingStartedAt = 0L
-        hostThinkingFlushed = false   // 同上：重新生成也按轮复位
-        // 本轮宿主事件产生的条目（思考/工具卡/结果）一律插到目标回答**之前**：
-        // 目标回答就在末位，按追加语义写会让工具轮渲染到回答之后（2026-09-12 修）
+        // 本轮思考条目一律插到目标回答**之前**：目标回答就在末位，按追加语义写会渲染到回答之后
         runInsertAt = index
         markRunning(true)
         return try {
@@ -611,16 +569,12 @@ class ChatState {
                     replaceMessageAt(at, Msg.Assistant(draft, null, effectiveModel))
                 },
                 onThinking = { noteThinkingDelta(it) },
-                onTool = ::handleToolEvent,
             )
             // 思考条目与回答同位替换（游标 = 目标回答当前位置）：前面已有思考 → 原位替换；没有则插入
             val target = upsertThinkingBefore(runInsertAt ?: index, outcome)
             replaceMessageAt(target, Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
             // 重新生成同样计入用量台账（一次真实请求 = 一笔用量）
             UsageStore.record(cfg.providerId, effectiveModel, outcome.usage)
-            // 与发送路径同口径：重新生成同样把压缩设置同步给宿主（App 不判定触发）
-            runCatching { syncCompactionSettings(cfg) }
-                .onFailure { Log.w(TAG, "压缩设置下发异常：${it.message}") }
             null
         } catch (e: kotlinx.coroutines.CancellationException) {
             replaceMessageAt(runInsertAt ?: index, original)   // 中止：恢复原内容
@@ -641,62 +595,25 @@ class ChatState {
     /**
      * 单次对话请求（流式 / 非流式共用一条路径，2026-09-11 抽出供发送与重新生成复用）：
      * 流式逐片回调 onDelta/onThinking，返回完整文本、usage 与思考文本。
+     *
+     * 2026-09-14 用户拍板：工具能力整体移除 —— 不再下发 `tools`、不再解析/执行工具调用、
+     * 不再有文本标记（DSML）兜底，这里就是一次普通的文本请求。
      */
     private suspend fun runChat(
         cfg: ProviderConfig,
         history: List<Pair<String, String>>,
         onDelta: (String) -> Unit,
         onThinking: (String) -> Unit = {},
-        onTool: (PiAgentEvent) -> Unit = {},
         /** 本回合要直发的附件部件（媒体能力开关；只作用于最新一条用户消息） */
         media: List<WirePart> = emptyList(),
     ): ChatOutcome {
         // 思考模式的总开关：null = 不给服务商发思考参数、且**服务商自带的推理内容一律不展示不落库**
         // （DeepSeek-R1 / GLM / Kimi 思考系列不靠 reasoning_effort 也会回 reasoning_content，
-        //   开关关着却把推理显示出来＝越权；2026-09-12 用户报「关了思考模式，流式期间仍显示思考内容、
+        //   开关关着却把推理显示出来＝越权；2026-09-12 用户报「关了思考模式、流式期间仍显示思考内容、
         //   回答完又消失」即此处漏门控——流式分支当时漏了判 `thinking != null`，只落了「不落库」）。
         val thinking = if (thinkingEnabled) thinkingLevel else null
-        // **唯一路径**（2026-09-14 决策：内核自研、宿主冻结）：没有「宿主 / 直连」两条路了——
-        // 对话与工具都在 Pient 自己的内核里，工具经 [ToolDispatcher] 落到四层执行体。
-        return runDirectChat(cfg, history, thinking, onDelta, onThinking, onTool, media)
-    }
-
-    /**
-     * 直连路径的一轮对话（**含工具循环**）：请求 → 解析工具调用（原生 `tool_calls` / 文本标记）→
-     * 应用内执行（[AppTools]）→ 结果回灌 → 再请求，直到模型给出最终回答（上限 [ToolDispatcher.MAX_ROUNDS] 轮）。
-     *
-     * 工具卡与思考块走**与宿主路径同一套事件**（[PiAgentEvent.ToolStart]/[ToolEnd] → [handleToolEvent]），
-     * 所以直连与宿主在聊天页的渲染完全一致（同一张工具卡、同一段 diff）。
-     *
-     * 两个兜底（都在文本标记这一路）：
-     * - 开关关：Operit 口径的「软件内工具调用机制」——工具说明进系统提示，模型用 `<tool_call>` 调用；
-     * - 开关开：DeepSeek 系模型可能把 DSML 标记漏进正文（上游已知问题），照样认回来执行，
-     *   正文只留模型真正说的话（用户不再看到「回答里直接输出命令」）。
-     */
-    private suspend fun runDirectChat(
-        cfg: ProviderConfig,
-        history: List<Pair<String, String>>,
-        thinking: ThinkingLevel?,
-        onDelta: (String) -> Unit,
-        onThinking: (String) -> Unit,
-        onTool: (PiAgentEvent) -> Unit,
-        media: List<WirePart>,
-    ): ChatOutcome {
-        val ctx = AppCtx.get()
-        val nativeTools = cfg.toolCallEnabled && ctx != null
-        // 工具声明来自工具包（[ToolRegistry.specs]），需要 context 才能装载包
-        val toolsJson = if (!nativeTools) null else ctx?.let { c ->
-            if (AiBackend.isAnthropicProtocol(cfg.endpoint)) ToolRegistry.anthropicDefinitions(c)
-            else ToolRegistry.definitions(c)
-        }
-        val prompt = Prompts.systemPrompt(
-            workspace = ctx?.let { PiRuntime.workspaceDir(it).absolutePath }.orEmpty(),
-            nativeTools = nativeTools,
-            // 技能装配（与 pi 同口径）：提示词里只给 name/description/location，正文由模型按需 read
-            skillsBlock = ctx?.let { Skills.promptBlock(Skills.enabled(it)) },
-            toolCatalog = ctx?.let { ToolRegistry.specs(it) }.orEmpty(),
-        )
-        systemPrompt = prompt   // 面板显示真实下发内容（含技能段）
+        val prompt = Prompts.systemPrompt()
+        systemPrompt = prompt   // 面板显示真实下发内容
         val turns = ArrayList<ChatTurn>(history.size)
         history.forEachIndexed { i, (role, content) ->
             if (i == history.lastIndex && role == "user" && media.isNotEmpty()) {
@@ -706,128 +623,47 @@ class ChatState {
             }
         }
 
-        var inTok = 0
-        var outTok = 0
-        var cacheTok = 0
-        var cacheWriteTok = 0
-        var lastText = ""
-        for (round in 0 until ToolDispatcher.MAX_ROUNDS) {
-            val roundText = StringBuilder()
-            val roundThinking = StringBuilder()
-            val nativeCalls = ArrayList<ToolCall>()
-            var usage: Usage? = null
-            if (!streamingOutputEnabled) {
-                val res = AiBackend.chat(cfg, prompt, turns, thinking, toolsJson)
-                roundText.append(res.text)
-                nativeCalls.addAll(res.toolCalls)
-                usage = res.usage
-                if (thinking != null) {
-                    res.thinking?.takeIf { it.isNotBlank() }?.let { onThinking(it) }
-                }
-            } else {
-                AiBackend.chatStream(cfg, prompt, turns, thinking, toolsJson).collect { ev ->
-                    when (ev) {
-                        is ChatEvent.TextDelta -> {
-                            roundText.append(ev.text)
-                            // 标记可能正在流进来 —— 只把标记之前的正文交给界面（整轮结束再定性）
-                            onDelta(ToolMarkup.safeStreamText(roundText.toString()))
-                        }
-                        is ChatEvent.ThinkingDelta -> if (thinking != null) {
-                            roundThinking.append(ev.text)
-                            onThinking(roundThinking.toString())
-                        }
-                        is ChatEvent.UsageEvent -> usage = ev.usage
-                        is ChatEvent.ToolCallsEvent -> nativeCalls.addAll(ev.calls)
-                        is ChatEvent.Failed -> throw AiException(ev.message)
-                        ChatEvent.Done -> Unit
+        val roundText = StringBuilder()
+        val roundThinking = StringBuilder()
+        var usage: Usage? = null
+        if (!streamingOutputEnabled) {
+            val res = AiBackend.chat(cfg, prompt, turns, thinking)
+            roundText.append(res.text)
+            usage = res.usage
+            if (thinking != null) {
+                res.thinking?.takeIf { it.isNotBlank() }?.let { onThinking(it) }
+            }
+        } else {
+            AiBackend.chatStream(cfg, prompt, turns, thinking).collect { ev ->
+                when (ev) {
+                    is ChatEvent.TextDelta -> {
+                        roundText.append(ev.text)
+                        onDelta(roundText.toString())
                     }
+                    is ChatEvent.ThinkingDelta -> if (thinking != null) {
+                        roundThinking.append(ev.text)
+                        onThinking(roundThinking.toString())
+                    }
+                    is ChatEvent.UsageEvent -> usage = ev.usage
+                    is ChatEvent.Failed -> throw AiException(ev.message)
+                    ChatEvent.Done -> Unit
                 }
             }
-            usage?.let {
-                inTok += it.inTokens
-                outTok += it.outTokens
-                cacheTok += it.cacheTokens
-                cacheWriteTok += it.cacheWriteTokens
-                // 上下文占用取**本轮**用量（最后一轮即当前上下文实际占用）
-                updateContextPercent(it, cfg)
-            }
-
-            // 文本形态的工具调用：原生调用优先；没有原生调用时看正文里有没有标记（DSML 泄漏兜底）
-            val (cleanText, textCalls) = ToolMarkup.extractTextCalls(roundText.toString())
-            val markupMode = nativeCalls.isEmpty() && textCalls.isNotEmpty()
-            val calls = if (nativeCalls.isNotEmpty()) nativeCalls else textCalls
-            val answer = if (nativeCalls.isNotEmpty()) roundText.toString() else cleanText
-            if (calls.isEmpty()) {
-                lastText = answer.trim()
-                if (answer.isNotEmpty()) onDelta(answer)
-                break
-            }
-
-            // 有工具调用：思考块先落库（顺序 = 思考 → 前置说明 → 工具卡 → 结果），
-            // 模型在调用工具前说的话（pi 同形态）单独落一条助手消息
-            flushStreamingThinking()
-            if (answer.isNotBlank()) appendEntry(Msg.Assistant(answer.trim()))
-            val results = ArrayList<String>()
-            val resultPairs = ArrayList<Pair<String, String>>()
-            for (c in calls) {
-                // 授权策略（与宿主路径同一份 pient_gate.json：read/grep/find/ls 默认 ALLOW，write/edit/bash 默认 ASK）
-                onTool(PiAgentEvent.ToolStart(c.id, c.name, c.arguments))
-                // 执行与授权都交调度器（唯一入口：层路由 → 就绪检查 → 门 → 执行）
-                val outcome = if (ctx == null) {
-                    ToolOutcome.err("工具不可用：应用上下文缺失")
-                } else {
-                    ToolDispatcher.dispatch(ctx, c) { call -> askInAppPermission(ctx, call.name, call.arguments) }
-                }
-                onTool(
-                    PiAgentEvent.ToolEnd(c.id, c.name, outcome.output, outcome.isError, outcome.diff),
-                )
-                results.add("[${c.name}] ${outcome.output.take(6000)}")
-                resultPairs += c.name to outcome.output.take(6000)
-            }
-            // 结果回灌：原生调用带回协议消息；文本标记调用用「助手原文 + 用户侧结果」继续
-            // （文本形态走 [toolResultsBlock]，与下面历史重建共用同一份文案）
-            if (markupMode) {
-                turns.add(ChatTurn.Text("assistant", roundText.toString()))
-                turns.add(ChatTurn.Text("user", toolResultsBlock(resultPairs)))
-            } else {
-                turns.add(ChatTurn.AssistantCalls(roundText.toString().trim(), calls))
-                for ((i, c) in calls.withIndex()) {
-                    turns.add(ChatTurn.ToolOutput(c.id, c.name, results.getOrElse(i) { "" }))
-                }
-            }
-            onDelta("")   // 前置说明已落库，清掉流式草稿（下一轮的正文重新积累）
-            streamDraft = ""
         }
-        // 轮数用尽（模型一直在调工具）时把已有内容交出去，不当失败
-        val usageTotal = Usage(inTok, outTok, cacheTok, 0.0, cacheWriteTok)
-        val text = if (lastText.isNotBlank()) lastText else streamDraft.trim().ifBlank { "（已达单轮工具调用上限 ${ToolDispatcher.MAX_ROUNDS} 轮）" }
-        return ChatOutcome(text, usageTotal.takeIf { it.inTokens + it.outTokens > 0 }, streamThinking)
+        usage?.let { updateContextPercent(it, cfg) }
+
+        val text = roundText.toString().trim()
+        if (text.isNotEmpty()) onDelta(text)
+        return ChatOutcome(text, usage?.takeIf { it.inTokens + it.outTokens > 0 }, streamThinking)
     }
 
-    /**
-     * 直连路径的授权询问（**与宿主路径同一个门**：策略判定已上移到 [ToolDispatcher]，
-     * 走到这里只剩 `ASK` 这一种情况）——弹**同一个**授权对话框并挂起等待回执。
-     * 宿主路径的询问来自守门扩展的 `extension_ui_request`，应用内没有 RPC，故用 [inAppAsk] 承接答案。
-     */
-    private suspend fun askInAppPermission(ctx: Context, name: String, args: String): Boolean {
-        val d = CompletableDeferred<String>()
-        inAppAsk = d
-        pendingPermission = PendingPermission(
-            id = "app:" + System.currentTimeMillis(),
-            toolName = name,
-            argsSummary = args.take(400),
-            dangerous = ToolGate.isDangerous(name, args),
-        )
-        val answer = d.await()
-        return answer == ToolGate.OPT_ONCE || answer == ToolGate.OPT_ALWAYS
-    }
 
     /** 单次请求结果：正文 + usage + 思考文本（思考模式关闭时为空串） */
     private data class ChatOutcome(val text: String, val usage: Usage?, val thinking: String)
 
     /**
      * 上下文占用百分比：本轮用量（输入 + 缓存读/写 + 输出）÷ 配置的上下文长度。
-     * 数据源从宿主 pi 的 usage 来（不再用占位值）；配置里长度缺失/为 0 时不改。
+     * 数据源 = 服务商返回的 usage 真值；配置里长度缺失/为 0 时不改。
      */
     private fun updateContextPercent(usage: Usage, cfg: ProviderConfig) {
         val limitK = cfg.ctxLenK.trim().toIntOrNull() ?: return
@@ -838,32 +674,16 @@ class ChatState {
         contextPercent = (used * 100f / (limitK * 1000f)).coerceIn(0f, 100f)
     }
 
-    // ─────────── 上下文压缩（**2026-09-14 改为 pi 原生口径**） ───────────
+    // ─────────── 上下文压缩（**内核自实现，pi 口径**：阈值触发 / keepRecentTokens 切点） ───────────
 
     /**
-     * 把配置页的压缩设置同步给宿主（pi 原生 `compaction`）：
-     * - `enabled` 走官方 RPC `set_auto_compaction`（即时生效；pi 自己也会把它持久化进 settings.json）；
-     * - `keepRecentTokens` / `reserveTokens` 随 [PiConfig.syncSettings] 写进 settings.json
-     *   （pi 读的是文件，改动在宿主下次启动时生效 —— 这两项是"下次压缩的切点/触发线"，不需要热改）。
-     *
-     * **触发与切点都不由 App 判定**：pi 在 agent 循环里自己查
-     * `contextTokens > contextWindow − reserveTokens`，切点按 `keepRecentTokens` 反向累计。
-     * App 只做两件事：把设置摆对、把 `compaction_start/end` 事件落成压缩卡。
-     */
-    private suspend fun syncCompactionSettings(cfg: ProviderConfig) {
-        // **宿主冻结后为空操作**（2026-09-14）：压缩口径改为内核自实现（见
-        // Docx/Pient 工具层设计.md「内核自研」N1），落地前不做任何压缩。
-    }
-
-    /**
-     * 手动压缩上下文（pi 官方 RPC `compact`，等价于桌面端的 `/compact [instructions]`）。
+     * 手动压缩上下文（参照 pi 桌面端的 `/compact`，移动端等价入口）。
      *
      * 为什么 Pient 需要它：**Android 上没有命令行入口**，而 pi 的手动压缩是 `/compact` 命令 ——
      * 移动端的等价入口 = 上下文用量卡里的「压缩上下文」动作（用户看得见"什么时候能压、压了什么"）。
      *
-     * 结果有两条回执：RPC 回执（`summary` / `tokensBefore` / `estimatedTokensAfter`）与
-     * `compaction_end` 事件 —— 按「摘要 + tokensBefore」去重（见 [appendCompactionEntry]），
-     * 所以这里落库与事件落库不会出现两张卡。返回 false = 宿主没跑 / 会话太小 / 失败（调用方提示）。
+     * 结果只有一条回执（内核自实现）：摘要 + 前后 token 估值直接落一张压缩卡。
+     * 返回 null = 成功；非空 = 如实回报的原因（没有可用模型 / 没什么可压 / 摘要为空 / 上一次还在跑）。
      */
     suspend fun compactNow(): String? {
         val cfg = selectedModel?.provider?.let { AiConfigStore.configs[it] }
@@ -914,8 +734,7 @@ class ChatState {
     }
 
     /**
-     * 压缩条目落库（宿主 RPC 回执与 `compaction_end` 事件是同一次压缩的两个信号 →
-     * 按「摘要文本 + tokensBefore」去重，避免重复落卡）。
+     * 压缩条目落库。按「摘要文本 + tokensBefore」去重 —— 同一结果重复落库时不叠卡。
      */
     private fun appendCompactionEntry(
         summary: String,
@@ -937,121 +756,10 @@ class ChatState {
         Log.i(TAG, "上下文已压缩（${reason ?: "来源未知"}）：前 $tokensBefore → 估 $estimatedAfter（摘要 ${summary.length} 字）")
     }
 
-    /**
-     * 回答工具授权询问。**必须回一个结果**——宿主那边（权限守门扩展的 `tool_call` 钩子）正阻塞
-     * 等待，只有扩展里设的超时（5 分钟）才会自动按拒绝处理。
-     * 「始终允许」= 写一条该工具的 ALLOW 例外（策略文件 App 侧唯一写者）；
-     * 「拒绝」只作用于本次调用——要彻底不允许该工具，用工具卡授权按钮/权限中心设 FORBID。
-     */
-    fun answerPermission(allowOnce: Boolean = false, always: Boolean = false, deny: Boolean = false) {
-        val ask = pendingPermission ?: return
-        pendingPermission = null
-        val ctx = AppCtx.get()
-        // 直连路径：回执交给等待中的协程（不走 RPC）
-        inAppAsk?.let { d ->
-            if (always && ctx != null) ToolGate.setToolPolicy(ctx, ask.toolName, ToolGate.ALLOW)
-            inAppAsk = null
-            d.complete(
-                when {
-                    always -> ToolGate.OPT_ALWAYS
-                    deny -> ToolGate.OPT_DENY
-                    allowOnce -> ToolGate.OPT_ONCE
-                    else -> ""   // 取消
-                },
-            )
-            return
-        }
-        // 宿主已冻结：授权询问只有应用内一条路径（上面的 inAppAsk），不再有扩展 UI 回执
-    }
-
-    /** 手动设某工具的策略（工具卡授权按钮 / 后续权限中心；值取 ToolGate.ALLOW|ASK|FORBID） */
-    fun setToolPolicy(tool: String, policy: String) {
-        AppCtx.get()?.let { ToolGate.setToolPolicy(it, tool, policy) }
-    }
-
-    /**
-     * 宿主工具事件落库（2026-09-12 宿主驱动对话）：ToolStart → 追加 RUNNING 工具卡；
-     * ToolEnd → 把最近一条 RUNNING 工具卡原位改成终态，并补一条结果条目
-     * （渲染层按「ToolCall + 紧随其后的 ToolResult」成对展示，见 ChatMessages）。
-     */
-    private fun handleToolEvent(ev: PiAgentEvent) {
-        when (ev) {
-            is PiAgentEvent.ToolStart -> {
-                flushStreamingThinking()
-                appendEntry(
-                    Msg.ToolCall(ev.name, ev.args, ToolStatus.RUNNING, startedAtMs = System.currentTimeMillis()),
-                )
-            }
-            is PiAgentEvent.UiRequest -> pendingPermission =
-                PendingPermission(ev.id, ev.toolName, ev.argsSummary, ev.dangerous)
-
-            is PiAgentEvent.ToolEnd -> {
-                val list = currentMessages
-                val idx = list.indexOfLast { it is Msg.ToolCall && it.status == ToolStatus.RUNNING }
-                if (idx >= 0) {
-                    val call = list[idx] as Msg.ToolCall
-                    // 耗时（Hermes 工具行 meta 的 1.2s 口径）：ToolStart 起点 → 现在
-                    val elapsed = call.startedAtMs?.let { maxOf(0L, System.currentTimeMillis() - it) }
-                    replaceMessageAt(
-                        idx,
-                        call.copy(
-                            status = if (ev.isError) ToolStatus.FAILED else ToolStatus.DONE,
-                            detail = ev.output.take(400),
-                            durationMs = elapsed,
-                            diff = ev.diff,
-                        ),
-                    )
-                }
-                appendEntry(Msg.ToolResult(ev.name, ev.output.take(200), ev.output))
-            }
-
-            // ── 宿主压缩（2026-09-14 起 = 上下文管理的**唯一**来源：pi 原生）──
-            // 触发由 pi 判定（阈值/溢出）或用户在用量卡点「压缩上下文」（manual）；
-            // 事件与 RPC 回执按「摘要 + tokensBefore」去重（见 appendCompactionEntry）
-            is PiAgentEvent.CompactionStart -> {
-                compacting = true
-                Log.i(TAG, "宿主压缩开始：${ev.reason}")
-            }
-
-            is PiAgentEvent.CompactionEnd -> {
-                compacting = false
-                ev.errorMessage?.let { Log.w(TAG, "宿主压缩失败：$it") }
-                if (ev.aborted) Log.w(TAG, "宿主压缩被中止：${ev.reason}")
-                if (ev.summary != null) {
-                    appendCompactionEntry(ev.summary, ev.tokensBefore, ev.estimatedAfter, ev.reason)
-                }
-            }
-            else -> Unit
-        }
-    }
-
     /** 首个思考增量到达时记起点（思考行右侧计时与落库 durationMs 都用它） */
     private fun noteThinkingDelta(text: String) {
-        // 当前块已随工具卡落库，又来了思考增量 = agent 开了新一条 assistant 消息（pi 每条消息一个思考块）：
-        // 复位「已落库」标记与计时，让新块自己落库、自己计时
-        //（旧实现把标记按整轮用 → 工具轮里最后一块被吞掉，见工具层交接记录）
-        if (hostThinkingFlushed) {
-            hostThinkingFlushed = false
-            streamThinkingStartedAt = 0L
-        }
         if (streamThinkingStartedAt == 0L) streamThinkingStartedAt = System.currentTimeMillis()
         streamThinking = text
-    }
-
-    /**
-     * 流式期间的思考先落库（工具调用/回答到来之前）——宿主事件顺序是
-     * 思考 → 工具调用 → 工具结果 → 回答，思考条目必须赶在工具条目前面落。
-     */
-    private fun flushStreamingThinking() {
-        if (hostThinkingFlushed) return
-        val text = streamThinking.trim()
-        if (text.isEmpty() || !thinkingEnabled) return
-        val started = streamThinkingStartedAt
-        val duration = if (started > 0L) System.currentTimeMillis() - started else null
-        liveThinkingIndex = appendEntry(Msg.Thinking(thinkingLevel.piValue, text, duration))
-        hostThinkingFlushed = true
-        // 已落库：流式预览不该再显示同一块（否则工具卡下方重复一块「思考中」）
-        streamThinking = ""
     }
 
     /** 本轮思考落库为 [Msg.Thinking]（无思考内容时不落条目）；返回落下的条目 */
@@ -1126,12 +834,12 @@ class ChatState {
      * API 上下文重建（2026-09-13：**参考 Operit 的上下文管线**重做）。
      *
      * ① **切片**：从最后一条压缩摘要（含）起 —— Operit `getMemoryFromMessages` 同款；
-     *    取代原先的 `takeLast(40)`（Operit 没有条数上限，长度由「总结」控制，见 ContextPolicy）；
-     * ② **附件进请求**：附件以「名称 · 路径」文本随该条用户消息发出（pi 的 read 工具据此打开文件），
+     * ② **附件进请求**：附件以「名称 · 路径」文本随该条用户消息发出，
      *    历史回合里的图片/音视频按「保留最近 N 个用户回合」裁剪、更早的写占位文案
      *    —— Operit `limitImageLinksInChatHistory` / `limitMediaLinksInChatHistory` 同款；
      * ③ 压缩摘要本身以一条 user 消息进请求（Operit 把 summary 作为 USER 角色发送）；
-     * ④ 思考 / 工具 / 结果条目不进上下文（沿用原口径）。
+     * ④ 思考条目不进上下文；**旧会话里已有的工具结果**以文本形态进历史（见 ToolResult 分支），
+     *    工具卡本身（参数 / diff）不进。
      */
     private fun buildApiHistory(): List<Pair<String, String>> = apiHistoryOf(currentMessages)
 
@@ -1166,12 +874,8 @@ class ChatState {
                     flushTools()
                     out += "user" to m.summary
                 }
-                // **工具结果要进历史**（2026-09-14 修）：此前这里和思考块一起被丢掉，导致
-                // 「同一轮内回灌」虽然做了，但用户下一轮发消息时模型完全看不到上一轮工具读到了什么
-                // （追问「刚才文件里写的是什么」只能重读一遍文件，文件被删就答不出来）。
-                // 为什么不还原成原生协议消息：本项目的条目里没存 tool_call_id（`Msg.ToolCall` 只有
-                // 名字与参数），OpenAI 侧孤儿 `role:"tool"` 会直接 400。故与标记模式**共用同一种
-                // 文本形态**（同一份文案，一份实现）——模型把它当环境回执读。
+                // **旧会话里已有的工具结果以文本形态进历史**：这些条目是工具能力移除前的记录，
+                // 继续拼进上下文能让老会话保持连贯（模型把它当环境回执读）；新会话不会再产生它们。
                 is Msg.ToolResult -> pendingTools += m.toolName to toolHistoryBody(m)
                 // 调用意图已由结果的 [name] 前缀表达；参数/diff 体积大又不影响后续推理，不入历史
                 is Msg.ToolCall -> Unit
@@ -1183,8 +887,7 @@ class ChatState {
     }
 
     /**
-     * 工具结果的上下文形态（**标记模式回灌与历史重建共用同一份文案**）：
-     * `工具执行结果：\n\n[read] …`。多处共用是刻意的——同一事实两套文案会让模型收到两种口径。
+     * 旧工具结果的上下文形态：`工具执行结果：\n\n[read] …`（仅历史重建路径使用）。
      */
     private fun toolResultsBlock(entries: List<Pair<String, String>>): String =
         "工具执行结果：\n\n" + entries.joinToString("\n\n") { (name, body) -> "[$name] $body" }
@@ -1405,19 +1108,13 @@ class ChatState {
      */
     var contextUsedTokens by mutableStateOf(0)
 
-    /** 宿主路径下思考条目是否已在工具条目之前落库（避免回答落地时重复落一份） */
-    private var hostThinkingFlushed = false
-
-    /** 已下发给宿主的自动压缩开关值（null = 尚未下发过；只在变化时发 RPC） */
-    private var lastAutoCompactionSent: Boolean? = null
-
     /** 手动压缩进行中（用量卡的「压缩上下文」动作据此显示进度，避免连点） */
     var compacting by mutableStateOf(false)
         private set
 
     /**
      * 本轮运行条目的插入游标（null = 追加到 leaf，发送路径语义）。
-     * 重新生成时 = 目标回答的上屏下标：宿主事件产生的思考/工具条目插到它之前，每插一条自增，
+     * 重新生成时 = 目标回答的上屏下标：本轮思考条目插到它之前，每插一条自增，
      * 始终指向目标回答的当前位置（见 [appendEntry] / [insertEntryAt]）。
      */
     private var runInsertAt: Int? = null
@@ -1426,17 +1123,15 @@ class ChatState {
     var connectionLabel by mutableStateOf("已连接")
     // 系统提示词只读展示（2026-09-01，对齐 pi-web system 面板）：
     // **真实值 = 内核每次发请求时构造的那一份**（`Prompts.systemPrompt`），由发送路径写入 ——
-    // 面板显示的必须是模型真正收到的内容（含 available_skills 等动态段）。
+    // 面板显示的必须是模型真正收到的内容。
     var systemPrompt by mutableStateOf("")
     // 上下文用量分类明细（Hermes 上下文卡片口径；UI 原型 mock，合计 = windowTokens）
-    // 分类经 pi-0.84.2 源码核实（2026-08-28）：pi 无语义记忆（memory=会话存储）、
-    // fork 子代理定义不进父上下文——「记忆」「子代理」已移除。
+    // 分类经 pi 源码核实：「记忆」「子代理」不参与；2026-09-14 工具 / 技能整体移除后
+    // 「工具定义」「技能」两行一并去掉。
     var contextCategories by mutableStateOf(
         listOf(
             ContextCategory("conversation", "对话", 40000),
             ContextCategory("system_prompt", "系统提示词", 9200),
-            ContextCategory("tool_definitions", "工具定义", 7200),
-            ContextCategory("skills", "技能", 3700),
             ContextCategory("rules", "规则", 1100),
         )
     )

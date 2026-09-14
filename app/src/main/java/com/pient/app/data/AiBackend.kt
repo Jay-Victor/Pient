@@ -1,7 +1,5 @@
 package com.pient.app.data
 
-import com.pient.app.tools.ToolCall
-
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -33,24 +31,18 @@ sealed class ChatEvent {
     data class ThinkingDelta(val text: String) : ChatEvent()
     data class UsageEvent(val usage: Usage) : ChatEvent()
 
-    /** 本轮模型请求的工具调用（原生 `tool_calls` / Anthropic `tool_use`；可能多个） */
-    data class ToolCallsEvent(val calls: List<ToolCall>) : ChatEvent()
     data object Done : ChatEvent()
     data class Failed(val message: String) : ChatEvent()
 }
 
 /**
- * 一次请求里的一个回合（比 `List<Pair<role, content>>` 更宽：工具调用与工具结果需要独立字段）。
+ * 一次请求里的一个回合（比 `List<Pair<role, content>>` 更宽：直发附件需要独立字段）。
  * - [Text]：普通文本回合（历史都是这种）；
- * - [Rich]：带**直发附件**的回合（媒体能力开关开启时，[MediaInline.parts] 产出内容部件）；
- * - [AssistantCalls]：模型上一轮回的工具调用（原生协议要求原样带回历史）；
- * - [ToolOutput]：工具执行结果（OpenAI = role:"tool" + tool_call_id；Anthropic = user 里的 tool_result）。
+ * - [Rich]：带**直发附件**的回合（媒体能力开关开启时，[MediaInline.parts] 产出内容部件）。
  */
 sealed interface ChatTurn {
     data class Text(val role: String, val content: String) : ChatTurn
     data class Rich(val role: String, val text: String, val parts: List<WirePart>) : ChatTurn
-    data class AssistantCalls(val text: String, val calls: List<ToolCall>) : ChatTurn
-    data class ToolOutput(val callId: String, val name: String, val content: String) : ChatTurn
 }
 
 /** 直发附件的一个部件（[type]：image / audio / video；[base64] 不含 data URL 前缀） */
@@ -62,8 +54,7 @@ data class WirePart(val type: String, val mime: String, val base64: String)
  * - OpenAI 兼容：`POST {endpoint}/chat/completions`（Bearer 鉴权，SSE 流式）；
  * - Anthropic 兼容：`POST {endpoint}/v1/messages`（x-api-key 鉴权，SSE 事件流）。
  * 思考级别映射：Anthropic = thinking.budget_tokens；OpenAI = reasoning_effort。
- * 工具调用（2026-09-14）：`tools` 由调用方按「模型能力」开关决定是否下发；回包解析
- * 原生 `tool_calls` / Anthropic `tool_use`（流式分片按 index 聚合）。
+ * 2026-09-14 用户拍板：工具能力整体移除 —— 请求不再带 `tools`，回包也不解析工具调用。
  * 仍不支持：Bedrock SigV4 签名（端点仍可配置，请求会报鉴权错误）。
  */
 object AiBackend {
@@ -140,8 +131,6 @@ object AiBackend {
         val text: String,
         val usage: Usage?,
         val thinking: String? = null,
-        /** 原生工具调用（无工具调用时为空表） */
-        val toolCalls: List<ToolCall> = emptyList(),
     )
 
     suspend fun chat(
@@ -149,9 +138,8 @@ object AiBackend {
         systemPrompt: String?,
         turns: List<ChatTurn>,
         thinkingLevel: ThinkingLevel?,
-        tools: JSONArray? = null,
     ): ChatResult {
-        val body = buildRequestBody(cfg, systemPrompt, turns, thinkingLevel, stream = false, tools = tools)
+        val body = buildRequestBody(cfg, systemPrompt, turns, thinkingLevel, stream = false)
         val req = Request.Builder().url(chatUrl(cfg)).post(body.toString().toRequestBody(JSON)).apply {
             authHeaders(cfg, this)
         }.build()
@@ -178,9 +166,8 @@ object AiBackend {
         systemPrompt: String?,
         turns: List<ChatTurn>,
         thinkingLevel: ThinkingLevel?,
-        tools: JSONArray? = null,
     ): Flow<ChatEvent> = callbackFlow {
-        val body = buildRequestBody(cfg, systemPrompt, turns, thinkingLevel, stream = true, tools = tools)
+        val body = buildRequestBody(cfg, systemPrompt, turns, thinkingLevel, stream = true)
         val req = Request.Builder().url(chatUrl(cfg)).post(body.toString().toRequestBody(JSON)).apply {
             authHeaders(cfg, this)
         }.build()
@@ -373,11 +360,9 @@ object AiBackend {
         turns: List<ChatTurn>,
         thinkingLevel: ThinkingLevel?,
         stream: Boolean,
-        tools: JSONArray?,
     ): JSONObject {
         val maxTokens = cfg.maxOutK.toIntOrNull()?.let { (it * 1024).coerceIn(1, 128000) }
         val thinking = thinkingLevel != null
-        val hasTools = tools != null && tools.length() > 0
         return if (isAnthropicProtocol(cfg.endpoint)) {
             JSONObject().apply {
                 put("model", modelNameOf(cfg))
@@ -385,7 +370,6 @@ object AiBackend {
                 if (!systemPrompt.isNullOrBlank()) put("system", systemPrompt)
                 put("messages", anthropicMessages(turns))
                 put("stream", stream)
-                if (hasTools) put("tools", tools)
                 applyReasoningParams(this, cfg, thinkingLevel)
                 if (thinking) {
                     // Anthropic：思考开启时 temperature 必须为 1 且不可传 top_p/top_k
@@ -402,7 +386,6 @@ object AiBackend {
                 put("messages", openAiMessages(systemPrompt, turns))
                 put("stream", stream)
                 if (maxTokens != null) put("max_tokens", maxTokens)
-                if (hasTools) put("tools", tools)
                 applyReasoningParams(this, cfg, thinkingLevel)
                 if (cfg.tempEnabled) cfg.tempValue.toFloatOrNull()?.let { put("temperature", it) }
                 if (cfg.topPEnabled) cfg.topPValue.toFloatOrNull()?.let { put("top_p", it) }
@@ -412,7 +395,7 @@ object AiBackend {
 
     // ───────────────────────── 回合 → 协议报文 ─────────────────────────
 
-    /** OpenAI 兼容：system 作为首条消息；工具调用/结果用 `tool_calls` / `role:"tool"` */
+    /** OpenAI 兼容：system 作为首条消息 */
     private fun openAiMessages(systemPrompt: String?, turns: List<ChatTurn>): JSONArray {
         val msgs = JSONArray()
         if (!systemPrompt.isNullOrBlank()) {
@@ -423,27 +406,6 @@ object AiBackend {
                 is ChatTurn.Text -> msgs.put(JSONObject().put("role", t.role).put("content", t.content))
                 is ChatTurn.Rich -> msgs.put(
                     JSONObject().put("role", t.role).put("content", openAiContent(t)),
-                )
-                is ChatTurn.AssistantCalls -> {
-                    val calls = JSONArray()
-                    for (c in t.calls) {
-                        calls.put(
-                            JSONObject().put("id", c.id).put("type", "function").put(
-                                "function",
-                                JSONObject().put("name", c.name).put("arguments", c.arguments),
-                            ),
-                        )
-                    }
-                    msgs.put(
-                        JSONObject().put("role", "assistant")
-                            .put("content", t.text.ifBlank { JSONObject.NULL })
-                            .put("tool_calls", calls),
-                    )
-                }
-                is ChatTurn.ToolOutput -> msgs.put(
-                    JSONObject().put("role", "tool")
-                        .put("tool_call_id", t.callId)
-                        .put("content", t.content),
                 )
             }
         }
@@ -488,7 +450,7 @@ object AiBackend {
         else -> mime.substringAfter("/", "wav")
     }
 
-    /** Anthropic Messages：system 独立字段；工具结果放 user 消息的 `tool_result` 块（协议规定） */
+    /** Anthropic Messages：system 独立字段 */
     private fun anthropicMessages(turns: List<ChatTurn>): JSONArray {
         val msgs = JSONArray()
         for (t in turns) {
@@ -510,29 +472,6 @@ object AiBackend {
                     if (t.text.isNotBlank()) blocks.put(JSONObject().put("type", "text").put("text", t.text))
                     msgs.put(JSONObject().put("role", t.role).put("content", blocks))
                 }
-                is ChatTurn.AssistantCalls -> {
-                    val blocks = JSONArray()
-                    if (t.text.isNotBlank()) blocks.put(JSONObject().put("type", "text").put("text", t.text))
-                    for (c in t.calls) {
-                        val input = runCatching { JSONObject(c.arguments.ifBlank { "{}" }) }
-                            .getOrElse { JSONObject() }
-                        blocks.put(
-                            JSONObject().put("type", "tool_use")
-                                .put("id", c.id).put("name", c.name).put("input", input),
-                        )
-                    }
-                    msgs.put(JSONObject().put("role", "assistant").put("content", blocks))
-                }
-                is ChatTurn.ToolOutput -> msgs.put(
-                    JSONObject().put("role", "user").put(
-                        "content",
-                        JSONArray().put(
-                            JSONObject().put("type", "tool_result")
-                                .put("tool_use_id", t.callId)
-                                .put("content", t.content),
-                        ),
-                    ),
-                )
             }
         }
         return msgs
@@ -587,27 +526,7 @@ object AiBackend {
         val thinking = message?.let { m ->
             REASONING_FIELDS.firstNotNullOfOrNull { f -> m.strOrEmpty(f).takeIf { it.isNotEmpty() } }
         }
-        return ChatResult(text, usage, thinking, openAiToolCalls(message))
-    }
-
-    /** OpenAI 兼容的 `message.tool_calls` → 调用列表（arguments 是 JSON 字符串，原样带） */
-    private fun openAiToolCalls(message: JSONObject?): List<ToolCall> {
-        val arr = message?.optJSONArray("tool_calls") ?: return emptyList()
-        val out = ArrayList<ToolCall>(arr.length())
-        for (i in 0 until arr.length()) {
-            val o = arr.optJSONObject(i) ?: continue
-            val fn = o.optJSONObject("function") ?: continue
-            val name = fn.strOrEmpty("name").trim()
-            if (name.isEmpty()) continue
-            out.add(
-                ToolCall(
-                    id = o.strOrEmpty("id").ifBlank { "call_${i}" },
-                    name = name,
-                    arguments = fn.strOrEmpty("arguments").ifBlank { "{}" },
-                ),
-            )
-        }
-        return out
+        return ChatResult(text, usage, thinking)
     }
 
     /**
@@ -622,7 +541,6 @@ object AiBackend {
     private fun parseAnthropicFull(root: JSONObject): ChatResult {
         val sb = StringBuilder()
         val thinking = StringBuilder()
-        val calls = ArrayList<ToolCall>()
         val content = root.optJSONArray("content")
         if (content != null) {
             for (i in 0 until content.length()) {
@@ -631,29 +549,15 @@ object AiBackend {
                     "text" -> sb.append(b.strOrEmpty("text"))
                     // 非流式思考块（Anthropic content 里的 thinking block）
                     "thinking" -> thinking.append(b.strOrEmpty("thinking"))
-                    // 原生工具调用：input 已经是对象，转成 JSON 字符串（与 OpenAI 的 arguments 同形）
-                    "tool_use" -> {
-                        val name = b.strOrEmpty("name").trim()
-                        if (name.isNotEmpty()) {
-                            calls.add(
-                                ToolCall(
-                                    id = b.strOrEmpty("id").ifBlank { "call_$i" },
-                                    name = name,
-                                    arguments = b.optJSONObject("input")?.toString() ?: "{}",
-                                ),
-                            )
-                        }
-                    }
                 }
             }
         }
         val usage = root.optJSONObject("usage")?.let { anthropicUsage(it) }
-        return ChatResult(sb.toString(), usage, thinking.toString().takeIf { it.isNotEmpty() }, calls)
+        return ChatResult(sb.toString(), usage, thinking.toString().takeIf { it.isNotEmpty() })
     }
 
     private fun parseOpenAiStream(source: okio.BufferedSource, emit: (ChatEvent) -> Unit) {
         var usage: Usage? = null
-        val tools = ToolCallAcc()
         while (true) {
             val line = source.readUtf8Line() ?: break
             if (!line.startsWith("data:")) continue
@@ -673,54 +577,12 @@ object AiBackend {
                         break
                     }
                 }
-                // 原生工具调用分片（按 index 聚合：id/name 只来一次、arguments 逐片拼）
-                delta.optJSONArray("tool_calls")?.let { arr ->
-                    for (i in 0 until arr.length()) {
-                        val tc = arr.optJSONObject(i) ?: continue
-                        val idx = if (tc.has("index")) tc.optInt("index") else i
-                        val fn = tc.optJSONObject("function")
-                        tools.merge(
-                            index = idx,
-                            id = tc.strOrEmpty("id"),
-                            name = fn?.strOrEmpty("name").orEmpty(),
-                            argFragment = fn?.strOrEmpty("arguments").orEmpty(),
-                        )
-                    }
-                }
                 o.optJSONObject("usage")?.let { usage = openAiUsage(it) }
             } catch (_: Exception) {
                 // 忽略无法解析的分片
             }
         }
         usage?.let { emit(ChatEvent.UsageEvent(it)) }
-        tools.build().takeIf { it.isNotEmpty() }?.let { emit(ChatEvent.ToolCallsEvent(it)) }
-    }
-
-    /**
-     * 流式工具调用分片聚合器（OpenAI 兼容口径）：`delta.tool_calls[]` 里 id/name 只出现在首片、
-     * `arguments` 逐片拼；同一 index 的片必须按到达顺序拼（顺序错 = 参数 JSON 坏）。
-     */
-    private class ToolCallAcc {
-        private val order = LinkedHashMap<Int, MutableList<Any>>() // index → [id, name, StringBuilder]
-
-        fun merge(index: Int, id: String, name: String, argFragment: String) {
-            val slot = order.getOrPut(index) { mutableListOf("", "", StringBuilder()) }
-            if (id.isNotEmpty()) slot[0] = id
-            if (name.isNotEmpty()) slot[1] = name
-            (slot[2] as StringBuilder).append(argFragment)
-        }
-
-        fun build(): List<ToolCall> = order.entries
-            .sortedBy { it.key }
-            .mapNotNull { (idx, slot) ->
-                val name = (slot[1] as String).trim()
-                if (name.isEmpty()) return@mapNotNull null
-                ToolCall(
-                    id = (slot[0] as String).ifBlank { "call_$idx" },
-                    name = name,
-                    arguments = (slot[2] as StringBuilder).toString().ifBlank { "{}" },
-                )
-            }
     }
 
     private fun parseAnthropicStream(source: okio.BufferedSource, emit: (ChatEvent) -> Unit) {
@@ -728,7 +590,6 @@ object AiBackend {
         var outTokens = 0
         var cacheTokens = 0
         var cacheWriteTokens = 0
-        val tools = ToolCallAcc()
         while (true) {
             val line = source.readUtf8Line() ?: break
             if (!line.startsWith("data:")) continue
@@ -736,18 +597,6 @@ object AiBackend {
             try {
                 val o = JSONObject(payload)
                 when (o.optString("type")) {
-                    // 工具调用块开始：{index, content_block:{type:"tool_use", id, name}}
-                    "content_block_start" -> {
-                        val block = o.optJSONObject("content_block")
-                        if (block?.optString("type") == "tool_use") {
-                            tools.merge(
-                                index = o.optInt("index"),
-                                id = block.strOrEmpty("id"),
-                                name = block.strOrEmpty("name"),
-                                argFragment = "",
-                            )
-                        }
-                    }
                     "content_block_delta" -> {
                         val delta = o.optJSONObject("delta") ?: continue
                         when (delta.optString("type")) {
@@ -760,13 +609,6 @@ object AiBackend {
                                 val t = delta.strOrEmpty("thinking")
                                 if (t.isNotEmpty()) emit(ChatEvent.ThinkingDelta(t))
                             }
-                            // 工具参数分片：partial_json 逐片拼成完整 arguments
-                            "input_json_delta" -> tools.merge(
-                                index = o.optInt("index"),
-                                id = "",
-                                name = "",
-                                argFragment = delta.strOrEmpty("partial_json"),
-                            )
                         }
                     }
                     "message_start" -> o.optJSONObject("message")?.optJSONObject("usage")?.let {
@@ -791,7 +633,6 @@ object AiBackend {
         if (inTokens > 0 || outTokens > 0 || cacheTokens > 0 || cacheWriteTokens > 0) {
             emit(ChatEvent.UsageEvent(Usage(inTokens, outTokens, cacheTokens, 0.0, cacheWriteTokens)))
         }
-        tools.build().takeIf { it.isNotEmpty() }?.let { emit(ChatEvent.ToolCallsEvent(it)) }
     }
 
     // ───────────────────────── 基础工具 ─────────────────────────
