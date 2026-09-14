@@ -48,6 +48,9 @@ private const val WINDOW_MIN_MESSAGES = 6
 /** 剩余更早内容估算不足这么多屏时直接全显（按钮不出现，避免「点一下没变化」） */
 private const val WINDOW_TAIL_SCREENS = 0.5f
 
+/** 单个工具结果进入对话历史时的字符上限（同轮回灌用 6000，历史里按「够模型接着推理」收窄） */
+private const val TOOL_HISTORY_CHARS = 2000
+
 /**
  * 单条消息的**渲染高度估算**（dp）——只在选择窗口大小时用，不影响渲染。
  *
@@ -806,6 +809,7 @@ class ChatState {
             flushStreamingThinking()
             if (answer.isNotBlank()) appendEntry(Msg.Assistant(answer.trim()))
             val results = ArrayList<String>()
+            val resultPairs = ArrayList<Pair<String, String>>()
             for (c in calls) {
                 // 授权策略（与宿主路径同一份 pient_gate.json：read/grep/find/ls 默认 ALLOW，write/edit/bash 默认 ASK）
                 val allowed = ctx != null && askInAppPermission(ctx, c.name, c.arguments)
@@ -819,11 +823,13 @@ class ChatState {
                     PiAgentEvent.ToolEnd(c.id, c.name, outcome.output, outcome.isError, outcome.diff),
                 )
                 results.add("[${c.name}] ${outcome.output.take(6000)}")
+                resultPairs += c.name to outcome.output.take(6000)
             }
             // 结果回灌：原生调用带回协议消息；文本标记调用用「助手原文 + 用户侧结果」继续
+            // （文本形态走 [toolResultsBlock]，与下面历史重建共用同一份文案）
             if (markupMode) {
                 turns.add(ChatTurn.Text("assistant", roundText.toString()))
-                turns.add(ChatTurn.Text("user", "工具执行结果：\n\n" + results.joinToString("\n\n")))
+                turns.add(ChatTurn.Text("user", toolResultsBlock(resultPairs)))
             } else {
                 turns.add(ChatTurn.AssistantCalls(roundText.toString().trim(), calls))
                 for ((i, c) in calls.withIndex()) {
@@ -1183,19 +1189,57 @@ class ChatState {
             cfg?.maxMediaHistoryTurnsValue ?: ContextPolicy.DEFAULT_MAX_MEDIA_HISTORY_TURNS,
         )
         val out = mutableListOf<Pair<String, String>>()
+        // 工具结果入历史的累积缓冲（见下方 when 分支的注释）
+        val pendingTools = mutableListOf<Pair<String, String>>()
+        fun flushTools() {
+            if (pendingTools.isEmpty()) return
+            out += "user" to toolResultsBlock(pendingTools)
+            pendingTools.clear()
+        }
         slice.forEachIndexed { i, m ->
             when (m) {
                 is Msg.User -> {
+                    flushTools()
                     val text = ContextPolicy.promptTextFor(m, windows[i])
                     out += "user" to (m.quote?.toPrompt(text) ?: text)
                 }
-                is Msg.Assistant -> if (!m.error) out += "assistant" to m.markdown
-                is Msg.Compaction -> out += "user" to m.summary
-                else -> Unit // 思考/工具/结果不参与对话上下文
+                is Msg.Assistant -> {
+                    flushTools()
+                    if (!m.error) out += "assistant" to m.markdown
+                }
+                is Msg.Compaction -> {
+                    flushTools()
+                    out += "user" to m.summary
+                }
+                // **工具结果要进历史**（2026-09-14 修）：此前这里和思考块一起被丢掉，导致
+                // 「同一轮内回灌」虽然做了，但用户下一轮发消息时模型完全看不到上一轮工具读到了什么
+                // （追问「刚才文件里写的是什么」只能重读一遍文件，文件被删就答不出来）。
+                // 为什么不还原成原生协议消息：本项目的条目里没存 tool_call_id（`Msg.ToolCall` 只有
+                // 名字与参数），OpenAI 侧孤儿 `role:"tool"` 会直接 400。故与标记模式**共用同一种
+                // 文本形态**（同一份文案，一份实现）——模型把它当环境回执读。
+                is Msg.ToolResult -> pendingTools += m.toolName to toolHistoryBody(m)
+                // 调用意图已由结果的 [name] 前缀表达；参数/diff 体积大又不影响后续推理，不入历史
+                is Msg.ToolCall -> Unit
+                else -> Unit // 思考块不参与对话上下文
             }
         }
+        flushTools()
         return out
     }
+
+    /**
+     * 工具结果的上下文形态（**标记模式回灌与历史重建共用同一份文案**）：
+     * `工具执行结果：\n\n[read] …`。多处共用是刻意的——同一事实两套文案会让模型收到两种口径。
+     */
+    private fun toolResultsBlock(entries: List<Pair<String, String>>): String =
+        "工具执行结果：\n\n" + entries.joinToString("\n\n") { (name, body) -> "[$name] $body" }
+
+    /**
+     * 单个工具结果入历史时的截断：**每个结果最多 2000 字符**（`preview` 是界面用的短摘要，
+     * 优先用 `full` 的截断）。整段历史另有 [trimToContextBudget] 的字符预算兜底。
+     */
+    private fun toolHistoryBody(m: Msg.ToolResult): String =
+        (m.full ?: m.preview).take(TOOL_HISTORY_CHARS)
 
     /**
      * 上下文长度预算裁剪（配置页「上下文长度」K Tokens 生效）：
