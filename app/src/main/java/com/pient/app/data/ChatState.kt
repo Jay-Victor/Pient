@@ -20,11 +20,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
 import com.pient.app.runtime.PiAgentEvent
-import com.pient.app.runtime.PiChat
-import com.pient.app.runtime.PiHost
-import com.pient.app.runtime.PiHostState
 import com.pient.app.runtime.PiRuntime
-import com.pient.app.runtime.PiSessions
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -345,12 +341,11 @@ class ChatState {
     }
 
     /**
-     * 会话删除时的 pi 侧清理（2026-09-13 补缺）：映射项 + pi 会话文件（见 [PiSessions.forget]）。
+     * 会话删除：宿主已冻结（2026-09-14），pi 侧不再有映射项与会话文件需要清理。
      * 走 IO 线程、失败只记日志 —— 删除动作本身不等宿主回答（UI 立即反馈）。
      */
     private fun forgetPiSession(id: String) {
         val ctx = AppCtx.get() ?: return
-        bgScope.launch { withContext(Dispatchers.IO) { PiSessions.forget(ctx, id) } }
     }
 
     /** 置顶/取消置顶会话 */
@@ -504,17 +499,8 @@ class ChatState {
             ?: cfg.models.firstOrNull().orEmpty()
 
         // 引用消息：正文以 markdown 块引用注入（Quote.toPrompt；UI 仍只显示用户正文）
-        // 宿主在跑：先把宿主切到「当前 Pient 会话」对应的 pi 会话（映射见 PiSessions），
-        // 否则换会话后宿主会接着用上一条会话的上下文
-        if (PiHost.state.value is PiHostState.Running) {
-            AppCtx.get()?.let { ctx ->
-                PiSessions.ensure(
-                    ctx, currentSessionId.orEmpty(), historyBefore, cfg.providerId, effectiveModel,
-                )
-            }
-            // 宿主的自动压缩开关跟随配置页（只在值变化时下发一次 RPC）
-            syncCompactionSettings(cfg)
-        }
+        // 宿主已冻结（2026-09-14）：不再有「把会话切到 pi 侧」这回事
+        // 宿主已冻结（2026-09-14）：不再需要把会话切到 pi 侧，也不再下发宿主压缩设置
         // 本轮用户消息的请求文本：附件以「名称 · 路径」附在正文后（本条是最新回合，媒体恒保留）；
         // 宿主路径只发这一条文本，直连路径的整段历史同样由它拼。
         // 附件直发（2026-09-14 照 Operit 的三个媒体开关）：开启的类别把文件本体转成内容部件随请求发出，
@@ -600,13 +586,7 @@ class ChatState {
         // 宿主在跑：与发送路径同一口径——先把宿主切到本会话对应的 pi 会话。
         // 宿主不会随抽屉切会话自动跟随（ensure 只在发消息时调），应用重启后宿主也是新会话，
         // 少了这一步「重新生成」会打到别的会话上下文上
-        if (PiHost.state.value is PiHostState.Running) {
-            AppCtx.get()?.let { ctx ->
-                PiSessions.ensure(
-                    ctx, currentSessionId.orEmpty(), history, cfg.providerId, effectiveModel,
-                )
-            }
-        }
+        // 宿主已冻结（2026-09-14）：不再需要把会话切到 pi 侧，也不再下发宿主压缩设置
         isStreaming = true
         streamDraft = ""
         streamThinking = ""
@@ -861,13 +841,8 @@ class ChatState {
      * App 只做两件事：把设置摆对、把 `compaction_start/end` 事件落成压缩卡。
      */
     private suspend fun syncCompactionSettings(cfg: ProviderConfig) {
-        if (lastAutoCompactionSent == cfg.compactionEnabled) return
-        if (PiChat.setAutoCompaction(cfg.compactionEnabled)) {
-            lastAutoCompactionSent = cfg.compactionEnabled
-            Log.i(TAG, "宿主自动压缩开关已下发：enabled=${cfg.compactionEnabled}")
-        } else {
-            Log.w(TAG, "宿主自动压缩开关下发失败：enabled=${cfg.compactionEnabled}")
-        }
+        // **宿主冻结后为空操作**（2026-09-14）：压缩口径改为内核自实现（见
+        // Docx/Pient 工具层设计.md「内核自研」N1），落地前不做任何压缩。
     }
 
     /**
@@ -881,25 +856,9 @@ class ChatState {
      * 所以这里落库与事件落库不会出现两张卡。返回 false = 宿主没跑 / 会话太小 / 失败（调用方提示）。
      */
     suspend fun compactNow(): Boolean {
-        if (PiHost.state.value !is PiHostState.Running) return false
-        val cfg = selectedModel?.provider?.let { AiConfigStore.configs[it] } ?: return false
-        if (compacting) return false
-        compacting = true
-        try {
-            val data = PiChat.compact(cfg.compactInstructions.ifBlank { null }) ?: run {
-                Log.w(TAG, "手动压缩未成功（会话太小 / 宿主拒绝）")
-                return false
-            }
-            appendCompactionEntry(
-                summary = data.optString("summary"),
-                tokensBefore = data.optInt("tokensBefore", contextUsedTokens),
-                estimatedAfter = data.optInt("estimatedTokensAfter", 0),
-                reason = "manual",
-            )
-            return true
-        } finally {
-            compacting = false
-        }
+        // 内核自研的压缩尚未落地（宿主已冻结）：如实返回 false，调用方给提示，不做假动作
+        Log.i(TAG, "压缩上下文：内核自实现尚未落地（原宿主 RPC 随宿主一并冻结）")
+        return false
     }
 
     /**
@@ -950,15 +909,7 @@ class ChatState {
             )
             return
         }
-        when {
-            always -> {
-                if (ctx != null) ToolGate.setToolPolicy(ctx, ask.toolName, ToolGate.ALLOW)
-                PiHost.respondUi(ask.id, value = ToolGate.OPT_ALWAYS)
-            }
-            deny -> PiHost.respondUi(ask.id, value = ToolGate.OPT_DENY)
-            allowOnce -> PiHost.respondUi(ask.id, value = ToolGate.OPT_ONCE)
-            else -> PiHost.respondUi(ask.id, cancelled = true)
-        }
+        // 宿主已冻结：授权询问只有应用内一条路径（上面的 inAppAsk），不再有扩展 UI 回执
     }
 
     /** 手动设某工具的策略（工具卡授权按钮 / 后续权限中心；值取 ToolGate.ALLOW|ASK|FORBID） */

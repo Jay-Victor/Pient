@@ -86,12 +86,6 @@
         </provider>
         <!-- pi 宿主的前台服务容器（工具层保活）：常驻通知 + START_STICKY；
              stopWithTask=false 让「划掉最近任务」不杀宿主（开发计划 §6.4） -->
-        <service
-            android:name=".runtime.PiHostService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="dataSync"
-            android:stopWithTask="false" />
     </application>
 
 </manifest>

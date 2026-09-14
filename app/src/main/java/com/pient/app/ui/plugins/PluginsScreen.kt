@@ -38,7 +38,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.pient.app.data.PluginStore
-import com.pient.app.runtime.PiHostService
 import com.pient.app.ui.components.HostRestartHint
 import com.pient.app.data.PluginItem
 import com.pient.app.ui.components.PientButton
@@ -103,8 +102,7 @@ fun PluginsScreen(nav: NavController) {
 
             // 改了插件配置/装完新包 → 同上：pi 要重启才会重新装配
             if (PluginStore.needsHostRestart) {
-                HostRestartHint("插件改动需重启宿主后才被 pi 加载") {
-                    PiHostService.restart(context)
+                HostRestartHint("插件改动已保存（内核装配插件在自研清单 N1 里）") {
                     PluginStore.markHostRestarted()
                 }
             }

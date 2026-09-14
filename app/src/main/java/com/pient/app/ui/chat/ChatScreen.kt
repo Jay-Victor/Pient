@@ -98,9 +98,6 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.runtime.collectAsState
-import com.pient.app.runtime.PiHost
-import com.pient.app.runtime.PiHostService
-import com.pient.app.runtime.PiHostState
 import com.pient.app.ui.components.PientButton
 import androidx.compose.foundation.border
 import com.pient.app.PientRuntime
@@ -819,67 +816,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
     }
 }
 
-// ─────────────────────────── pi 宿主未就绪提示条 ───────────────────────────
-
-/**
- * 宿主没在跑时的显式降级提示（2026-09-14）。为什么必须显式：
- * `ChatState.runChat` 在 `PiHost.state !is Running` 时会**静默退回 Kotlin 直连**（无工具），
- * 用户视角就是「AI 只回文字、不调工具」——这条提示把「为什么」与「怎么办」摆在会话页顶部。
- */
-@Composable
-private fun HostNotReadyStrip(state: PiHostState, onRetry: () -> Unit) {
-    val (title, detail) = when (state) {
-        is PiHostState.MissingRuntime ->
-            // 架构不符 = 换包才能解决，标题就直说（别再让用户以为「重试一下就好」）
-            if (state.abiMismatch) "安装包与设备架构不符" to state.summary
-            else "pi 运行时未部署" to state.summary
-        PiHostState.MissingModel -> "没有可用的服务商 / 模型" to
-            "去「模型配置」填好服务商与模型，宿主才有模型可跑 agent 循环"
-        PiHostState.Starting -> "pi 宿主启动中…" to "正在拉起 node 宿主（首次约数秒），完成后工具即可用"
-        else -> "pi 宿主未运行 —— 当前是直连模式" to
-            "直连模式由应用内工具执行（read / write / edit / bash / grep / find / ls）：" +
-            "工具调用、文件读写与命令都能跑；pi 宿主独有的能力（插件 / Skill / 原生压缩）不可用"
-    }
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-            .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(10.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-    ) {
-        Icon(
-            Icons.Outlined.WarningAmber, contentDescription = null,
-            tint = MaterialTheme.colorScheme.tertiary,
-            modifier = Modifier.size(16.dp),
-        )
-        Column(Modifier.weight(1f).padding(start = 8.dp)) {
-            Text(
-                title,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                detail,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp),
-            )
-        }
-        // 架构不符时「重试启动」不可能成功（每次都查同一批不存在的文件）→ 不摆这个键，
-        // 免得用户以为点一下就好
-        if (state !is PiHostState.MissingRuntime || !state.abiMismatch) {
-            PientButton(
-                text = if (state is PiHostState.Starting) "检测中" else "重试启动",
-                onClick = onRetry,
-                primary = false,
-                height = 30,
-                modifier = Modifier.padding(start = 8.dp),
-            )
-        }
-    }
-}
+// 宿主已冻结（2026-09-14）：原「pi 宿主未就绪提示条」随宿主一并删除
 
 // ───────────────────────────── 顶部栏 ─────────────────────────────
 

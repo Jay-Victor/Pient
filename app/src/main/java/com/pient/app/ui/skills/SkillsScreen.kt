@@ -38,7 +38,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.navigation.NavController
 import com.pient.app.data.SkillItem
 import com.pient.app.data.SkillStore
-import com.pient.app.runtime.PiHostService
 import com.pient.app.ui.components.HostRestartHint
 import com.pient.app.ui.components.PientSegmented
 import com.pient.app.ui.theme.MonoFont
@@ -98,8 +97,7 @@ fun SkillsScreen(nav: NavController) {
 
             // 改了技能/装完新技能 → pi 要重启才会重新装配（提示 + 一键重启）
             if (SkillStore.needsHostRestart) {
-                HostRestartHint("技能改动需重启宿主后才被 pi 加载") {
-                    PiHostService.restart(context)
+                HostRestartHint("技能改动已保存（内核装配技能在自研清单 N1 里）") {
                     SkillStore.markHostRestarted()
                 }
             }

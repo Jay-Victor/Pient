@@ -8,7 +8,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ThemeMode
-import com.pient.app.runtime.PiHostService
 import com.pient.app.ui.theme.preloadBackgroundImage
 
 class MainActivity : ComponentActivity() {

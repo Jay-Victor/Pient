@@ -43,10 +43,8 @@ import com.pient.app.data.ModelPricingDefaults
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ThemeMode
 import com.pient.app.data.UsageStore
-import com.pient.app.runtime.PiHostService
 import com.pient.app.runtime.EnvProvision
 import com.pient.app.runtime.PiRuntime
-import com.pient.app.runtime.PiHost
 import com.pient.app.ui.chat.ChatScreen
 import com.pient.app.ui.onboarding.OnboardingScreen
 import com.pient.app.ui.plugins.PluginsScreen
