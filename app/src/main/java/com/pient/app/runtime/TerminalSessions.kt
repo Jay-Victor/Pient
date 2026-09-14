@@ -218,12 +218,22 @@ object TerminalSessions {
         runCatching {
             val buf = ByteArray(4096)
             val input = proc.inputStream
+            // 块边界可能正好切在一个 UTF-8 多字节字符中间（中文 3 字节），
+            // 整块解码会把尾部的半个字符变成 U+FFFD：把不完整的尾巴留到下一块再解。
+            var pending = ByteArray(0)
             while (true) {
                 val n = input.read(buf)
                 if (n < 0) break
                 if (n == 0) continue
-                val text = String(buf, 0, n, Charsets.UTF_8)
-                main.post { feed(session, text) }
+                val bytes = if (pending.isEmpty()) buf.copyOf(n) else pending + buf.copyOf(n)
+                val cut = utf8IncompleteSuffix(bytes)
+                val text = String(bytes, 0, bytes.size - cut, Charsets.UTF_8)
+                pending = if (cut == 0) ByteArray(0) else bytes.copyOfRange(bytes.size - cut, bytes.size)
+                if (text.isNotEmpty()) main.post { feed(session, text) }
+            }
+            if (pending.isNotEmpty()) {
+                val text = String(pending, Charsets.UTF_8)
+                if (text.isNotEmpty()) main.post { feed(session, text) }
             }
         }.onFailure { Log.w(TAG, "读取会话${session.id} 输出失败：${it.message}") }
         val code = runCatching { proc.waitFor() }.getOrDefault(-1)
@@ -258,6 +268,30 @@ object TerminalSessions {
      * 一行输出的落点：**脚本哨兵行被吃掉**（不显示，用来收尾安装脚本），其余原样进界面。
      * 收尾行由这里补一条「完成/失败」，让终端里读得懂这次安装的结果。
      */
+    /**
+     * 末尾「不完整的 UTF-8 序列」占几个字节（0 = 这块是完整的）。
+     * 判定：从尾部往前走连续字节（0b10xxxxxx），再看它前面那个起始字节声明了几字节。
+     */
+    private fun utf8IncompleteSuffix(b: ByteArray): Int {
+        var i = b.size - 1
+        var cont = 0
+        while (i >= 0 && cont < 3 && (b[i].toInt() and 0xC0) == 0x80) {
+            i--
+            cont++
+        }
+        if (i < 0) return 0                       // 整块都是连续字节（异常输入）：交给 REPLACE 处理
+        val c = b[i].toInt() and 0xFF
+        val need = when {
+            c and 0x80 == 0 -> 1                  // ASCII
+            c and 0xE0 == 0xC0 -> 2               // 110xxxxx
+            c and 0xF0 == 0xE0 -> 3               // 1110xxxx
+            c and 0xF8 == 0xF0 -> 4               // 11110xxx
+            else -> 1                             // 非法起始字节：不是我们该留的
+        }
+        val have = cont + 1
+        return if (have < need) have else 0
+    }
+
     private fun onOutputLine(session: Session, line: String) {
         if (line.startsWith(SENTINEL)) {
             val code = line.removePrefix(SENTINEL).trim().toIntOrNull() ?: -1

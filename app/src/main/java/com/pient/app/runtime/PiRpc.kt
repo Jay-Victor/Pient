@@ -193,31 +193,40 @@ object PiRpc {
 
     // ─────────────────────── 读线程 ───────────────────────
 
+    /**
+     * 读 stdout：**按字节攒够一行、整行用 UTF-8 解码**。
+     *
+     * 曾经的写法是逐字节 `b.toChar()`——那等于把 UTF-8 当 Latin-1 解：ASCII 看不出问题，
+     * 一旦模型回中文就变成「ãåæ¯æµè¯åå¤」（实测踩过）。UTF-8 的多字节序列不可能含 0x0A，
+     * 所以「按 LF 切行、整行解码」天然不会切坏字符。
+     */
     private fun readStdout(proc: Process) {
         val input = proc.inputStream
         val buf = ByteArray(8192)
-        val line = StringBuilder()
-        var tailCR = false
+        val line = java.io.ByteArrayOutputStream()
         try {
             while (true) {
                 val n = input.read(buf)
                 if (n < 0) break
+                var start = 0
                 for (i in 0 until n) {
-                    val b = buf[i].toInt() and 0xFF
-                    if (b == 0x0A) {   // LF = 唯一的行界
-                        val text = line.toString()
-                        line.setLength(0)
-                        if (text.isNotBlank()) dispatch(text)
-                    } else if (b == 0x0D && !tailCR) {
-                        // CR：行尾 CRLF 的 CR 丢弃；行中 CR 保留（JSON 字符串里合法）
-                        tailCR = true
-                    } else {
-                        if (tailCR) { line.append('\r'); tailCR = false }
-                        line.append(b.toChar())
+                    if (buf[i].toInt() != 0x0A) continue   // LF = 唯一的行界
+                    line.write(buf, start, i - start)
+                    start = i + 1
+                    var bytes = line.toByteArray()
+                    line.reset()
+                    // 行尾 CR（CRLF）丢弃
+                    if (bytes.isNotEmpty() && bytes.last() == 0x0D.toByte()) {
+                        bytes = bytes.copyOf(bytes.size - 1)
                     }
+                    val text = String(bytes, StandardCharsets.UTF_8)
+                    if (text.isNotBlank()) dispatch(text)
                 }
+                line.write(buf, start, n - start)
             }
-            if (line.isNotEmpty()) dispatch(line.toString())
+            if (line.size() > 0) {
+                dispatch(String(line.toByteArray(), StandardCharsets.UTF_8).trimEnd('\r'))
+            }
         } catch (t: Throwable) {
             Log.w(TAG, "读 stdout 结束：${t.message}")
         } finally {
