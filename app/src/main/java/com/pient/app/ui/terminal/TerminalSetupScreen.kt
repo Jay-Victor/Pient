@@ -4,6 +4,7 @@ import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,17 +39,21 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
+import com.pient.app.ui.theme.DarkWarn
+import com.pient.app.ui.theme.LightWarn
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.pient.app.data.APT_MIRRORS
 import com.pient.app.data.ChatState
 import com.pient.app.data.ComponentGroups
+import com.pient.app.data.PI_AGENT_UPDATE
 import com.pient.app.data.ExecEnv
 import com.pient.app.data.Panel
 import com.pient.app.data.RootGateway
@@ -62,6 +67,7 @@ import com.pient.app.ui.components.ArcSpinner
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.theme.MonoFont
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -90,6 +96,14 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
     val selected = remember { mutableStateMapOf<String, Boolean>() }      // 待安装（已装的从不进来）
     val expanded = remember { mutableStateMapOf<String, Boolean>() }
 
+    // pi 版本（读解出来的 package.json，不启 guest）；进页面/重新检测时重读
+    var piVersion by remember { mutableStateOf(PiRuntime.piVersion(context)) }
+
+    // 更新检查状态机：**默认是「检测更新」，只有真查到新版本才变成「更新」**（用户口径 2026-09-14）
+    var piUpdate by remember { mutableStateOf<PiUpdateState>(PiUpdateState.Idle) }
+    val scope = rememberCoroutineScope()
+
+
     // rootfs 就绪与否（决定整页可用性：未解包时所有检测都无意义）
     var rootfsReady by remember { mutableStateOf(PiRuntime.rootfsReady(context)) }
     val rooted = remember { RootGateway.deviceRooted(context) }
@@ -102,6 +116,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
         status = null
         val result = withContext(Dispatchers.IO) { EnvProvision.detect(context, UBUNTU_COMPONENTS) }
         status = result
+        piVersion = PiRuntime.piVersion(context)
         // 已装的项从待安装集合里剔掉（可能刚在终端里装完）
         result?.filterValues { it }?.keys?.forEach { selected.remove(it) }
     }
@@ -116,6 +131,30 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
 
     val installable = status?.let { m -> UBUNTU_COMPONENTS.filter { selected[it.id] == true && m[it.id] != true } }
         ?: emptyList()
+
+    /** 查 npm 官方最新版并和本机版本比：有新版本 → 按钮变「更新到 vX.Y.Z」 */
+    fun checkPiUpdate() {
+        piUpdate = PiUpdateState.Checking
+        scope.launch {
+            val latest = EnvProvision.latestPiVersion()
+            val current = PiRuntime.piVersion(context)
+            piVersion = current
+            piUpdate = when {
+                latest.isNullOrBlank() -> PiUpdateState.Failed("检测失败：连不上 npm（网络？）")
+                current.isBlank() -> PiUpdateState.Failed("检测失败：读不到本机 pi 版本")
+                EnvProvision.isNewer(latest, current) -> PiUpdateState.Available(current, latest)
+                else -> PiUpdateState.Latest(current)
+            }
+        }
+    }
+
+    /** 更新 pi agent（走与安装组件同一条终端会话路径，输出在终端页可见） */
+    fun updatePi() {
+        val session = EnvProvision.installInTerminal(context, listOf(PI_AGENT_UPDATE))
+        chatState.activePanel = Panel.TERMINAL
+        chatState.terminalIndex = TerminalSessions.sessions.indexOf(session).coerceAtLeast(0)
+        nav.popBackStack()
+    }
 
     fun install() {
         if (installable.isEmpty()) {
@@ -179,6 +218,66 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                             else "此安装包未内置 Ubuntu 环境（构建时未打包 rootfs）—— 无法解包，环境内软件不可用。",
                             style = MaterialTheme.typography.labelMedium,
                             color = androidx.compose.material3.MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
+
+            // ── 0.5 Pient 运行时（pi 本体：随包预置，这里只做更新 —— 不是"待安装组件"） ──
+            item { GroupTitle("Pient 运行时", "pi 随 Pient 预置，不需要安装；这一块只用来更新它") }
+            item {
+                SetupCard {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 14.dp, end = 10.dp, top = 12.dp, bottom = 12.dp),
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("pi agent", style = MaterialTheme.typography.bodyMedium)
+                                if (piVersion.isNotEmpty()) Badge("v$piVersion")
+                                Badge("随包预置")
+                            }
+                            val (stateLine, warn) = when (val s = piUpdate) {
+                                PiUpdateState.Idle ->
+                                    (if (!rootfsReady) "Ubuntu 未就绪（解包后自动铺开）"
+                                     else if (piVersion.isEmpty()) "未解包（重开应用会自动解包）"
+                                     else "已就绪 · /usr/bin/pi · 点右侧可检测官方最新版") to false
+                                PiUpdateState.Checking -> "正在查 npm 官方最新版…" to false
+                                is PiUpdateState.Latest -> "已是最新（v${s.version}）" to false
+                                is PiUpdateState.Available ->
+                                    "官方最新 v${s.latest} · 当前 v${s.current} —— 可更新" to true
+                                is PiUpdateState.Failed -> s.reason to true
+                            }
+                            Text(
+                                stateLine,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (warn) {
+                                    if (isSystemInDarkTheme()) DarkWarn else LightWarn
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                        PientButton(
+                            text = when (val s = piUpdate) {
+                                PiUpdateState.Checking -> "检测中…"
+                                is PiUpdateState.Available -> "更新到 v${s.latest}"
+                                else -> "检测更新"
+                            },
+                            enabled = rootfsReady && piVersion.isNotEmpty() && !EnvProvision.running &&
+                                piUpdate != PiUpdateState.Checking,
+                            height = 36,
+                            onClick = {
+                                if (piUpdate is PiUpdateState.Available) {
+                                    piUpdate = PiUpdateState.Idle
+                                    updatePi()
+                                } else {
+                                    checkPiUpdate()
+                                }
+                            },
                         )
                     }
                 }
@@ -275,13 +374,19 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
             }
 
             // ── 3. 环境内软件（照 Operit：分类卡 + 全选 + 展开） ──
-            item { GroupTitle("环境内软件", "首次进入时按需下载安装；已装好的会标出来，不会重复装") }
+            item {
+                GroupTitle(
+                    "环境内软件",
+                    "按运行时分类；带「（Pient 必须）」的两类排在最前，已装好的会标出来",
+                )
+            }
             items(ComponentGroups.ORDER) { group ->
                 val list = UBUNTU_COMPONENTS.filter { it.group == group }
                 if (list.isEmpty()) return@items
                 CategoryCard(
                     title = group,
                     desc = ComponentGroups.DESCS[group].orEmpty(),
+                    requiredGroup = group in ComponentGroups.REQUIRED_GROUPS,
                     list = list,
                     status = status,
                     expanded = expanded[group] == true,
@@ -305,6 +410,19 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // 「Pient 必须」还差什么（一眼看到，不用逐组展开找）
+            val missingRequired = status?.let { m ->
+                UBUNTU_COMPONENTS.filter { it.required && m[it.id] != true }
+            }.orEmpty()
+            if (missingRequired.isNotEmpty() && !EnvProvision.running) {
+                Text(
+                    "Pient 必须项还差 " + missingRequired.size + " 个：" +
+                        missingRequired.joinToString("、") { it.name } + " —— 点右侧「勾选必须项」再安装",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isSystemInDarkTheme()) DarkWarn else LightWarn,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(top = 8.dp),
@@ -315,6 +433,21 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
+                if (!EnvProvision.running) {
+                    Text(
+                        "勾选必须项",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .padding(end = 14.dp)
+                            .clickable {
+                                UBUNTU_COMPONENTS.filter { it.required }.forEach {
+                                    if (status?.get(it.id) != true) selected[it.id] = true
+                                }
+                            }
+                            .padding(horizontal = 6.dp, vertical = 8.dp),
+                    )
+                }
                 PientButton(
                     text = if (EnvProvision.running) "去终端查看" else "安装所选（${installable.size}）",
                     enabled = EnvProvision.running || installable.isNotEmpty(),
@@ -373,16 +506,25 @@ private fun DividerThin() {
     )
 }
 
-/** 徽标（推荐 / 需 Root）：小圆角标签 */
+/**
+ * 徽标（小圆角标签）：分类徽标（「Pient 必须」/「pi 工具依赖」）与行内标记（必须 / 大）共用。
+ * [strong] = 醒目的黄（Pient 必须项那类），否则用主色（普通提示）。
+ * 口径照 Operit 在分类标题下写「(Operit 必须)」的做法，这里做成可点读的小标签。
+ */
 @Composable
-private fun Badge(text: String) {
+private fun Badge(text: String, strong: Boolean = false) {
+    val color = if (strong) {
+        if (isSystemInDarkTheme()) DarkWarn else LightWarn
+    } else {
+        MaterialTheme.colorScheme.primary
+    }
     Text(
         text,
         style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.primary,
+        color = color,
         modifier = Modifier
             .padding(start = 6.dp)
-            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+            .background(color.copy(alpha = 0.14f), RoundedCornerShape(4.dp))
             .padding(horizontal = 5.dp, vertical = 1.dp),
     )
 }
@@ -395,6 +537,7 @@ private fun Badge(text: String) {
 private fun CategoryCard(
     title: String,
     desc: String,
+    requiredGroup: Boolean,
     list: List<UbuntuComponent>,
     status: Map<String, Boolean>?,
     expanded: Boolean,
@@ -415,6 +558,15 @@ private fun CategoryCard(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                // 「（Pient 必须）」：照 Operit 的做法写在分类标题下的橙色小字（不另做徽标）
+                if (requiredGroup) {
+                    Text(
+                        "（Pient 必须）",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isSystemInDarkTheme()) DarkWarn else LightWarn,
+                        modifier = Modifier.padding(top = 1.dp),
+                    )
+                }
                 Text(
                     "$installed/${list.size} 已装" + if (desc.isNotEmpty()) " · $desc" else "",
                     style = MaterialTheme.typography.labelSmall,
@@ -491,6 +643,7 @@ private fun ComponentRow(
                         modifier = Modifier.padding(start = 6.dp),
                     )
                 }
+                if (component.required) Badge("必须", strong = true)
                 if (component.heavy) Badge("大")
             }
             Text(
@@ -501,4 +654,20 @@ private fun ComponentRow(
             )
         }
     }
+}
+
+/** 「Pient 运行时」卡片的更新检查状态（默认 Idle = 显示「检测更新」） */
+private sealed interface PiUpdateState {
+    /** 还没检测过（按钮 = 检测更新） */
+    data object Idle : PiUpdateState
+
+    data object Checking : PiUpdateState
+
+    /** 已经是最新（[version] = 本机版本） */
+    data class Latest(val version: String) : PiUpdateState
+
+    /** 查到新版本（按钮 = 更新到 vX.Y.Z） */
+    data class Available(val current: String, val latest: String) : PiUpdateState
+
+    data class Failed(val reason: String) : PiUpdateState
 }

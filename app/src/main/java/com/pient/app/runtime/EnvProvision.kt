@@ -9,6 +9,8 @@ import com.pient.app.data.AptMirror
 import com.pient.app.data.UbuntuComponent
 import java.io.File
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * 环境内软件（Ubuntu）的**真实**配置：apt 镜像源写入 + 组件检测 + 组件安装。
@@ -22,6 +24,48 @@ import java.util.concurrent.TimeUnit
 object EnvProvision {
 
     private const val TAG = "PientEnv"
+
+    /** pi 在 npm 上的包名（与清单里的安装命令一致） */
+    private const val PI_PACKAGE = "@earendil-works/pi-coding-agent"
+
+    /**
+     * 查 **pi 的官方最新版**（npm registry：先镜像 `registry.npmmirror.com`，失败退回官方源）。
+     *
+     * 返回 null = 查不到（没网 / 解析失败）—— 由调用方如实显示「检测失败」，不假装已是最新。
+     * 走 App 自己的网络（宿主侧），不需要起 guest。
+     */
+    suspend fun latestPiVersion(): String? = withContext(Dispatchers.IO) {
+        val urls = listOf(
+            "https://registry.npmmirror.com/$PI_PACKAGE/latest",
+            "https://registry.npmjs.org/$PI_PACKAGE/latest",
+        )
+        for (u in urls) {
+            val body = runCatching {
+                val client = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(8, TimeUnit.SECONDS)
+                    .readTimeout(8, TimeUnit.SECONDS)
+                    .build()
+                client.newCall(okhttp3.Request.Builder().url(u).build()).execute().use { resp ->
+                    if (resp.isSuccessful) resp.body?.string() else null
+                }
+            }.getOrNull()
+            val ver = body?.let { Regex("\"version\"\\s*:\\s*\"([^\"]+)\"").find(it)?.groupValues?.get(1) }
+            if (!ver.isNullOrBlank()) return@withContext ver
+        }
+        null
+    }
+
+    /** 版本比较：[a] 是否比 [b] 新（`0.86.0` > `0.85.1`；忽略 `-pre` 后缀与空段） */
+    fun isNewer(a: String, b: String): Boolean {
+        fun parts(v: String) = v.substringBefore('-').split('.').map { it.trim().toIntOrNull() ?: 0 }
+        val x = parts(a)
+        val y = parts(b)
+        for (i in 0 until maxOf(x.size, y.size)) {
+            val d = (x.getOrElse(i) { 0 }) - (y.getOrElse(i) { 0 })
+            if (d != 0) return d > 0
+        }
+        return false
+    }
 
     /** 有安装任务在跑（页面据此把「安装所选」换成「去终端查看」） */
     var running by mutableStateOf(false)
