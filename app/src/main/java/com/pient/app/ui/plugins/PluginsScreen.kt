@@ -123,7 +123,7 @@ fun PluginsScreen(nav: NavController) {
                     item {
                         Text(
                             if (segment == 0)
-                                "还没有配置任何插件。点右下 + 安装（npm: / git: / 本地路径）。"
+                                "还没有配置任何插件。点右下 + 安装（npm: 包 / 本地路径）。"
                             else
                                 "当前项目没有插件。项目插件写在工作区的 .pi/settings.json（pi install -l）。",
                             style = MaterialTheme.typography.bodySmall,
@@ -330,7 +330,7 @@ private fun InstallPluginDialog(
                     )
                 }
                 Text(
-                    "支持：npm: 包 / git: 仓库 / https:// 链接 / 本地路径",
+                    "支持：npm: 包 / 本地路径；git: 与 https: 暂不支持（运行时没有 git）",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),

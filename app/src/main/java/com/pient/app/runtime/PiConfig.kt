@@ -106,6 +106,15 @@ object PiConfig {
                 .put("keepRecentTokens", cfg.keepRecentTokensValue)
         }
         if (compaction != null) json.put("compaction", compaction)
+        // npm 命令（argv 形式）：Android 上「私有目录里的脚本不能 execve」（SELinux），所以不能放一个
+        // 叫 npm 的脚本进 PATH —— 改为让 pi 直接跑 [node 二进制, 随包的 npm-cli.js]。
+        // pi 的 `npmCommand` 就是带参数的 argv（settings-manager.ts:114），装包时它 spawn 的第一段
+        // 是命令、其余是前置参数（package-manager.ts 用它拼 `node npm-cli.js install …`）。
+        val npmCli = PiRuntime.npmCli(context)
+        val npmCommand = if (npmCli.isFile) {
+            JSONArray().put(PiRuntime.nodeBinary(context).absolutePath).put(npmCli.absolutePath)
+        } else null
+        if (npmCommand != null) json.put("npmCommand", npmCommand)
         writeJson(file, json)
         Log.i(
             TAG,
@@ -114,7 +123,8 @@ object PiConfig {
                 (compaction?.let {
                     " compaction(enabled=${it.optBoolean("enabled")}, " +
                         "keepRecent=${it.optInt("keepRecentTokens")}, reserve=${it.optInt("reserveTokens")})"
-                } ?: ""),
+                } ?: "") +
+                (npmCommand?.let { " npmCommand=${it.optString(1)}" } ?: ""),
         )
     }
 
