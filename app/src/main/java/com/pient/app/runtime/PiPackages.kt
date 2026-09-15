@@ -60,7 +60,8 @@ object PiPackages {
                     "cd /workspace 2>/dev/null; export NO_COLOR=1; export FORCE_COLOR=0; pi $args",
                 )
                     .redirectErrorStream(true)
-                    .also { it.environment().putAll(PiRuntime.environment(context)) }
+                    // pi 自己永远在 Ubuntu 里跑（与用户选的 exec_env 解耦，见 PiRuntime.guestEnv）
+                    .also { it.environment().putAll(PiRuntime.guestEnv(context)) }
                     .start()
                 val out = StringBuilder()
                 val reader = Thread {
@@ -113,13 +114,12 @@ object PiPackages {
     // ─────────────────────────── 内部 ───────────────────────────
 
     private fun runInTerminal(context: Context, label: String, cmd: String, onDone: (() -> Unit)?) {
-        val session = TerminalSessions.sessionNamed(SESSION)
-            ?: TerminalSessions.newSession(context, SESSION)
         running = true
         step = label
         lastExit = null
         onFinished = onDone
-        TerminalSessions.runScript(session, label, listOf(cmd)) { code ->
+        // 会话固定 Ubuntu（见 GuestScripts / TerminalSessions.Session.execEnvOverride）
+        GuestScripts.runInTerminal(context, SESSION, label, cmd) { code ->
             running = false
             step = ""
             lastExit = code

@@ -128,10 +128,20 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
     // 默认把第一组展开（不然整页像空的）
     LaunchedEffect(Unit) { expanded[ComponentGroups.ORDER.first()] = true }
 
-    /** 环境就绪判定：Ubuntu 两类都要 rootfs 就绪；chroot 还要求设备已 Root */
+    /**
+     * 环境就绪判定（terminal 的两个形态都要 rootfs；chroot 还要求设备已 Root）。
+     * 注：**Android shell 不在这张列表里** —— 它是独立通道（见 `AndroidShell`），
+     * 与 terminal 执行环境是两条轴，入口在「系统权限设置」页（权限档位那一侧）。
+     */
     fun envReady(env: ExecEnv): Boolean = when (env) {
         ExecEnv.UBUNTU -> rootfsReady
         ExecEnv.UBUNTU_CHROOT -> rootfsReady && rooted
+    }
+
+    /** 未就绪时右侧显示的原因 */
+    fun envBlockedNote(env: ExecEnv): String = when (env) {
+        ExecEnv.UBUNTU_CHROOT -> "需 Root"
+        ExecEnv.UBUNTU -> "未就绪"
     }
 
     val installable = status?.let { m -> UBUNTU_COMPONENTS.filter { selected[it.id] == true && m[it.id] != true } }
@@ -306,7 +316,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                                 .clickable(enabled = ready) {
                                     SettingsStore.execEnv = env
                                     PiRuntime.prepareTerminal(context)   // 立刻写 exec_env，下一条命令生效
-                                    toast(if (env == ExecEnv.UBUNTU_CHROOT) "已切到 Ubuntu（chroot）" else "已切到 Ubuntu（PRoot）")
+                                    toast("已切到 ${env.title}")
                                 }
                                 .alpha(if (ready) 1f else 0.45f)
                                 .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -327,7 +337,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                                 Icon(Icons.Outlined.Check, "已选", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                             } else if (!ready) {
                                 Text(
-                                    if (env == ExecEnv.UBUNTU_CHROOT) "需 Root" else "未就绪",
+                                    envBlockedNote(env),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(start = 8.dp),

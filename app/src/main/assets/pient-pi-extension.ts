@@ -1,21 +1,26 @@
 /**
  * Pient ↔ pi 的桥接扩展（随 APK 预置，安装到 guest 的 `~/.pi/agent/extensions/pient.ts`）。
  *
- * 为什么需要它：pi 的官方 RPC 暴露了会话/树/分叉的**大部分**能力
+ * 这里一共三样东西：
+ *  1. `/pient-nav <entryId>` —— 会话内分支跳转（补 RPC 缺的那条能力）；
+ *  2. `/pient-sysprompt` —— 把 pi 真实生效的系统提示词回流给 App 的只读面板；
+ *  3. `android_shell` **工具** —— 让 AI 能在 **Android 系统**里执行命令（Ubuntu 做不到的那些：
+ *     `pm`/`am`/`cmd`/`dumpsys` 等系统命令、装应用、改系统设置、读别的 app 私有数据、操作硬件）。
+ *
+ * ── 为什么 `/pient-nav` 要自己写 ─────────────────────────────────────────────
+ * pi 的官方 RPC 暴露了会话/树/分叉的**大部分**能力
  * （`get_tree` / `get_entries` / `get_fork_messages` / `fork` / `clone` / `new_session` /
  * `switch_session` / `set_session_name` / `get_session_stats`），
  * 但**没有"把活跃叶移到树里另一个节点"的命令** —— 那正是 Pi TUI 里 `/tree` 干的事，
- * 只做成内部 API（`ctx.navigateTree`）暴露给扩展。
- *
- * Pient 的「会话内分支」（分支节点画布页上点某条历史消息继续）等于 pi 的树导航，
- * 所以这里注册一条命令补上这个缺口：
+ * 只做成内部 API（`ctx.navigateTree`）暴露给扩展。Pient 的「会话内分支」（画布上点某条
+ * 历史消息继续）等于 pi 的树导航，所以这里注册一条命令补上这个缺口：
  *
  *   /pient-nav <entryId> [--summarize] [--label <文字>] [--instructions <文字>]
  *
  * pi 的 RPC 说明里写明扩展命令属于 `get_commands` 并且 **"available for invocation via prompt"**，
  * 因此 Pient 侧只要 `{"type":"prompt","message":"/pient-nav <id>"}` 即可触发。
  *
- * ── 用户消息条目：锚点标记（2026-09-15）────────────────────────────────────────────
+ * ── 用户消息条目：锚点标记（2026-09-15）────────────────────────────────────────
  * `navigateTree` 对 **role=user 的条目**走的是 TUI 的"重编辑"语义：叶退到该条目的**父条目**，
  * 消息文本作为 `editorText` 回填编辑器（`agent-session.ts:3236-3251`）。Pient 的
  * 「创建分支 / 切换分支」要的是**停在该消息本身**——选中节点 = 上下文切到这次对话（画布节点
@@ -30,18 +35,107 @@
  *   ③ 对这条标记走 `ctx.navigateTree(marker)` —— 非用户条目 ⇒ 叶 = 该条目，并把
  *      `agent.state.messages` 按新叶重建（含目标用户消息本身）。
  * 幂等：同一节点复用已有标记，反复点不会往会话文件里堆条目。
+ *
+ * ── `android_shell` 为什么走 127.0.0.1 回桥 ──────────────────────────────────
+ * 本扩展跑在 **Ubuntu(PRoot) 的 guest 里**，而 Android 侧的通道只有两条，都不在 guest 里：
+ * Shizuku 的 `IShizukuService.newProcess` 是 Java 侧的 binder（shell 链路根本到不了）、
+ * `su` 是系统的 uid 0 通道。所以「guest → Android 系统」只有一条现实路径：
+ * **应用在 loopback 上开一个执行端点**（`ExecBridge.kt`），把端口与令牌写在
+ * `~/.pi/agent/.pient-exec-bridge.json`（这个文件 guest 看得见），本扩展读它、POST 命令，
+ * 应用按**当前档位**（Shizuku / Root）执行后回包。PRoot 与应用共享网络命名空间，所以
+ * `127.0.0.1` 就是同一台设备上的同一个应用进程。
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 
 /** 锚点标记的 customType（Pient 与 pi 都视其为元数据） */
 const ANCHOR_TYPE = "pient_anchor";
 
 /** 系统提示词回流文件（Pient 的「系统提示词」面板读它；App 侧不再持有提示词） */
 const SYSPROMPT_FILE = ".pient-sysprompt.txt";
+
+/** Android shell 回桥的端点文件（应用写；结构见 ExecBridge.kt） */
+const BRIDGE_FILE = ".pient-exec-bridge.json";
+
+function agentDir(): string {
+  return join(homedir(), ".pi", "agent");
+}
+
+interface BridgeInfo {
+  port: number;
+  token: string;
+  backend: string;
+}
+
+/** 读回桥端点（文件不存在 / 内容不合法 ⇒ null，调用方给可读的说明） */
+function bridgeInfo(): BridgeInfo | null {
+  try {
+    const raw = readFileSync(join(agentDir(), BRIDGE_FILE), "utf8");
+    const j = JSON.parse(raw) as Partial<BridgeInfo>;
+    if (typeof j.port === "number" && typeof j.token === "string") {
+      return { port: j.port, token: j.token, backend: typeof j.backend === "string" ? j.backend : "unknown" };
+    }
+  } catch {
+    /* 未就绪 */
+  }
+  return null;
+}
+
+interface BridgeResult {
+  ok?: boolean;
+  backend?: string;
+  exit?: number;
+  stdout?: string;
+  stderr?: string;
+  timeout?: boolean;
+  note?: string;
+}
+
+/** 让 App 在 Android 侧执行一条命令（超时由应用侧兜底，这里再加一层 fetch 超时） */
+async function androidExec(cmd: string, timeoutMs: number): Promise<BridgeResult> {
+  const info = bridgeInfo();
+  if (!info) {
+    return {
+      ok: false,
+      note:
+        "Android shell 回桥未就绪：App 还没写好端点文件（~/.pi/agent/.pient-exec-bridge.json）。" +
+        "请确认 Pient 应用在前台运行过、且 Ubuntu 运行时已解包。",
+    };
+  }
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs + 10_000);
+  try {
+    const res = await fetch(`http://127.0.0.1:${info.port}/exec`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: info.token, cmd, timeoutMs }),
+      signal: ctl.signal,
+    });
+    return (await res.json()) as BridgeResult;
+  } catch (e) {
+    return {
+      ok: false,
+      note: `回桥调用失败：${e instanceof Error ? e.message : String(e)}（应用可能已被系统回收，回到 Pient 前台再试）`,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 把结果格式化成模型好读的文本（stdout/stderr/退出码都给，别让模型猜） */
+function formatResult(r: BridgeResult, cmd: string): string {
+  if (r.note && !r.ok) return `${r.note}\n（命令未执行：${cmd}）`;
+  const lines: string[] = [];
+  lines.push(`# backend=${r.backend ?? "?"} exit=${r.exit ?? "?"}${r.timeout ? " （超时，已中断）" : ""}`);
+  if (r.stdout && r.stdout.length > 0) lines.push(r.stdout);
+  if (r.stderr && r.stderr.length > 0) lines.push(`[stderr]\n${r.stderr}`);
+  if ((!r.stdout || r.stdout.length === 0) && (!r.stderr || r.stderr.length === 0)) lines.push("（无输出）");
+  return lines.join("\n");
+}
 
 export default function (pi: ExtensionAPI) {
   // ── 系统提示词回流（2026-09-15）──────────────────────────────────────────────
@@ -53,13 +147,52 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       const text = ctx.getSystemPrompt();
       try {
-        const dir = join(homedir(), ".pi", "agent");
-        mkdirSync(dir, { recursive: true });
-        writeFileSync(join(dir, SYSPROMPT_FILE), text, "utf8");
+        mkdirSync(agentDir(), { recursive: true });
+        writeFileSync(join(agentDir(), SYSPROMPT_FILE), text, "utf8");
         ctx.ui.notify(`pient-sysprompt: 已写出系统提示词（${text.length} 字）`, "info");
       } catch (e) {
         ctx.ui.notify(`pient-sysprompt 写文件失败：${e instanceof Error ? e.message : String(e)}`, "error");
       }
+    },
+  });
+
+  // ── Android 系统 shell（Pient 要求 5）───────────────────────────────────────
+  // 只要注册就一定会出现在模型可见的工具表里；不可用时**如实报错**（而不是静默失败或装作做过）。
+  pi.registerTool({
+    name: "android_shell",
+    label: "Android Shell",
+    description:
+      "在 Android **系统 shell** 里执行一条命令（以 shell / root 身份）。用于 Ubuntu(PRoot) 做不到的系统级操作：" +
+      "`pm`（安装/卸载/查询应用）、`am`（启动 Activity/服务、发送广播）、`cmd`、`dumpsys`、`settings`、" +
+      "`getprop`/`setprop`、`svc`（网络/电源）、`input`（模拟点击输入）等；Root 档下还能读改 `/data/data` 下其它应用的私有数据、" +
+      "直接改系统文件。命令经 `sh -c` 执行，`;`、`&&`、管道、重定向均可。\n" +
+      "这条通道**完全独立于 Ubuntu 终端**：命令不经过 Ubuntu、不经过终端会话，由系统直接执行；" +
+      "而且**即发即走** —— 每次调用都是新进程，`cd` / `export` 之类的状态**不跨调用保留**" +
+      "（需要先切目录就写在同一句里：`cd /sdcard && ls`）。反过来，Ubuntu 沙盘里的文件、构建、包管理一律用 bash 工具。\n" +
+      "需要用户先在 Pient 里开启「调试权限（Shizuku）」或「Root 权限」——标准档下会返回明确的不可用说明。",
+    promptSnippet: "android_shell: 在 Android 系统 shell 里执行命令（pm/am/cmd/dumpsys/settings 等；需 Shizuku 或 Root）",
+    promptGuidelines: [
+      "android_shell 用于操作 Android 系统本身（安装应用、启动组件、改系统设置、读系统属性、模拟输入）；Ubuntu 内的文件与构建操作一律用 bash。",
+      "android_shell 需要用户在 Pient 里开启 Shizuku（调试权限）或 Root 权限；工具返回不可用说明时，如实转告用户并给出开启路径，不要改用别的方式硬凑。",
+      "android_shell 以 shell 或 root 身份执行，命令会真实作用于用户的设备：先想清楚再执行，破坏性命令（卸载、删除、格式化）务必先向用户确认。",
+    ],
+    parameters: Type.Object({
+      command: Type.String({ description: "要在 Android 系统 shell 里执行的命令（经 sh -c）" }),
+      timeout_ms: Type.Optional(
+        Type.Number({ description: "超时毫秒数，默认 30000；安装应用等慢操作可加大（上限 600000）" }),
+      ),
+    }),
+    async execute(_toolCallId, params, signal) {
+      const cmd = (params.command ?? "").trim();
+      if (!cmd) {
+        return { content: [{ type: "text", text: "command 为空：android_shell 需要一条要执行的命令。" }], details: {} };
+      }
+      if (signal?.aborted) {
+        return { content: [{ type: "text", text: "已取消（调用被中止）。" }], details: {} };
+      }
+      const timeoutMs = Math.max(1000, Math.min(600000, Math.floor(params.timeout_ms ?? 30000)));
+      const r = await androidExec(cmd, timeoutMs);
+      return { content: [{ type: "text", text: formatResult(r, cmd) }], details: { backend: r.backend ?? null } };
     },
   });
 

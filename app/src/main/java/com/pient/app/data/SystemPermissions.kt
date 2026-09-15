@@ -312,9 +312,20 @@ object RootGateway {
                 runCatching { context.packageManager.getPackageInfo(pkg, 0) }.isSuccess
             }
 
+    /**
+     * 「**已授权**」缓存（2026-09-15 加）：[requestAccess] 真跑通过一次 su（uid=0）后置真。
+     * 为什么需要它：`deviceRooted` 只说明设备**看起来**有 root，su 每次调用都可能弹授权框或被拒；
+     * 而 Android shell 通道要按「现在到底能不能用」门控（工具描述、终端页选项都以它为准）。
+     */
+    @Volatile
+    var granted: Boolean = false
+        private set
+
     /** 请求 Root 授权：调用一次 su（首次触发授权弹窗），返回是否拿到 uid=0 */
     suspend fun requestAccess(): Boolean = withContext(Dispatchers.IO) {
-        runSu("id")?.contains("uid=0") == true
+        val ok = runSu("id")?.contains("uid=0") == true
+        granted = ok
+        ok
     }
 
     private fun runSu(command: String): String? = try {

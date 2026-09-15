@@ -298,6 +298,10 @@ dependencies {
     //   provider — binder 接收入口（AndroidManifest 里需声明 rikka.shizuku.ShizukuProvider，见 manifest）
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+    // aidl = `moe.shizuku.server.IShizukuService` / `IRemoteProcess` 的接口定义（2026-09-15 加）：
+    // Android shell 通道要在 Java 侧调 `IShizukuService.newProcess(...)` 以 shell 身份起进程 ——
+    // 那两个类型就在这个 artifact 里（api 只是 Java 友好封装，不含 newProcess）。
+    implementation("dev.rikka.shizuku:aidl:13.1.5")
     // 数学公式渲染（LaTeX → 位图，Operit 同款依赖：jlatexmath 的 Android 移植，字体资源随 AAR 打包）
     implementation("ru.noties:jlatexmath-android:0.2.0")
     // 输入框材质（磨砂玻璃 / 液态玻璃，2026-09-12，与 Mdcito 同款依赖）：

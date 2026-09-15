@@ -13,32 +13,20 @@
 P=$(dirname "$HOME")
 
 # ── 执行环境路由（应用写进 $P/exec_env；本脚本每次被执行时现读 → 改完下一条命令即生效）──
-#   android       系统 shell（toybox）：am / pm / dumpsys / getprop 等 Android 命令直接可用
-#   ubuntu        Ubuntu 24.04 rootfs（PRoot，应用 uid，无需 Root）
+#   ubuntu        Ubuntu 24.04 rootfs（PRoot，应用 uid，无需 Root）—— 默认
 #   ubuntu-chroot 同一个 rootfs，su + chroot（真 uid 0，零模拟开销；无 su 时可见回退 PRoot）
-# PIENT_EXEC_ENV 可覆盖（环境配置页安装组件时强制走 Ubuntu，不受当前选择影响）。
+# PIENT_EXEC_ENV 可覆盖（应用内部会话固定 ubuntu；见 TerminalSessions.Session.execEnvOverride）。
+#
+# **这里没有 "android" 这个取值**：Android shell 是另一条**独立通道** —— 由应用在 Java 侧
+# 用 Shizuku(IShizukuService.newProcess) / su 直接把命令扔给 Android 系统执行，即发即走、
+# 没有会话，也从不经过本脚本（见 runtime/AndroidShell.kt + runtime/ExecBridge.kt）。
 E=${PIENT_EXEC_ENV:-$(cat "$P/exec_env" 2>/dev/null)}
 
 # 工作区 = 当前项目目录（应用写；没设过就退回随包工作区 app/）——agent 的 cwd 与 guest 的 /workspace 同一处
 W=$(cat "$P/workspace" 2>/dev/null)
 [ -n "$W" ] && [ -d "$W" ] || W=$P/app
 
-# ── ① Android shell（需 Shizuku / Root 授权）：系统命令以 root 身份执行 ──
-#   标准权限下这个环境不可选（页面里会拦）；真跑起来时若拿不到 su 就可见回退 Ubuntu。
-if [ "$E" = "android" ]; then
-  if command -v su >/dev/null 2>&1; then
-    if [ "${1:-}" = "-c" ] && [ $# -ge 2 ]; then
-      mkdir -p "$P/tmp"
-      # 命令正文经文件转交，避开 su -c "...引号..." 的拆解（路径无空格，安全）
-      printf '%s' "$2" > "$P/tmp/android-cmd.sh"
-      exec su -c "cd $W 2>/dev/null; sh $P/tmp/android-cmd.sh"
-    fi
-    exec su -c "cd $W 2>/dev/null; /system/bin/sh"
-  fi
-  echo "[pient] 已选 Android shell，但未获得 Shizuku / Root 授权 —— 本次回退 Ubuntu（PRoot）。" >&2
-fi
-
-# ── ② Ubuntu（chroot）：su 通道，真 root ──
+# ── ① Ubuntu（chroot）：su 通道，真 root ──
 if [ "$E" = "ubuntu-chroot" ]; then
   if command -v su >/dev/null 2>&1; then
     if [ "${1:-}" = "-c" ] && [ $# -ge 2 ]; then
@@ -52,7 +40,7 @@ if [ "$E" = "ubuntu-chroot" ]; then
   echo "[pient] 已选 Ubuntu（chroot），但设备上没有可用的 su（未 root / 未授权）——本次回退 PRoot（应用 uid）。" >&2
 fi
 
-# ── ③ Ubuntu（PRoot，默认）：应用 uid 跑 GNU 用户空间 ──
+# ── ② Ubuntu（PRoot，默认）：应用 uid 跑 GNU 用户空间 ──
 # env -i：宿主环境是 Android 的（PATH 指向 /system/bin、LD_* 指向 Android 库），
 # 直接透传会把 guest 污染成四不像（实测：guest 里 `head`/`id` 全找不到）。
 # `-l`（link2symlink）**必须开**：SELinux 不允许 untrusted_app 建硬链接（avc denied { link }），

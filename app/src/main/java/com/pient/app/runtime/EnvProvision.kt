@@ -171,8 +171,8 @@ object EnvProvision {
      * @return 承载安装的会话（调用方据此切到终端页并选中这个会话）
      */
     fun installInTerminal(context: Context, components: List<UbuntuComponent>): TerminalSessions.Session {
-        val session = TerminalSessions.sessionNamed(TerminalSessions.CONFIG_SESSION)
-            ?: TerminalSessions.newSession(context, TerminalSessions.CONFIG_SESSION)
+        // 会话固定 Ubuntu（不受用户给终端页选的执行环境影响；见 GuestScripts）
+        val session = GuestScripts.sessionFor(context, TerminalSessions.CONFIG_SESSION)
         if (components.isEmpty() || running) return session
         running = true
         step = "安装 ${components.size} 个组件"

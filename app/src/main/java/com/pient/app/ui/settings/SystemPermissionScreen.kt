@@ -64,6 +64,7 @@ import com.pient.app.data.PermissionTier
 import com.pient.app.data.RootGateway
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ShizukuGateway
+import com.pient.app.runtime.AndroidShell
 import com.pient.app.data.SystemPermissions
 import com.pient.app.ui.components.ArcSpinner
 import com.pient.app.ui.components.PientButton
@@ -389,14 +390,41 @@ fun SystemPermissionScreen(nav: NavController) {
             // 归位说明（2026-09-13 用户拍板）：这一块**不再放在终端页**——终端页是 Ubuntu 的地盘；
             // 系统命令通道属于"权限能力"，按 Operit 的口径只在权限页管（Operit 的 AndroidPermissionLevel
             // 也只出现在权限引导页/抽屉/权限卡里）。bash 的执行落点与这里无关（只有 Ubuntu 两档）。
+            //
+            // 2026-09-15（要求 5）起这里是**真状态**：通道 = 应用在 Java 侧用 Shizuku / su 直接把命令
+            // 扔给 Android 系统执行，即发即走、没有会话；AI 的工具 `android_shell` 与它同源。
             SectionHeader("Android shell（系统命令通道）", icon = Icons.Outlined.Terminal)
             PermissionCardBox {
                 Column(Modifier.padding(14.dp)) {
+                    val shellReady = AndroidShell.available(context)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            if (shellReady) Icons.Outlined.CheckCircle else Icons.Outlined.Info,
+                            null,
+                            tint = if (shellReady) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            AndroidShell.statusText(context),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (shellReady) MaterialTheme.colorScheme.onBackground
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 6.dp).weight(1f),
+                        )
+                    }
                     Text(
-                        "原「系统命令执行通道」条目随工具层整体移除（2026-09-14）：当前版本不执行任何 AI 工具命令，" +
-                            "本区块仅保留界面位置。",
-                        style = MaterialTheme.typography.bodySmall,
+                        "这是一条**独立通道**：命令由系统直接执行，不经过 Ubuntu、也不经过终端会话；" +
+                            "每次调用都是新进程（没有会话、不保留 cd/export 状态）。" +
+                            "AI 侧通过 `android_shell` 工具使用它。" +
+                            if (shellReady && displayed == PermissionTier.ROOT) {
+                                " Root 档下还可以在「环境配置」把 Ubuntu 从 PRoot 升级为 chroot。"
+                            } else {
+                                ""
+                            },
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
                     )
                 }
             }

@@ -432,6 +432,9 @@ object PiRuntime {
         appDir(context).mkdirs()
         ensureLinks(context)
         installPiExtension(context)
+        // Android shell 回桥的端点文件（要求 5）：rootfs 刚解包好时这里补写一次 ——
+        // 应用启动那一刻 rootfs 可能还没就绪，端点文件当时写不进去（父目录不存在）。
+        ExecBridge.writeEndpointFile(context)
         ensureRootfsAsync(context)
         ensurePiAsync(context)      // rootfs 未就绪时它会直接返回，等解包完的链式调用再补
     }
@@ -587,4 +590,17 @@ object PiRuntime {
         "HOME" to File(root(context), "home").absolutePath,
         "TMPDIR" to tmpDir(context).absolutePath,
     )
+
+    /**
+     * **应用内部**调用 guest 时的环境变量：强制 Ubuntu（PRoot）。
+     *
+     * 为什么必须强制：`exec_env` 是给「用户/终端页/工具命令」选的落点（Ubuntu PRoot / Ubuntu chroot /
+     * Android shell）。但 **pi 自己**（App 的 RPC 通道、`pi list/install/remove`、技能扫描脚本）永远
+     * 只能跑在 Ubuntu 里 —— node 与 pi 都装在那棵 rootfs 里；一旦跟着 `exec_env=android` 走，
+     * 通道会以「Android 上没有 pi」的方式整体失效（实测前的设计约束，别省这一步）。
+     *
+     * @param execEnv 传 `ubuntu-chroot` 可让 pi 走 chroot（只在明确的场景下用）
+     */
+    fun guestEnv(context: Context, execEnv: String = "ubuntu"): Map<String, String> =
+        environment(context) + mapOf("PIENT_EXEC_ENV" to execEnv)
 }

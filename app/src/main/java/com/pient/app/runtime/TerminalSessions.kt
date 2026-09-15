@@ -5,7 +5,9 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.compose.runtime.mutableStateListOf
+import com.pient.app.data.ExecEnv
 import com.pient.app.data.MockTerminal
+import com.pient.app.data.SettingsStore
 import com.pient.app.data.TerminalLine
 import com.pient.app.data.TerminalLineKind
 import java.util.concurrent.TimeUnit
@@ -17,8 +19,12 @@ import java.util.concurrent.TimeUnit
  *
  * 因为是**同一个 shell 进程**，`cd` / `export` 在会话内保持；命令逐行写 stdin，输出逐行回流到界面。
  *
- * 执行环境（`android` / `ubuntu` / `ubuntu-chroot`）由包装脚本**每次被执行时现读**
- * `files/pient-rt/exec_env` 决定 —— 改完下一条命令/新会话即生效，已在跑的会话进程不换环境。
+ * 执行环境（`ubuntu` / `ubuntu-chroot`）由包装脚本**每次被执行时现读** `files/pient-rt/exec_env`
+ * 决定 —— 改完下一条命令/新会话即生效，已在跑的会话进程不换环境。
+ *
+ * **Android shell 不在这条链上**（2026-09-15 用户口径）：它是**另一条独立通道** ——
+ * Shizuku / Root 把命令直接扔给 Android 系统执行，不经过 terminal、不经过 Ubuntu，
+ * 且**即发即走、没有会话**（`runtime/AndroidShell.kt` + `runtime/ExecBridge.kt`）。
  *
  * 已知边界（无 PTY，如实说明）：交互式程序（vim / top / apt 的 TUI）与行编辑、Tab 补全不可用；
  * Ctrl+C 也发不出 SIGINT —— [interrupt] 的实现是「结束并重建该会话进程」（cwd 回到 ~）。要真终端需上 PTY。
@@ -34,9 +40,14 @@ object TerminalSessions {
     /** 脚本结束哨兵：只有 `echo` 出来的这一行会被拦下（不显示），用来判定安装结束与退出码 */
     private const val SENTINEL = "__PIENT_DONE__"
 
-    class Session(val id: Int, val name: String) {
+    class Session(val id: Int, val name: String, /**
+         * 执行环境覆盖（`PIENT_EXEC_ENV`）：null = 跟随用户在「环境配置」页选的那个。
+         * 应用**内部**的会话（环境配置安装、pi 包管理、技能市场）固定 `"ubuntu"` ——
+         * 它们要的是「node 与 pi 在的那棵 rootfs」，跟着用户把终端页切到 Android shell 会整体失效。
+         */
+        val execEnvOverride: String? = null) {
         val lines = mutableStateListOf<TerminalLine>()
-        @Volatile var process: Process? = null
+        @Volatile var process: ShellProcess? = null
         @Volatile var alive: Boolean = false
 
         /** 跨 read 的半行缓冲（管道 read 会把行截断） */
@@ -60,18 +71,21 @@ object TerminalSessions {
     /** 按名字找会话（「环境配置」复用同一个，不重复建） */
     fun sessionNamed(name: String): Session? = sessions.firstOrNull { it.name == name }
 
-    /** 新建会话：横幅 + 一条真实的环境自检命令（首屏输出即证明连到了 rootfs） */
+    /** 新建会话：横幅 + 一条真实的环境自检命令（首屏输出即证明连到了目标环境） */
     @Synchronized
-    fun newSession(context: Context, name: String? = null): Session {
+    fun newSession(context: Context, name: String? = null, execEnvOverride: String? = null): Session {
         appContext = context.applicationContext
         counter += 1
-        val s = Session(counter, name ?: "会话$counter")
+        val s = Session(counter, name ?: "会话$counter", execEnvOverride)
         s.lines.addAll(MockTerminal.banner)
         sessions += s
         start(context, s)
-        write(s, INIT_CMD)
+        write(s, initCommand(s))
         return s
     }
+
+    /** 首屏自检命令（**terminal 恒为 Ubuntu**：Android shell 是独立通道，不在这里跑） */
+    private fun initCommand(session: Session): String = INIT_CMD
 
     /**
      * 在会话里跑一段脚本（「环境配置 → 安装所选」走这条）：
@@ -116,8 +130,8 @@ object TerminalSessions {
         }
         val p = session.process ?: return
         runCatching {
-            p.outputStream.write((command + "\n").toByteArray(Charsets.UTF_8))
-            p.outputStream.flush()
+            p.stdin.write((command + "\n").toByteArray(Charsets.UTF_8))
+            p.stdin.flush()
         }.onFailure { append(session, TerminalLine("写入失败：${it.message}", TerminalLineKind.OUTPUT)) }
     }
 
@@ -131,7 +145,8 @@ object TerminalSessions {
         return runCatching {
             val p = ProcessBuilder(shell.absolutePath, "-c", command)
                 .redirectErrorStream(true)
-                .also { it.environment().putAll(PiRuntime.environment(context)) }
+                // 探针类调用固定 Ubuntu（不受 exec_env 选择影响；见 PiRuntime.guestEnv）
+                .also { it.environment().putAll(PiRuntime.guestEnv(context)) }
                 .start()
             val text = StringBuilder()
             val reader = Thread {
@@ -153,7 +168,11 @@ object TerminalSessions {
     @Synchronized
     private fun start(context: Context, session: Session) {
         PiRuntime.prepareTerminal(context)   // DNS / root 启动器 / 执行环境，会话启动时对齐
-        // 终端页固定是 Ubuntu 环境（装工具链、跑脚本都在这）
+        val effectiveEnv = session.execEnvOverride ?: SettingsStore.execEnv.id
+
+        // 终端页 = **proot Ubuntu**（装工具链、跑脚本、AI 的 bash 工具都在这；chroot 是它的 Root 形态）。
+        // 注：**Android shell 不走这里** —— 它是另一条独立通道（Shizuku / Root 直接把命令扔给系统执行、
+        // 即发即走、没有会话），实现在 runtime/AndroidShell.kt + ExecBridge.kt（2026-09-15 用户口径）。
         if (!PiRuntime.rootfsReady(context)) {
             // 对齐 Operit 的口径：**不需要用户手动点解包** —— Operit 把 install_ubuntu 写进生成的
             // 启动脚本（common.sh），首次起会话自动解包并把进度回显到终端。这里照做。
@@ -199,25 +218,37 @@ object TerminalSessions {
         val proc = runCatching {
             ProcessBuilder(shell.absolutePath)
                 .redirectErrorStream(true)
-                .also { it.environment().putAll(PiRuntime.environment(context)) }
+                .also { pb ->
+                    pb.environment().putAll(PiRuntime.environment(context))
+                    // 应用内部会话固定 Ubuntu（见 Session.execEnvOverride）：包装脚本读它优先于 exec_env 文件
+                    session.execEnvOverride?.let { pb.environment()["PIENT_EXEC_ENV"] = it }
+                }
                 .start()
         }.getOrElse {
             append(session, TerminalLine("会话启动失败：${it.message}", TerminalLineKind.OUTPUT))
             return
         }
-        session.process = proc
+        // 本地进程统一包成 ShellProcess（与 Shizuku 远端进程同一接口；pump/write 只认它）
+        val wrapped = LocalShellProcess(
+            proc,
+            when (effectiveEnv) {
+                ExecEnv.UBUNTU_CHROOT.id -> "Ubuntu(chroot)"
+                else -> "Ubuntu(PRoot)"
+            },
+        )
+        session.process = wrapped
         session.alive = true
         session.pending.setLength(0)
         Log.i(TAG, "会话${session.id} 启动 shell=${shell.name}")
-        Thread({ pump(session, proc) }, "pient-term-${session.id}")
+        Thread({ pump(session, wrapped) }, "pient-term-${session.id}")
             .apply { isDaemon = true }
             .start()
     }
 
-    private fun pump(session: Session, proc: Process) {
+    private fun pump(session: Session, proc: ShellProcess) {
         runCatching {
             val buf = ByteArray(4096)
-            val input = proc.inputStream
+            val input = proc.stdout
             // 块边界可能正好切在一个 UTF-8 多字节字符中间（中文 3 字节），
             // 整块解码会把尾部的半个字符变成 U+FFFD：把不完整的尾巴留到下一块再解。
             var pending = ByteArray(0)

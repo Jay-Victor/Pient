@@ -16,11 +16,18 @@ R=$P/rootfs
 
 [ -x "$R/bin/bash" ] || { echo "[pient] rootfs 未就绪：$R" >&2; exit 127; }
 
+# 工作区 = 当前项目目录（应用写进 $P/workspace；没设过就退回随包工作区 app/）——
+# **与 PRoot 分支同一口径**：早先这里写死 bind $P/app，导致 chroot 模式下 guest 的
+# /workspace 永远是随包目录、看不到用户当前项目（2026-09-15 修）。
+W=$(cat "$P/workspace" 2>/dev/null)
+[ -n "$W" ] && [ -d "$W" ] || W=$P/app
+mkdir -p "$R/workspace"
+
 # chroot 前把宿主侧该给的东西挂进去（幂等：已是挂载点会失败，忽略即可）
 mount -t proc proc "$R/proc" 2>/dev/null
 mount -t sysfs sysfs "$R/sys" 2>/dev/null
 mount -o bind /dev "$R/dev" 2>/dev/null
-mount -o bind "$P/app" "$R/workspace" 2>/dev/null
+mount -o bind "$W" "$R/workspace" 2>/dev/null
 
 GUEST_ENV="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C.UTF-8 TERM=xterm"
 

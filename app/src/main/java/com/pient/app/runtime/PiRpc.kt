@@ -129,7 +129,9 @@ object PiRpc {
             val proc = ProcessBuilder(shell.absolutePath, "-c", cmd)
                 .directory(PiRuntime.appDir(ctx))
                 .redirectErrorStream(false)
-                .also { it.environment().putAll(PiRuntime.environment(ctx)) }
+                // **pi 自己永远在 Ubuntu 里跑**（与用户选的 exec_env 解耦）：node 与 pi 都装在那棵 rootfs 里，
+                // 跟着 exec_env=android 走会把通道整体打断（见 PiRuntime.guestEnv 的说明）。
+                .also { it.environment().putAll(PiRuntime.guestEnv(ctx)) }
                 .start()
             process = proc
             writer = OutputStreamWriter(proc.outputStream, StandardCharsets.UTF_8)

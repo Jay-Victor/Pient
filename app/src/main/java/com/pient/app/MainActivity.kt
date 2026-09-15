@@ -23,6 +23,10 @@ class MainActivity : ComponentActivity() {
         PiRuntime.ensureRootfsAsync(this)
         // 预置的 pi 包解进 Ubuntu（rootfs 未就绪时立即返回，由解包完成后的链式调用接手）
         PiRuntime.ensurePiAsync(this)
+        // Android shell 回桥（2026-09-15，要求 5）：guest 里的 pi 工具要执行 Android 命令时，
+        // 经 loopback 回到应用执行（Shizuku 的 binder 只在 Java 侧可达）。起在应用启动，
+        // 端点文件每次请求都会刷新（档位/授权变化后无需重启 pi）。
+        com.pient.app.runtime.ExecBridge.ensureStarted(this)
         // 背景图片预解码（与 Compose 启动重叠）：聊天页首帧即可同步命中缓存，
         // 不再出现「先空背景、等 IO 解码完才出图」的一瞬（2026-09-12）
         preloadBackgroundImage(this)

@@ -11,11 +11,18 @@ package com.pient.app.data
  */
 
 /**
- * 执行环境（终端层的落点）——界面语义保留：AI 的 shell 命令曾经跑在哪一个环境里。
- * 当前版本不连接执行环境，选择只作为界面状态保存。
+ * 执行环境（**terminal 自己的落点**）—— 终端页会话与工具命令跑在哪一个环境里。
+ *
+ * **这里只有 proot Ubuntu 的两个形态**：同一个 rootfs（它有**自己的 root 用户、自己的文件系统、
+ * 自己的包管理器**），区别只在「怎么进去」——PRoot（应用 uid，无需 Root）与 su + chroot（真 uid 0）。
+ *
+ * **Android shell 不是这里的一个取值**（2026-09-15 用户口径）：它是**另一条完全独立的通道** ——
+ * Shizuku / Root 把命令**直接扔给 Android 系统**执行，不经过 terminal、不经过 Ubuntu，
+ * 而且**即发即走、没有会话**（见 `runtime/AndroidShell.kt` 与 `runtime/ExecBridge.kt`）。
+ * 两条轴别混：本枚举管「terminal 落在哪」，权限档位管「AI 能不能用 Android shell 通道」。
  */
 enum class ExecEnv(
-    val id: String,          // prefs 存储值
+    val id: String,          // prefs 存储值 + exec_env 文件内容
     val title: String,
     val desc: String,
     val badge: String,       // 卡片右侧徽标（推荐 / 需 Root）
