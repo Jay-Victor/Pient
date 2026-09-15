@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,7 +15,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -28,8 +26,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,45 +35,68 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
-import com.pient.app.data.MockStore
-import com.pient.app.data.SkillItem
+import com.pient.app.runtime.PiSkills
+import com.pient.app.runtime.PiSkillsMarket
 import com.pient.app.ui.components.PientButton
+import com.pient.app.ui.components.PientSegmented
 import com.pient.app.ui.theme.MonoFont
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
- * 技能搜索页（**UI 壳**，2026-09-14：市场请求 / 安装链路已移除）：
- * 结果分两组：市场结果（占位数据，原 skills.sh 形态）+ 本地已安装匹配（[MockStore]）。
- * 「安装」只把条目标记为已安装（内存态），不写盘、不联网。
+ * 技能搜索页（**真数据层**，2026-09-15 接回 pi 生态）：
+ *
+ * - **市场结果** = skills.sh（与 pi-web 同一条通信：`GET /api/search`，失败回落
+ *   `npx skills find`），见 [PiSkillsMarket]；
+ * - **安装** = `npx skills add <包> -y --agent pi [-g]` —— `--agent pi` 让 skills CLI 按
+ *   pi 的目录约定落地（项目作用域 `.agents/skills`、全局 `~/.agents/skills`），
+ *   安装过程在终端页「技能市场」会话里可见（有报错就去那里看原文）；
+ * - **已安装（本地匹配）** = 直接扫盘 pi 的技能目录（[PiSkills]：`~/.pi/agent/skills`、
+ *   `~/.agents/skills`、项目 `.pi/skills`、`.agents/skills`）。
+ *
+ * 页面结构沿用原设计（搜索行 + 分组列表），只把占位数据换成真实数据。
  */
 @Composable
 fun SkillSearchScreen(nav: NavController) {
+    val context = LocalContext.current
     var query by remember { mutableStateOf("") }
     var searched by remember { mutableStateOf("") }
-    var installing by remember { mutableStateOf<String?>(null) }
+    var searching by remember { mutableStateOf(false) }
+    var installing by remember { mutableStateOf<String?>(null) }     // 正在安装的包标识
     val scope = rememberCoroutineScope()
 
-    // 市场结果：占位数据按关键词过滤（原 skills.sh 请求已移除）
-    var marketResults by remember { mutableStateOf<List<SkillItem>>(emptyList()) }
+    var marketResults by remember { mutableStateOf<List<PiSkillsMarket.Hit>>(emptyList()) }
     var note by remember { mutableStateOf<String?>(null) }
-    // 本页内「已安装」集合（把市场条目标记为已安装；内存态，重启即重置）
-    var installedNames by remember { mutableStateOf(setOf<String>()) }
 
+    /** 安装落点：true = 全局（`-g`，~/.agents/skills）/ false = 项目（当前项目的 .agents/skills） */
+    var global by remember { mutableStateOf(true) }
+
+    /** 本地已安装技能（真扫盘；安装完会重扫） */
+    var localSkills by remember { mutableStateOf<List<PiSkills.Local>>(emptyList()) }
+    fun rescanLocal() {
+        scope.launch { localSkills = withContext(Dispatchers.IO) { PiSkills.list(context) } }
+    }
+    LaunchedEffect(Unit) { rescanLocal() }
+
+    // 市场搜索（真网络；失败时把原因如实写在 note 里）
     LaunchedEffect(searched) {
         if (searched.isBlank()) {
             marketResults = emptyList()
             note = null
             return@LaunchedEffect
         }
-        val r = MockStore.marketSkills.filter { it.name.contains(searched, ignoreCase = true) }
-        marketResults = r
-        note = if (r.isEmpty()) "没有匹配的技能（占位数据里没有）" else null
+        searching = true
+        val (hits, err) = PiSkillsMarket.search(context, searched)
+        marketResults = hits
+        note = err
+        searching = false
     }
 
-    val localResults = (MockStore.globalSkills + MockStore.projectSkills).filter {
+    val localResults = localSkills.filter {
         searched.isNotBlank() && it.name.contains(searched, ignoreCase = true)
     }
 
@@ -149,12 +170,27 @@ fun SkillSearchScreen(nav: NavController) {
             // 搜索按钮：与输入框同高 44dp；宽度固定 72dp 以对齐输入框行
             //（PientButton 自身已带左右 20dp 内边距，2026-09-12 起）
             PientButton(
-                "搜索",
+                if (searching) "搜索中" else "搜索",
                 onClick = { searched = query },
                 height = 44,
+                enabled = !searching,
                 modifier = Modifier.padding(start = 10.dp).width(72.dp),
             )
         }
+
+        // 安装落点选择（与插件页同一套组件；pi 的两处技能目录）
+        PientSegmented(
+            labels = listOf("装到全局", "装到项目"),
+            selected = if (global) 0 else 1,
+            onSelect = { global = it == 0 },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        )
+        Text(
+            if (global) "~/.agents/skills（pi 全局技能目录）" else "当前项目 .agents/skills",
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFont),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+        )
 
         LazyColumn(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
@@ -163,10 +199,23 @@ fun SkillSearchScreen(nav: NavController) {
             if (searched.isBlank()) {
                 item {
                     Text(
-                        "输入关键词后搜索技能市场（skills.sh）",
+                        "输入关键词后搜索技能市场（skills.sh；搜索走应用直连，安装由 Ubuntu 里的 skills CLI 执行）",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+            if (searching) {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                        Text(
+                            "正在搜索技能市场…",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
                 }
             }
             note?.let { text ->
@@ -182,19 +231,21 @@ fun SkillSearchScreen(nav: NavController) {
                 item {
                     Text("市场结果（skills.sh）：", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                 }
-                items(marketResults, key = { it.marketId ?: it.name }) { skill ->
+                items(marketResults, key = { it.pkg }) { hit ->
                     MarketSkillRow(
-                        skill = skill,
-                        installing = installing == skill.name,
-                        installed = skill.name in installedNames,
+                        hit = hit,
+                        installing = installing == hit.pkg,
                         onInstall = {
-                            installing = skill.name
-                            scope.launch {
-                                // 占位安装：模拟一次进度，然后标记「已安装」（不写盘、不联网）
-                                delay(700)
-                                installedNames = installedNames + skill.name
+                            installing = hit.pkg
+                            note = "已开始安装 ${hit.pkg} —— 终端页「${PiSkillsMarket.SESSION}」可看进度"
+                            PiSkillsMarket.install(context, hit.pkg, global) { code ->
                                 installing = null
-                                note = "已安装「${skill.name}」（占位数据，仅界面演示）"
+                                note = if (code == 0) {
+                                    "已安装「${hit.name}」（${if (global) "全局" else "项目"}）"
+                                } else {
+                                    "安装失败（退出码 $code）—— 终端页「${PiSkillsMarket.SESSION}」有完整报错"
+                                }
+                                rescanLocal()
                             }
                         },
                     )
@@ -204,7 +255,7 @@ fun SkillSearchScreen(nav: NavController) {
                 item {
                     Text("已安装（本地匹配）：", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                 }
-                items(localResults, key = { "l-${it.global}-${it.name}" }) { skill ->
+                items(localResults, key = { "l-${it.global}-${it.name}-${it.relPath}" }) { skill ->
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
@@ -218,6 +269,14 @@ fun SkillSearchScreen(nav: NavController) {
                             style = MaterialTheme.typography.bodyMedium.copy(fontFamily = MonoFont),
                             modifier = Modifier.weight(1f),
                         )
+                        if (!skill.enabled) {
+                            Text(
+                                "已停用",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(end = 6.dp),
+                            )
+                        }
                         Icon(
                             Icons.Outlined.Check, null,
                             tint = MaterialTheme.colorScheme.primary,
@@ -231,7 +290,7 @@ fun SkillSearchScreen(nav: NavController) {
                     }
                 }
             }
-            if (searched.isNotBlank() && marketResults.isEmpty() && localResults.isEmpty()) {
+            if (searched.isNotBlank() && !searching && marketResults.isEmpty() && localResults.isEmpty()) {
                 item {
                     Text(
                         "没有找到与「$searched」相关的技能",
@@ -246,9 +305,8 @@ fun SkillSearchScreen(nav: NavController) {
 
 @Composable
 private fun MarketSkillRow(
-    skill: SkillItem,
+    hit: PiSkillsMarket.Hit,
     installing: Boolean,
-    installed: Boolean,
     onInstall: () -> Unit,
 ) {
     Row(
@@ -260,30 +318,26 @@ private fun MarketSkillRow(
             .padding(12.dp),
     ) {
         Column(Modifier.weight(1f)) {
-            Text(skill.name, style = MaterialTheme.typography.labelLarge.copy(fontFamily = MonoFont))
+            Text(hit.label, style = MaterialTheme.typography.labelLarge.copy(fontFamily = MonoFont))
             Text(
-                skill.desc,
-                style = MaterialTheme.typography.bodySmall,
+                hit.pkg,
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFont),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp),
             )
-        }
-        when {
-            installing -> CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-            installed -> {
-                Icon(
-                    Icons.Outlined.Check, null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp),
-                )
+            if (hit.installs.isNotBlank()) {
                 Text(
-                    "已安装",
+                    hit.installs,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 4.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp),
                 )
             }
-            else -> Row(
+        }
+        if (installing) {
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+        } else {
+            Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))

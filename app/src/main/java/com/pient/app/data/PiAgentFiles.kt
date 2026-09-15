@@ -110,6 +110,12 @@ object PiAgentFiles {
             )
         }
         root.put("defaultTools", JSONArray(PI_DEFAULT_TOOLS))
+        // 项目信任（2026-09-15）：pi 的**项目级资源**（`.pi/skills`、`.pi/settings.json` 的 packages、
+        // `.pi/extensions`）默认要先经用户交互确认「信任这个项目」才会加载；RPC 模式下没有人能回答
+        // 那个提问 → 项目级技能/插件**静默不生效**（表现为"装到项目了但 AI 看不到"）。
+        // Pient 的项目都是应用自己创建/绑定的（不存在别人仓库那种风险），所以把这条口径固定成
+        // 「总是信任」；用户若在桌面 pi 里显式设过别的值，这里不覆盖。
+        if (!root.has("defaultProjectTrust")) root.put("defaultProjectTrust", "always")
         write(settingsFile(context), root.toString(2))
         Log.i(TAG, "settings.json 已合并写入（compaction + defaultTools=${PI_DEFAULT_TOOLS.size} 项）")
         true
