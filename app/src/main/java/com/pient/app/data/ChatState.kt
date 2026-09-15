@@ -732,7 +732,11 @@ class ChatState {
                     Log.i(TAG_CHAT, "会话已映射到 pi 文件：$newFile")
                 }
             } else {
-                PiRpc.switchSession(file)
+                // **同一个会话文件不要重载**：switch_session 会按文件末尾重新定位活跃叶，
+                // 把用户刚在画布上切好的分支位置冲掉（实测：切到 #2 后发消息，上下文又回到全量 4 条来回）。
+                // 只有 pi 当前打开的不是这个文件时才切。
+                val current = PiRpc.getSessionStats()?.optString("sessionFile").orEmpty()
+                if (current != file) PiRpc.switchSession(file)
             }
             refreshPiTree()
             syncMessagesFromPi()
