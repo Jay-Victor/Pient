@@ -43,7 +43,6 @@ import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.components.PientDialog
 import com.pient.app.ui.components.PientSegmented
 import com.pient.app.ui.theme.MonoFont
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -279,12 +278,10 @@ private fun InstallPluginDialog(
             confirmEnabled = valid && !installing,
             showClose = false,
             onConfirm = {
+                // 真安装立刻交给数据层（pi install 在终端会话里跑，页面这里只负责关弹窗 + 提示）
                 installing = true
                 error = null
-                scope.launch {
-                    delay(1100) // 原型安装进度
-                    onInstalled(source)
-                }
+                onInstalled(source.trim())
             },
         ) {
             Column(Modifier.padding(top = 12.dp)) {
@@ -319,7 +316,7 @@ private fun InstallPluginDialog(
                     )
                 }
                 Text(
-                    "支持：npm: 包 / 本地路径；git: 与 https: 暂不支持（运行时没有 git）",
+                    "支持：npm: 包 / git: 仓库 / https 链接 / 本地路径（git 类需 Ubuntu 里已装 git）",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),
@@ -330,10 +327,16 @@ private fun InstallPluginDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    "安装目标：${if (global) "全局" else "项目"}（当前版本为界面演示，不会真正安装）",
+                    if (global) "装到全局：写 ~/.pi/agent/settings.json"
+                    else "装到项目：写 .pi/settings.json（等价 pi install -l）",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp),
+                )
+                Text(
+                    "安装过程在终端页「${PiPackages.SESSION}」会话里可见",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (installing) {
                     Row(

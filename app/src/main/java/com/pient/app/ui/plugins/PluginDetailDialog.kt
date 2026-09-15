@@ -452,7 +452,10 @@ private fun kindLabel(kind: PluginResourceKind): String = when (kind) {
 }
 
 /** 安装路径（占位：按 pi 的落盘规则推导，告诉用户它会去哪） */
-private fun pluginRealPath(item: PluginItem): String = pluginPath(item)
+private fun pluginRealPath(item: PluginItem): String =
+    // 优先用真数据：`pi list` 给的 installedPath（pi 自己解析出来的落点）；
+    // 没有时才退回按 pi 的落盘规则推导
+    item.installedPath?.takeIf { it.isNotBlank() } ?: pluginPath(item)
 
 /**
  * 插件安装路径（pi-0.85.1 package-manager 落盘规则）：
