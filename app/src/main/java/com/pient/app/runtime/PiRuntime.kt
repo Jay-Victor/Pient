@@ -133,6 +133,20 @@ object PiRuntime {
             .getOrDefault(false)
 
     /** 解包进度/原因的公开快照（终端页/环境页要显示「正在解包 …%」） */
+    /**
+     * rootfs 没就绪的**具体原因**（一句人话；2026-09-15）。
+     * 旧写法只区分「解包中 / 其它」，于是任何"不是解包中"的情形都被说成「安装包未内置 Ubuntu」——
+     * 实测误报：rootfs 明明在包里、只是 bash 不可执行/架构不符时也这么显示。
+     */
+    fun rootfsIssue(context: Context): String {
+        val bash = rootfsBash(context)
+        return when {
+            !rootfsArchiveAvailable(context) -> "此安装包未内置 Ubuntu 环境（构建时未打包 rootfs 归档）"
+            !bash.isFile -> "Ubuntu 运行时还没解包完（可在本页「重新检测」，或重启应用继续解包）"
+            else -> "Ubuntu 运行时不可用：bash 架构 " + (elfMachine(bash) ?: "未知") +
+                " ≠ 本机 " + hostMachine() + "，或文件权限异常（bash 需可读可执行）"
+        }
+    }
     @Volatile
     private var unpackNote: String = ""
 

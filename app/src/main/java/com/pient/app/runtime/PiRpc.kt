@@ -89,11 +89,22 @@ object PiRpc {
      */
     @Synchronized
     fun start(provider: String, model: String): Boolean {
+        Log.i(TAG, "start() 进入：key=[$provider/$model](len=${provider.length + 1 + model.length})；现有进程 alive=${process?.isAlive} 状态=${_state.value}")
         val key = "$provider/$model"
         process?.let { p ->
-            if (p.isAlive && (_state.value as? PiRpcState.Running)?.let { "$it.provider/${it.model}" } == key) {
+            val st = _state.value
+            val cur = (st as? PiRpcState.Running)?.let { "${it.provider}/${it.model}" }
+            if (p.isAlive && cur == key) {
                 return true
             }
+            // 诊断（2026-09-15）：旧代码静默 stop+重启，通道反复启停无从查起 —— 把原因打出来
+            val why = if (!p.isAlive) {
+                "旧进程已退出（exit=" + (runCatching { p.exitValue() }.getOrNull()?.toString() ?: "?") + "）"
+            } else "alive=true 但状态/键不匹配：st=$st cur=[$cur](len=${cur?.length}) key=[$key](len=${key.length})"
+            val caller = Throwable().stackTrace
+                .firstOrNull { it.className.startsWith("com.pient.app") && !it.className.endsWith("PiRpc") }
+                ?.let { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }.orEmpty()
+            Log.i(TAG, "通道重启：$why；调用方=$caller")
         }
         stop()
         val ctx = AppCtx.get() ?: return false
@@ -263,6 +274,23 @@ object PiRpc {
     suspend fun newSession(): JSONObject? = send(JSONObject().put("type", "new_session"))
     suspend fun getState(): JSONObject? = send(JSONObject().put("type", "get_state"))
 
+    /**
+     * 起得来 ≠ 活着（2026-09-15 实测）：rootfs 不可执行 / proot 报错时进程会**秒退**，
+     * 而 `start()` 只看 ProcessBuilder 是否成功 → 会误报可用。这里给进程一个露馅窗口。
+     */
+    suspend fun aliveAfterStartup(timeoutMs: Long = 2500): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val p = process ?: return false
+            if (!p.isAlive) return false
+            kotlinx.coroutines.delay(120)
+        }
+        return process?.isAlive == true
+    }
+
+    /** 当前进程是否还在跑（诊断/界面上报错用） */
+    fun processAlive(): Boolean = process?.isAlive == true
+
     // ─────────────────────── 读线程 ───────────────────────
 
     /**
@@ -301,7 +329,10 @@ object PiRpc {
             }
         } catch (t: Throwable) {
             Log.w(TAG, "读 stdout 结束：${t.message}")
-        } finally {
+            // 进程退出的现场（2026-09-15）：exit 码 + stderr 末行 —— 通道 churn 排查靠它
+            val code = runCatching { proc.exitValue() }.getOrNull()
+            val tail = stderrText().lines().lastOrNull { it.isNotBlank() }.orEmpty()
+            Log.w(TAG, "pi 进程 stdout 结束（exit=$code）" + if (tail.isBlank()) "" else " · stderr 末行：$tail")
             _events.tryEmit(JSONObject().put("type", "channel_closed"))
         }
     }

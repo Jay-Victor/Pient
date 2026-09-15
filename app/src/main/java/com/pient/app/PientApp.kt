@@ -92,7 +92,11 @@ fun PientApp() {
     }
     var ready by remember { mutableStateOf(PientRuntime.dataLoaded) }
     LaunchedEffect(Unit) {
-        if (!PientRuntime.dataLoaded) {
+        // 读盘闸门（2026-09-15）：Activity 重建 / 双重组合会让这段 LaunchedEffect 跑两次，
+        // 而旧写法只在读盘**完成后**才置 dataLoaded —— 第二次进来又读一遍，同一份数据落两遍
+        // （实测 state.json 的 entries 变成 64 = 32×2）。现在：谁认领谁读盘，其余调用者等同一份
+        // 结果（顺带避免"读盘未完成就用空状态写盘"的老事故）。
+        if (PientRuntime.claimLoad()) {
             val startedAt = SystemClock.uptimeMillis()
             withContext(Dispatchers.IO) {
                 // 内置模型价格表（assets/model_pricing.tsv，Operit 式内置定价）
@@ -103,13 +107,15 @@ fun PientApp() {
                 // 用量台账恢复（2026-09-11：模型用量信息页的真实数据源）
                 UsageStore.load(context)
             }
-            PientRuntime.dataLoaded = true
+            PientRuntime.finishLoad()
             // 最短展示：真机读盘可能百毫秒内完成，过短会像「闪一下」。
             // 行为设置里关掉「开屏动画」时不做这层等待——不显示开屏页，读盘完就直接进主界面。
             if (SettingsStore.startupAnimation) {
                 val elapsed = SystemClock.uptimeMillis() - startedAt
                 if (elapsed < STARTUP_MIN_SHOW_MS) delay(STARTUP_MIN_SHOW_MS - elapsed)
             }
+        } else {
+            PientRuntime.awaitLoad()   // 别的组合正在读盘：等它读完再放行，别用空状态写盘
         }
         ready = true
     }
@@ -234,6 +240,7 @@ fun PientApp() {
                 chatState.messagesBySession.mapValues { it.value.toList() } to
                 chatState.entriesBySession.mapValues { it.value.toList() } to
                 chatState.leafBySession.toMap() to
+                chatState.piDesiredLeaf.toMap() to
                 (chatState.currentProject to chatState.currentSessionId) to
                 chatState.selectedModelId to
                 (chatState.thinkingEnabled to chatState.thinkingLevel to
@@ -356,6 +363,30 @@ fun PientApp() {
 internal object PientRuntime {
     var chatState: ChatState? = null
     var dataLoaded = false
+
+    /** 读盘闸门（2026-09-15）：并发/重复组合只允许一次读盘，其余 await 同一份结果 */
+    private val lock = Any()
+    private var gate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
+    /** @return true = 本次调用负责读盘；false = 已有别的调用在读（应 [awaitLoad]） */
+    fun claimLoad(): Boolean = synchronized(lock) {
+        if (dataLoaded) return false
+        if (gate == null) {
+            gate = kotlinx.coroutines.CompletableDeferred()
+            true
+        } else false
+    }
+
+    suspend fun awaitLoad() {
+        gate?.await()
+    }
+
+    fun finishLoad() {
+        synchronized(lock) {
+            dataLoaded = true
+            gate?.complete(Unit)
+        }
+    }
 }
 
 /** 开屏加载页最短展示时长（读盘过快时避免「闪一下」） */

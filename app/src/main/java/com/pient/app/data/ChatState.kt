@@ -14,6 +14,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
 import com.pient.app.runtime.PiRpc
+import com.pient.app.runtime.PiRuntime
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -334,6 +335,11 @@ class ChatState {
         entriesBySession.remove(id)
         leafBySession.remove(id)
         if (currentSessionId == id) currentSessionId = sessionsFor(proj).firstOrNull()?.id
+        piDesiredLeaf.remove(id)
+        if (piTreeSessionId == id) {
+            piTree = null
+            piTreeSessionId = null
+        }
         // 删除最后一个会话后自动新建（2026-09-09 用户定：侧边栏会话列表恒有会话）
         if (sessionsFor(proj).isEmpty()) newSession()
     }
@@ -347,6 +353,11 @@ class ChatState {
         entriesBySession.remove(id)
         leafBySession.remove(id)
         if (currentSessionId == id) {
+        piDesiredLeaf.remove(id)
+        if (piTreeSessionId == id) {
+            piTree = null
+            piTreeSessionId = null
+        }
             currentSessionId = sessionsFor(currentProject ?: "").firstOrNull()?.id
         }
     }
@@ -459,6 +470,88 @@ class ChatState {
      */
     var piChannelEnabled: Boolean = true
 
+    /**
+     * pi 运行时就绪态（2026-09-15 用户拍板 B：**pi 是唯一产品路径**）。
+     * 未就绪 = 聊天页明确阻断 + 给「环境配置」修复入口，**不再静默改走直连内核**。
+     */
+    enum class PiReadiness { Unknown, Ready, Unready }
+
+    var piReadiness by mutableStateOf(PiReadiness.Unknown)
+        private set
+
+    /** 未就绪原因（一句中文，直接给用户看） */
+    var piUnreadyReason by mutableStateOf("")
+        private set
+
+    /** 一次性的界面提示（被阻断的发送等；ChatScreen 消费后清空） */
+    var blockedNote by mutableStateOf<String?>(null)
+
+    /**
+     * 直连内核只作**开发诊断通道**（debug 包）：release 包里 pi 起不来就是起不来，
+     * 不允许悄悄换一条没有工具能力的路（用户 2026-09-15 拍板 B）。
+     */
+    /**
+     * pi 通道的**目标**（providerId, modelId）：统一口径 = 输入栏**选中的模型**（拿不到才退到该服务商列表首个）。
+     *
+     * 2026-09-15 修：`runChat`（用「本次有效模型」）与 `bindPiSession`（用「服务商列表首个」）各算各的 ——
+     * 服务商配了多个模型时两边不一致，于是**每一轮都会把健康的通道重启一次**（实测 churn：
+     * `通道重启：状态不是 Running（当前 Running(mock, mock-model)）；新 key=mock/mock-model`），
+     * 中途重启还可能把正在跑的那一轮打断（消息只落本地镜像）。现在三处（发送 / 绑定 / 就绪探测）用同一个来源。
+     */
+    private fun piChannelTarget(): Pair<String, String>? {
+        val m = selectedModel ?: return null
+        val cfg = AiConfigStore.configs[m.provider] ?: return null
+        val model = m.name.takeIf { it.isNotBlank() } ?: cfg.models.firstOrNull() ?: return null
+        return cfg.providerId to model
+    }
+
+    private fun directFallbackAllowed(): Boolean {
+        val ctx = AppCtx.get() ?: return false
+        return (ctx.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    }
+
+    /** 重测 pi 就绪态（必要时尝试起一次通道）；结果写 [piReadiness] / [piUnreadyReason] */
+    fun refreshPiReadiness() {
+        bgScope.launch {
+            val ctx = AppCtx.get() ?: return@launch
+            val result = withContext(Dispatchers.IO) { probePiReadiness(ctx) }
+            piReadiness = result.first
+            piUnreadyReason = result.second
+            Log.i(TAG_CHAT, "pi 就绪态：${result.first}${if (result.second.isBlank()) "" else "（${result.second}）"}")
+        }
+    }
+
+    private suspend fun probePiReadiness(ctx: Context): Pair<PiReadiness, String> {
+        val target = piChannelTarget()
+        if (target == null) {
+            return PiReadiness.Unready to "没有可用的服务商 / 模型：先到「服务商与模型配置」里配好"
+        }
+        if (!PiRuntime.rootfsReady(ctx)) {
+            // 原因文案与「环境配置」页共用一处（rootfsIssue）：避免两处说法不一致（2026-09-15）
+            return PiReadiness.Unready to PiRuntime.rootfsIssue(ctx)
+        }
+        if (!PiRuntime.piReady(ctx)) {
+            return PiReadiness.Unready to "pi 未就绪：随包运行时还没解出来（可在「环境配置」里重新检测）"
+        }
+        if (!PiRpc.start(target.first, target.second)) {
+            val tail = PiRpc.stderrText().lines().lastOrNull { it.isNotBlank() }.orEmpty()
+            return PiReadiness.Unready to ("pi 通道启动失败" + if (tail.isBlank()) "" else "：$tail")
+        }
+        // 起得来 ≠ 活着：进程秒退（rootfs 不可执行 / proot 报错）时 start() 仍返回 true（2026-09-15 实测）
+        if (!PiRpc.aliveAfterStartup()) {
+            val tail = PiRpc.stderrText().lines().lastOrNull { it.isNotBlank() }.orEmpty()
+            PiRpc.stop()
+            return PiReadiness.Unready to ("pi 通道起来后立刻退出" + if (tail.isBlank()) "" else "：$tail")
+        }
+        // 再要一次真实往返（RPC 通了才算真的可用；失败 = 管道/进程有问题）
+        if (PiRpc.getState() == null) {
+            val tail = PiRpc.stderrText().lines().lastOrNull { it.isNotBlank() }.orEmpty()
+            PiRpc.stop()
+            return PiReadiness.Unready to ("pi 通道无响应" + if (tail.isBlank()) "" else "：$tail")
+        }
+        return PiReadiness.Ready to ""
+    }
+
     /** pi 通道最近一次报错（回合内收敛，供本回合失败时如实抛给 UI） */
     private var lastPiError: String? = null
 
@@ -468,6 +561,13 @@ class ChatState {
      * 模型参数均来自输入栏与配置页状态。请求失败以 error 助手消息呈现（不进 API 上下文）。
      */
     suspend fun streamReply(userText: String, quote: Quote? = null) {
+        // ── pi 唯一产品路径的门控（2026-09-15 拍板 B）─────────────────────────────
+        // 已知未就绪 → 明确阻断：不发送、不落任何条目、草稿留在输入栏（ChatScreen 给提示）
+        if (piChannelEnabled && piReadiness == PiReadiness.Unready) {
+            blockedNote = "pi 运行时未就绪：消息未发送（点上方提示条的「环境配置」修复）"
+            Log.w(TAG_CHAT, "发送被阻断：pi 未就绪（$piUnreadyReason）")
+            return
+        }
         isStreaming = true
         streamDraft = ""
         streamThinking = ""
@@ -476,9 +576,13 @@ class ChatState {
         //   上屏后再取会把本条用户消息算进历史、又被末尾显式追加一次 = 重复（2026-09-09 修复）
         // 内核自实现的自动压缩（2026-09-14 取代随宿主冻结的 pi 原生 compaction）：逼近上限时先把老消息压成摘要卡，
         // 这样紧接着构建的 history 就是压缩后的形态。失败只记日志，绝不阻断发送。
-        selectedModel?.provider?.let { AiConfigStore.configs[it] }?.let { c ->
-            runCatching { maybeAutoCompact(c) }
-                .onFailure { Log.w(TAG, "自动压缩失败：${it.message}") }
+        // 本地压缩（App 侧实现）只在**直连诊断路径**跑：走 pi 时压缩由 pi 原生负责 ——
+        // 旧写法两头都压（白跑判定、必要时多调一次模型、还落一张 pi 不知道的压缩卡），2026-09-15 修。
+        if (!(piChannelEnabled && PiRpc.usable())) {
+            selectedModel?.provider?.let { AiConfigStore.configs[it] }?.let { c ->
+                runCatching { maybeAutoCompact(c) }
+                    .onFailure { Log.w(TAG, "自动压缩失败：${it.message}") }
+            }
         }
         val historyBefore = buildApiHistory()
         // 当前这条用户消息（附件随文本进请求用；attachments 列表马上会被清空，先取快照）
@@ -643,11 +747,25 @@ class ChatState {
         // 会话上下文由 pi 自己维护（同一进程内连续 prompt），这里只把新消息送进去、
         // 把流式增量与 usage 接回 UI；起不来就落回下面的直连内核。
         if (piChannelEnabled) {
-            val modelId = cfg.models.firstOrNull()
-            if (!modelId.isNullOrBlank() && PiRpc.usable() && PiRpc.start(cfg.providerId, modelId)) {
+            val target = piChannelTarget()      // 统一口径（见 [piChannelTarget] 注释）
+            if (target != null && PiRpc.usable() && PiRpc.start(target.first, target.second)) {
                 bindPiSession()          // 会话映射：懒建 / 切到本会话对应的 pi 会话文件（失败不阻断本轮）
+                if (piReadiness != PiReadiness.Ready) {
+                    piReadiness = PiReadiness.Ready
+                    piUnreadyReason = ""
+                }
                 return runChatViaPi(cfg, history, media, onDelta, onThinking)
             }
+            // ── pi 起不来：**不静默换路**（2026-09-15 用户拍板 B）────────────────────
+            // 产品路径 = 明确失败（错误卡直说去「环境配置」）；只有 debug 包才落直连诊断通道，
+            // 且日志显式标注 —— 直连没有任何工具能力，不能让用户以为自己在用 agent。
+            Log.w(TAG_CHAT, "pi 通道不可用，本轮没走 pi：${PiRpc.stderrText().takeLast(300)}")
+            piReadiness = PiReadiness.Unready
+            if (piUnreadyReason.isBlank()) piUnreadyReason = "pi 通道启动失败：可到「环境配置」里检测/更新"
+            if (!directFallbackAllowed()) {
+                throw AiException("pi 运行时未就绪：本轮没有发送。请到「终端 → 环境配置」检查 Ubuntu / pi。")
+            }
+            Log.w(TAG_CHAT, "⚠️ 开发诊断通道：debug 包回退到直连内核（纯文本，无工具）")
         }
         // 思考模式的总开关：null = 不给服务商发思考参数、且**服务商自带的推理内容一律不展示不落库**
         // （DeepSeek-R1 / GLM / Kimi 思考系列不靠 reasoning_effort 也会回 reasoning_content，
@@ -720,6 +838,33 @@ class ChatState {
     var piLeafId by mutableStateOf<String?>(null)
         private set
 
+    /** pi 树的归属会话（2026-09-15）：切会话后旧树立即作废（否则画布会显示上一个会话的树） */
+    var piTreeSessionId by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * 画布节点（用户条目 id）→ **锚点条目 id**（该节点回合末尾的**非用户**条目）。
+     * 这是「会话内分支」的导航目标（《Pient 会话与上下文管理设计》§4.2）：必须交锚点，
+     * **不能**交用户消息条目本身 —— 后者会触发 pi「叶退到父 + 文本回填编辑器」的原生语义
+     * （`agent-session.ts:3236-3251`），位置会退到该节点**之前**。
+     * 表里没有的节点 = 尚无回答（无锚点）→ 按 pi 原生语义处理（退回该消息之前 + 回填输入栏）。
+     */
+    var piAnchorOf by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
+
+    /**
+     * **期望位置**（pi 条目 id）：对账基准（《会话与上下文管理设计》§4.3）。
+     * pi 的活跃叶只在内存里、重启/切会话后回到文件末尾，所以位置由 Pient 记并在每次绑定时拉回来。
+     */
+    val piDesiredLeaf = mutableStateMapOf<String, String>()
+
+    /** 画布/详情用的 pi 条目索引（解析 get_tree 时留存；普通字段，避免无谓重组） */
+    private var piEntryById: Map<String, JSONObject> = emptyMap()
+    private var piParentOf: Map<String, String?> = emptyMap()
+
+    /** 输入栏回填请求（无回答节点「改写重问」用；ChatScreen 消费后清空） */
+    var prefillInput by mutableStateOf<String?>(null)
+
     /**
      * 绑（或切到）当前 Pient 会话对应的 pi 会话文件。
      * **懒建**：没有就让 pi `new_session`（顺带把 Pient 的标题 `set_session_name` 同步过去），
@@ -731,10 +876,8 @@ class ChatState {
         runCatching {
             // 通道没起就自己起（画布、切会话这些入口没有"发送"那一路的启动逻辑）——
             // 否则 getTree/switchSession 全落空，画布会是空的
-            val cfg = selectedModel?.provider?.let { AiConfigStore.configs[it] }
-            val model = cfg?.models?.firstOrNull()
-            if (PiRpc.usable() && cfg != null && !model.isNullOrBlank()) {
-                PiRpc.start(cfg.providerId, model)
+            piChannelTarget()?.let { t ->            // 统一口径（见 [piChannelTarget] 注释）
+                if (PiRpc.usable()) PiRpc.start(t.first, t.second)
             }
             val file = rec.piSessionFile
             if (file.isNullOrBlank()) {
@@ -762,6 +905,8 @@ class ChatState {
             }
             refreshPiTree()
             syncMessagesFromPi()
+            // 位置对账（T1/T2/T3）：通道重启、切会话后 pi 的叶会回到文件末尾 —— 拉回 Pient 记的位置
+            reconcilePiLeaf(id)
         }.onFailure { Log.w(TAG_CHAT, "绑 pi 会话失败：${it.message}") }
     }
 
@@ -774,12 +919,55 @@ class ChatState {
     }
 
     /** 拉 pi 的会话树，转成画布用的 [SessionTreeNode]（节点 id **就是 pi 的 entry id**） */
-    suspend fun refreshPiTree() {
-        val rec = sessionRecord() ?: return
+    suspend fun refreshPiTree(follow: Boolean = false) {
+        val sid = currentSessionId ?: return
+        val rec = sessionRecord(sid) ?: return
         if (rec.piSessionFile.isNullOrBlank() || !PiRpc.usable()) return
         val data = PiRpc.getTree() ?: return
         piLeafId = data.optString("leafId").takeIf { it.isNotBlank() && it != "null" }
-        piTree = piTreeFromJson(data)
+        val parsed = piParseTree(data) ?: return
+        piTree = parsed.tree
+        piTreeSessionId = sid            // 归属：切会话后旧树立即作废
+        piAnchorOf = parsed.anchorOf
+        piEntryById = parsed.entryById
+        piParentOf = parsed.parentOf
+        // follow = 一轮结束/切到某分支之后：期望位置跟随后端（pi 追加后的叶就是"当前所在"）
+        if (follow) normalizedPiLeaf()?.let { piDesiredLeaf[sid] = it }
+    }
+
+    /**
+     * 规范化叶（§4.3）：叶指向 label / branch_summary / session_info 等**元数据条目**时（重载后常见），
+     * 沿父链回退到最近的 message 条目再比较 —— 否则每次绑定都会白跑一次导航。
+     */
+    private fun normalizedPiLeaf(): String? {
+        var cur = piLeafId
+        var hops = 0
+        while (cur != null && hops++ < 64) {
+            val t = piEntryById[cur]?.optString("type")
+            if (t == null || t == "message") return cur
+            cur = piParentOf[cur]
+        }
+        return piLeafId
+    }
+
+    /**
+     * **位置对账**（幂等；《会话与上下文管理设计》§4.3 T1/T2/T3）：pi 的叶只在内存、
+     * 重启/切会话后回到文件末尾 —— 发送前把 pi 拉回 Pient 记的期望位置；一致时一个 RPC 都不发。
+     */
+    private suspend fun reconcilePiLeaf(sid: String) {
+        val want = piDesiredLeaf[sid] ?: return
+        if (!piEntryById.containsKey(want)) {
+            Log.w(TAG_CHAT, "位置对账：目标条目 $want 不在当前树里 → 丢弃该期望位置")
+            piDesiredLeaf.remove(sid)
+            return
+        }
+        val have = normalizedPiLeaf()
+        if (have == want) return
+        Log.i(TAG_CHAT, "位置对账：pi 叶 $have ≠ 目标 $want → /pient-nav")
+        runCatching { PiRpc.navigate(want, summarize = false) }
+            .onFailure { Log.w(TAG_CHAT, "位置对账失败：${it.message}") }
+        refreshPiTree()
+        syncMessagesFromPi()
     }
 
     /**
@@ -797,6 +985,14 @@ class ChatState {
         val id = currentSessionId ?: return
         val rec = sessionRecord(id) ?: return
         if (rec.piSessionFile.isNullOrBlank() || !PiRpc.usable()) return
+        // ── **本轮在飞 / 有未落盘的用户消息时不要重建**（2026-09-15 实测 bug）──────────────
+        // `streamReply` 先 `appendEntry(用户消息)` 上屏，紧接着 `runChat` 里 `bindPiSession()` 会走到这里；
+        // 而 pi 是在更后面的 `prompt` 里才记录这条消息 —— 此刻 clear+addAll 会把它冲掉，
+        // 表现为「画布创建分支后回聊天页，第一条消息不显示在聊天页（但回答照收、画布节点也在）」。
+        if (isStreaming) {
+            Log.i(TAG_CHAT, "本轮在飞：跳过按 pi 重建消息流（保住刚上屏的用户消息）")
+            return
+        }
         val arr = PiRpc.getMessages()?.optJSONArray("messages") ?: return
         val rebuilt = ArrayList<Msg>(arr.length())
         for (i in 0 until arr.length()) {
@@ -837,14 +1033,32 @@ class ChatState {
         }
         if (rebuilt.isEmpty()) return
         val list = messagesBySession.getOrPut(id) { mutableStateListOf() }
+        // 兜底：本地尾部若是一条 pi 还不认识的用户消息（刚发出、pi 未落盘），重建后补回去 ——
+        // 用户看得见自己发过的话，比「报告一个更完整的历史」重要。
+        val pending = list.lastOrNull() as? Msg.User
+        // 判重口径：pi 侧同一条消息可能带附件/引用（它的正文是本地文本的超集，或本地是它的超集）→ 双向包含匹配
+        val known = rebuilt.any { it is Msg.User && (it.text.contains(pending?.text.orEmpty()) || pending?.text.orEmpty().contains(it.text)) }
         list.clear()
         list.addAll(rebuilt)
-        leafBySession[id] = piLeafId
+        if (pending != null && pending.text.isNotBlank() && !known) {
+            list += pending
+            Log.i(TAG_CHAT, "重建后补回未被 pi 记录的用户消息：${pending.text.take(24)}")
+        }
+        // 位置**不进本地条目树**（2026-09-15）：pi 的条目 id 与本地镜像 id 不同源，写进来会让
+        // leafPath 落空、会话在界面上变空白（实测踩过）。pi 侧位置由 [piDesiredLeaf] 单独记。
         Log.i(TAG_CHAT, "消息流已按 pi 上下文重建：${rebuilt.size} 条")
     }
 
-    /** pi `get_tree` → [SessionTreeNode]（只把**用户消息**当节点，与其后的助手文本做 exchange —— 与本地画布同口径） */
-    private fun piTreeFromJson(data: JSONObject): SessionTreeNode? {
+    /** 解析 get_tree 的产物：画布树 + 锚点表 + 条目索引（锚点/对账都要原始 id 空间） */
+    private class PiParsed(
+        val tree: SessionTreeNode,
+        val anchorOf: Map<String, String>,
+        val entryById: Map<String, JSONObject>,
+        val parentOf: Map<String, String?>,
+    )
+
+    /** pi `get_tree` → 画布树 + 锚点（节点 = 用户消息，与其后的助手文本做 exchange —— 与本地画布同口径） */
+    private fun piParseTree(data: JSONObject): PiParsed? {
         val roots = data.optJSONArray("tree") ?: return null
         // 拍平成 (id → {entry, children})，并记下"到叶的路径"用于标 active
         val parentOf = HashMap<String, String?>()
@@ -924,6 +1138,21 @@ class ChatState {
             }
             return null
         }
+        // 锚点（§4.2）：节点 → 该回合**末尾的非用户条目**。回合内容 = 紧跟其后的 message 条目
+        // （助手回答 / 工具结果），遇下一条用户消息停；元数据条目（label / branch_summary /
+        // session_info / compaction / model_change / thinking_level_change）不算回合内容、也不算分叉。
+        fun isTurnContent(id: String): Boolean =
+            entryById[id]?.optString("type") == "message" && !idxOf.containsKey(id)
+        val anchorOf = HashMap<String, String>()
+        userIds.forEach { u ->
+            var cur = u
+            while (true) {
+                val kids = childrenOf[cur].orEmpty().filter { isTurnContent(it) }
+                if (kids.size != 1) break
+                cur = kids[0]
+            }
+            if (cur != u) anchorOf[u] = cur      // cur == u ⇒ 该节点尚无回答（无锚点）
+        }
         fun build(id: String): SessionTreeNode {
             // ⚠️ 必须再加 `idxOf.containsKey(it)`：光判「最近用户祖先 = id」的话，**所有助手/工具条目**
             // 都会挂成子节点（它们的最近用户祖先也是这个 id）→ 画布节点数从 11 变 28、蓝色扭成折线。
@@ -945,13 +1174,14 @@ class ChatState {
             built[built.lastIndex] = built.last().copy(active = true)
         }
         // 画布只认单根：多个根（分叉起点不同）时包一个合成根
-        return if (built.size == 1) built[0] else SessionTreeNode(
+        val tree = if (built.size == 1) built[0] else SessionTreeNode(
             id = "pi-root",
             userText = "",
             exchange = emptyList(),
             children = built,
             active = built.any { it.active },
         )
+        return PiParsed(tree, anchorOf, entryById, parentOf)
     }
 
     private fun piRole(entry: JSONObject?): String =
@@ -1129,6 +1359,12 @@ class ChatState {
         }
         val ok = withTimeoutOrNull(600_000) { settled.await() } != null
         collector.cancel()
+        // 通道中途断开（channel_closed）且本轮没拿到任何文本 → 如实报错，
+        // 别落一条空回答让用户以为"AI 回了但看不到内容"（2026-09-15 实测：pi 秒退时就这样）
+        if (!PiRpc.processAlive() && text.isBlank() && think.isBlank()) {
+            val tail = PiRpc.stderrText().lines().lastOrNull { it.isNotBlank() }.orEmpty()
+            throw AiException("pi 通道中途断开（本轮未完成）" + if (tail.isBlank()) "" else "：$tail")
+        }
         if (!ok) {
             bgScope.launch { PiRpc.abort() }
             throw AiException("pi 通道超时（10 分钟未见 agent_settled）")
@@ -1140,6 +1376,9 @@ class ChatState {
         usage?.let { updateContextPercent(it, cfg) }
         val out = text.toString().trim()
         if (out.isNotEmpty()) onDelta(out)
+        // 期望位置跟随后端（§4.3）：本轮追加后 pi 的叶就是新的"当前所在"（不跟则下次绑定会拉回旧位置）
+        runCatching { refreshPiTree(follow = true) }
+            .onFailure { Log.w(TAG_CHAT, "回合结束刷新 pi 树失败：${it.message}") }
         ChatOutcome(out, usage?.takeIf { it.inTokens + it.outTokens > 0 }, think.toString())
     }
 
@@ -1318,6 +1557,14 @@ class ChatState {
         val byId = entries.associateBy { it.id }
         val path = mutableListOf<SessionEntry>()
         var cur = leafBySession[sid]?.let { byId[it] }
+        // 自愈（2026-09-15）：叶不在条目树里（历史 bug：把 pi 的 entry id 写进本地叶，或记录损坏）
+        // → 回退到**末条目**。否则 leafPath 为空、会话在界面上直接变成"空白"（实测：
+        // leaves[s-…] = 78ceb77d ∈ pi 条目而 ∉ 本地条目 → 重启后整个会话读不出消息）。
+        if (cur == null && entries.isNotEmpty()) {
+            cur = entries.last()
+            leafBySession[sid] = cur.id
+            Log.w(TAG_CHAT, "叶自愈：会话 $sid 的 leaf 不在条目树里 → 回退到末条目 ${cur.id}")
+        }
         while (cur != null) {
             path += cur
             cur = cur.parentId?.let { byId[it] }
@@ -1465,7 +1712,12 @@ class ChatState {
      * 接入 pi 运行时后改由 SDK `getTree()` 同源数据驱动。
      */
     val branchTree: SessionTreeNode?
-        get() = piTree ?: buildBranchTree(currentSessionId)   // 绑了 pi：画布直接用 pi 的树
+        get() {
+            // 只有**归属当前会话**的 pi 树才算数：切会话后旧树立即作废（否则画布会显示上一个会话的树）
+            val sid = currentSessionId
+            val pi = if (sid != null && piTreeSessionId == sid) piTree else null
+            return pi ?: buildBranchTree(sid)
+        }
 
     fun buildBranchTree(sid: String?): SessionTreeNode? {
         if (sid == null) return null
@@ -1534,15 +1786,29 @@ class ChatState {
         // 走扩展命令 /pient-nav：pi 侧会切换上下文（必要时还能生成被放弃分支的摘要），
         // 之后我们只拉一次 pi 的树刷新画布；本地 leaf 同步一份让 UI 立刻响应。
         val rec = sessionRecord(sid)
-        if (piChannelEnabled && piTree != null && !rec?.piSessionFile.isNullOrBlank() && PiRpc.usable()) {
-            // 画布的节点 id 就来自 pi 的树（= pi entry id），这里原样交给 pi
-            leafBySession[sid] = nodeId
+        if (piChannelEnabled && piTreeSessionId == sid && piTree != null &&
+            !rec?.piSessionFile.isNullOrBlank() && PiRpc.usable()
+        ) {
+            // **导航目标 = 锚点**（该节点回合末尾的非用户条目），不是节点自身：把用户消息条目交给 pi
+            // 会触发它"叶退到父 + 文本回填编辑器"的原生语义，位置退到该节点**之前**（§4.2）。
+            // 无锚点（该节点尚无回答）时才交给 pi 原生语义，并把消息文本回填输入栏（改写重问）。
+            val anchor = piAnchorOf[nodeId]
+            val target = anchor ?: nodeId
+            piDesiredLeaf[sid] = target
             bgScope.launch {
                 // 摘要是可选的：pi 会为此**调用一次模型**（用户偏好见 SettingsStore.branchSummarize）
-                runCatching { PiRpc.navigate(nodeId, summarize = SettingsStore.branchSummarize) }
+                runCatching { PiRpc.navigate(target, summarize = SettingsStore.branchSummarize && anchor != null) }
                     .onFailure { Log.w(TAG_CHAT, "pi 会话内分支跳转失败：${it.message}") }
                 refreshPiTree()
                 syncMessagesFromPi()
+                if (anchor == null) {
+                    val t = piText(piEntryById[nodeId]?.optJSONObject("message")).trim()
+                    if (t.isNotEmpty()) {
+                        prefillInput = t
+                        Log.i(TAG_CHAT, "无回答节点：按 pi 原生语义退到该消息之前，文本回填输入栏（${t.length} 字）")
+                    }
+                }
+                Log.i(TAG_CHAT, "会话内分支跳转：节点 $nodeId → 目标 $target（pi 叶=$piLeafId）")
             }
             return true
         }

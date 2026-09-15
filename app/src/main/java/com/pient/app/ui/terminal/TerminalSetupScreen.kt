@@ -108,6 +108,8 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
 
     // rootfs 就绪与否（决定整页可用性：未解包时所有检测都无意义）
     var rootfsReady by remember { mutableStateOf(PiRuntime.rootfsReady(context)) }
+    /** 未就绪的具体原因（在 refresh 里算：rootfsIssue 要读 ELF 头，不能放在组合期） */
+    var rootfsIssueText by remember { mutableStateOf("") }
     val rooted = remember { RootGateway.deviceRooted(context) }
 
     fun toast(text: String) = Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
@@ -115,6 +117,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
     // 进页面即检测；点刷新重跑（检测在 IO 线程，30 个组件的探测 ≈ 一条脚本一次往返）
     LaunchedEffect(detectSeq) {
         rootfsReady = PiRuntime.rootfsReady(context)
+        rootfsIssueText = if (rootfsReady) "" else PiRuntime.rootfsIssue(context)
         status = null
         val result = withContext(Dispatchers.IO) { EnvProvision.detect(context, UBUNTU_COMPONENTS) }
         status = result
@@ -216,8 +219,11 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                 item {
                     SetupCard {
                         Text(
-                            if (PiRuntime.isUnpacking()) "Ubuntu 正在后台解包：${PiRuntime.unpackNote()}"
-                            else "此安装包未内置 Ubuntu 环境（构建时未打包 rootfs）—— 无法解包，环境内软件不可用。",
+                            when {
+                                PiRuntime.isUnpacking() -> "Ubuntu 正在后台解包：${PiRuntime.unpackNote()}"
+                                rootfsIssueText.isNotBlank() -> "Ubuntu 未就绪：$rootfsIssueText"
+                                else -> "Ubuntu 未就绪：可点右上角「重新检测」，或重启应用触发解包。"
+                            },
                             style = MaterialTheme.typography.labelMedium,
                             color = androidx.compose.material3.MaterialTheme.colorScheme.error,
                         )

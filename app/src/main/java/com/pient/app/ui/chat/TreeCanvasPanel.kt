@@ -328,13 +328,13 @@ fun TreeCanvasPanel(chatState: ChatState) {
             )
             TreeFab(
                 icon = Icons.Outlined.CallSplit,
-                desc = "从此处分支",
+                desc = "创建分支",
                 enabled = selectedNode != null,
-                // **会话外分支**（2026-09-14）：pi 的 fork → 新会话文件 → Pient 建一个绑定它的新会话。
-                // 与左边那个「切换分支」（会话内分支 = 同一个文件里移动活跃叶）是两件事：
-                // 前者留档案、后者就地换路。
+                // **会话内分支**（2026-09-15 定稿，《Pient 会话与上下文管理设计》§6）：
+                // 切点 = 该节点回合末尾的**锚点条目** → 回聊天页，此后发消息即在该节点下长出新分支。
+                // 会话外分支（fork 新会话）不在画布上 —— 它归长按消息菜单与节点详情卡。
                 onClick = {
-                    selectedId?.let { chatState.forkPiSession(it) }
+                    selectedId?.let { chatState.navigateToNode(it) }
                     detailOpen = false
                     chatState.activePanel = Panel.MESSAGES
                 },

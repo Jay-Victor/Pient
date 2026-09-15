@@ -88,6 +88,12 @@ object ChatStore {
             state.leafBySession.forEach { (id, leaf) -> if (leaf != null) leaves.put(id, leaf) }
             root.put("leaves", leaves)
 
+            // pi 侧期望位置（Pient 记的活跃位置）：pi 的叶只在内存里、重启后回到文件末尾，
+            // 靠它在对账时把 pi 拉回来（《Pient 会话与上下文管理设计》§4.3）
+            val piLeaves = JSONObject()
+            state.piDesiredLeaf.forEach { (id, leaf) -> if (leaf.isNotEmpty()) piLeaves.put(id, leaf) }
+            root.put("piLeaves", piLeaves)
+
             val f = file(context)
             f.parentFile?.mkdirs()
             val tmp = File(f.parentFile, "state.json.tmp")
@@ -157,13 +163,14 @@ object ChatStore {
             val messages = root.optJSONObject("messages")
             if (messages != null) {
                 for (key in messages.keys()) {
-                    val list = state.messagesBySession.getOrPut(key) {
-                        androidx.compose.runtime.mutableStateListOf()
-                    }
+                    // 替换而不是追加（2026-09-15）：载入必须**同一进程里跑两遍也幂等** ——
+                    // 旧写法 `getOrPut + +=` 会把同一份消息写两遍（实测消息/条目翻倍）。
                     val arr = messages.getJSONArray(key)
+                    val list = androidx.compose.runtime.mutableStateListOf<Msg>()
                     for (i in 0 until arr.length()) {
                         deserializeMsg(arr.getJSONObject(i))?.let { list += it }
                     }
+                    state.messagesBySession[key] = list
                 }
             }
 
@@ -171,25 +178,39 @@ object ChatStore {
             val entries = root.optJSONObject("entries")
             if (entries != null) {
                 for (key in entries.keys()) {
-                    val list = state.entriesBySession.getOrPut(key) {
-                        androidx.compose.runtime.mutableStateListOf()
-                    }
+                    // 替换 + **按 id 去重**（2026-09-15）：①载入幂等（同一次启动跑两遍不再翻倍）；
+                    // ②自愈已落盘的坏数据（实测每会话 entries 恰为同一份两遍：64=32×2、174=87×2）。
                     val arr = entries.getJSONArray(key)
+                    val list = androidx.compose.runtime.mutableStateListOf<SessionEntry>()
+                    val seen = HashSet<String>()
+                    var dropped = 0
                     for (i in 0 until arr.length()) {
                         val e = arr.getJSONObject(i)
                         val msg = e.optJSONObject("msg")?.let { deserializeMsg(it) } ?: continue
+                        val eid = e.optString("id")
+                        if (eid.isBlank() || !seen.add(eid)) { dropped++; continue }
                         list += SessionEntry(
-                            id = e.optString("id"),
+                            id = eid,
                             parentId = if (e.isNull("parentId")) null else e.optString("parentId"),
                             msg = msg,
                         )
                     }
+                    if (dropped > 0) {
+                        android.util.Log.w("Pient", "载入去重：会话 $key 丢弃 $dropped 条重复/无效条目（保留 ${list.size} 条）")
+                    }
+                    state.entriesBySession[key] = list
                 }
             }
             val leaves = root.optJSONObject("leaves")
             if (leaves != null) {
                 for (key in leaves.keys()) {
                     state.leafBySession[key] = leaves.optString(key).takeIf { it.isNotEmpty() }
+                }
+            }
+            val piLeaves = root.optJSONObject("piLeaves")
+            if (piLeaves != null) {
+                for (key in piLeaves.keys()) {
+                    piLeaves.optString(key).takeIf { it.isNotEmpty() }?.let { state.piDesiredLeaf[key] = it }
                 }
             }
             // 条目树优先：有树 → 按 leaf 重建上屏消息流（记录里的 messages 只是派生缓存）；

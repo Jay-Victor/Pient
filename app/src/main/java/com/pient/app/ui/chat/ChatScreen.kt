@@ -151,6 +151,24 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
     var inputText by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(""))
     }
+
+    // 画布「无回答节点」的改写重问（2026-09-15）：把该节点消息文本回填输入栏并聚焦
+    LaunchedEffect(chatState.prefillInput) {
+        val t = chatState.prefillInput ?: return@LaunchedEffect
+        inputText = TextFieldValue(t, TextRange(t.length))
+        chatState.prefillInput = null
+        inputFocusTick++
+    }
+
+    // pi 就绪态（2026-09-15 拍板 B）：进页面即测一次（通道没起时顺带起一次）
+    LaunchedEffect(Unit) { chatState.refreshPiReadiness() }
+
+    // 被阻断的发送等一次性提示（用完即清）
+    LaunchedEffect(chatState.blockedNote) {
+        val note = chatState.blockedNote ?: return@LaunchedEffect
+        Toast.makeText(context, note, Toast.LENGTH_SHORT).show()
+        chatState.blockedNote = null
+    }
     // @ 引用查询（派生态，2026-09-12）：光标前最近一个「词首 @」到光标之间的文本即筛选串；
     // null = 不在引用输入中（引用已提交 "@路径 " 之后、词中 @、或压根没 @）。
     // 查询串随每次输入变化 → 引用卡候选列表实时筛选，不需要额外的开关状态。
@@ -410,6 +428,16 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                     attachSheetOpen = false // 切页时收起附件卡片
                 },
             )
+            // pi 运行时就绪条（2026-09-15 用户拍板 B）：**pi = 唯一产品路径** ——
+            // 未就绪时明确告知 + 给「环境配置」修复入口（不再静默降级到没有工具的直连内核）
+            if (chatState.piReadiness == ChatState.PiReadiness.Unready) {
+                PiUnreadyStrip(
+                    reason = chatState.piUnreadyReason,
+                    onRetry = { chatState.refreshPiReadiness() },
+                    onFix = { nav.navigate("terminal_setup") },
+                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 2.dp),
+                )
+            }
             // 工具能力已整体移除（2026-09-14）：「宿主未就绪 → 工具不可用」这类降级提示不存在
             // （原 HostNotReadyStrip 早已删除）。
             // 面板内容 + 覆盖其上的输入栏（2026-09-12：输入栏 dock 改为浮层，
@@ -473,11 +501,18 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                         onToggleContextCard = { contextCardOpen = !contextCardOpen },
                         onToggleSystemPrompt = { systemPromptOpen = !systemPromptOpen },
                         onSend = { text ->
-                            // 首条消息自动建会话（2026-09-08：无 mock 会话后，发送即建当前项目首会话）
-                            if (chatState.currentSessionId == null) chatState.newSession()
-                            val q = pendingQuote
-                            chatState.streamJob = scope.launch { chatState.streamReply(text, q) }
-                            pendingQuote = null // 引用随消息落库（Msg.User.quote），输入栏引用卡随之清空
+                            // pi 未就绪 → 阻断发送，并把草稿**原样还回**输入栏（2026-09-15 拍板 B；
+                            // 输入栏在点击时已自行清空文本，这里补回来，避免"消息没发出去还丢了草稿"）
+                            if (chatState.piReadiness == ChatState.PiReadiness.Unready) {
+                                inputText = TextFieldValue(text, TextRange(text.length))
+                                Toast.makeText(context, "pi 运行时未就绪：消息未发送（见上方提示条）", Toast.LENGTH_SHORT).show()
+                            } else {
+                                // 首条消息自动建会话（2026-09-08：无 mock 会话后，发送即建当前项目首会话）
+                                if (chatState.currentSessionId == null) chatState.newSession()
+                                val q = pendingQuote
+                                chatState.streamJob = scope.launch { chatState.streamReply(text, q) }
+                                pendingQuote = null // 引用随消息落库（Msg.User.quote），输入栏引用卡随之清空
+                            }
                         },
                         onAbort = { chatState.abort() },
                         modelSelectorOpen = modelSheetOpen,
@@ -986,4 +1021,66 @@ private fun MessagesPanel(
         onOpenLocator = onOpenLocator,
         onMessageLongPress = onMessageLongPress,
     )
+}
+
+/**
+ * pi 运行时就绪条（2026-09-15 用户拍板 B：pi 是**唯一产品路径**）。
+ *
+ * 未就绪时聊天页必须**明确阻断**（不再静默改走那条没有工具能力的直连内核），
+ * 并给一眼可见的修复入口：「环境配置」= Ubuntu / pi 的检测与安装页；「重试」= 重测就绪态
+ * （通道没起时顺带起一次）。
+ */
+@Composable
+private fun PiUnreadyStrip(
+    reason: String,
+    onRetry: () -> Unit,
+    onFix: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Icon(
+            Icons.Outlined.WarningAmber, null,
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(18.dp),
+        )
+        Column(Modifier.weight(1f).padding(start = 10.dp)) {
+            Text(
+                "pi 运行时未就绪",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                reason.ifBlank { "Ubuntu / pi 还没准备好（可在「环境配置」里检测）" },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            "重试",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .clickable(onClick = onRetry)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+        )
+        Text(
+            "环境配置",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .clickable(onClick = onFix)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+        )
+    }
 }
