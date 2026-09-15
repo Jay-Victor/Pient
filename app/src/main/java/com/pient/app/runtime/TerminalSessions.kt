@@ -45,7 +45,12 @@ object TerminalSessions {
          * 应用**内部**的会话（环境配置安装、pi 包管理、技能市场）固定 `"ubuntu"` ——
          * 它们要的是「node 与 pi 在的那棵 rootfs」，跟着用户把终端页切到 Android shell 会整体失效。
          */
-        val execEnvOverride: String? = null) {
+        val execEnvOverride: String? = null,
+        /**
+         * AI 执行镜像会话（2026-09-16）：**不绑进程**，只用来收 pi 工具事件的镜像行。
+         * 它不参与前台保活（保活在 [start] 里挂），也不影响用户自己的会话。
+         */
+        val aiMirror: Boolean = false) {
         val lines = mutableStateListOf<TerminalLine>()
         @Volatile var process: ShellProcess? = null
         @Volatile var alive: Boolean = false
@@ -70,6 +75,39 @@ object TerminalSessions {
 
     /** 按名字找会话（「环境配置」复用同一个，不重复建） */
     fun sessionNamed(name: String): Session? = sessions.firstOrNull { it.name == name }
+
+    /** AI 执行镜像会话名（终端页里那一栏） */
+    const val AI_MIRROR_NAME = "AI 执行"
+
+    /**
+     * 把 pi 的**工具执行**镜像进终端页（2026-09-16；用户对照 Operit 提的需求）。
+     *
+     * 为什么需要：pi 的 `bash` 工具是**它自己 spawn 的一次性进程**（`spawn(shellPath, ["-c", cmd])`），
+     * 与终端页这些常驻会话没有任何关系 —— 所以 AI 在 Ubuntu 里干活时，终端页里什么都看不到
+     * （对照 Operit：它的工具层直接走自己的 `TerminalManager`，命令天然出现在终端 UI 里，
+     * 见 `core/tools/defaultTool/standard/StandardTerminalCommandExecutor.kt`）。
+     *
+     * 形态：一个**只读镜像会话**（`aiMirror = true`，不绑进程、不占前台保活），
+     * 工具每跑一步就往里追一行；用户自己的命令仍在自己的会话里。
+     */
+    @Synchronized
+    fun mirror(context: Context, line: String) {
+        if (line.isBlank()) return
+        appContext = context.applicationContext
+        val s = sessions.firstOrNull { it.aiMirror } ?: Session(
+            id = counter + 1,
+            name = AI_MIRROR_NAME,
+            aiMirror = true,
+        ).also {
+            counter += 1
+            it.lines += TerminalLine(
+                "pi 工具执行镜像（只读）：AI 在 Ubuntu 里跑的每一步都记在这里；自己的命令请用别的会话。",
+                TerminalLineKind.COMMAND,
+            )
+            sessions += it
+        }
+        append(s, TerminalLine(line, TerminalLineKind.COMMAND))
+    }
 
     /** 新建会话：横幅 + 一条真实的环境自检命令（首屏输出即证明连到了目标环境） */
     @Synchronized

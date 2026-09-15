@@ -410,6 +410,32 @@ class ChatState {
     fun messagesForExport(id: String): List<Msg> =
         messagesIn(id).ifEmpty { entriesBySession[id].orEmpty().map { it.msg } }
 
+    /**
+     * 终端镜像：工具开始那一行（2026-09-16）。
+     *
+     * bash 写成 `$ <原始命令>`（与用户在终端里敲的一模一样）；文件类工具写路径；其它退回落 JSON 摘要。
+     * 目的是「在终端页里看得见 AI 在 Ubuntu 里干了什么」（对照 Operit 的工具走 TerminalManager）。
+     */
+    private fun mirrorStartLine(name: String, args: JSONObject?): String {
+        val detail = when (name) {
+            "bash" -> args?.optString("command").orEmpty()
+            "read", "write", "edit", "ls" ->
+                args?.optString("path").orEmpty().ifBlank { args?.optString("file").orEmpty() }
+            "grep", "find" ->
+                listOf(args?.optString("pattern").orEmpty(), args?.optString("path").orEmpty())
+                    .filter { it.isNotBlank() }.joinToString(" ")
+            else -> args?.toString().orEmpty()
+        }.trim().replace('\n', ' ')
+        val body = detail.take(400)
+        return if (name == "bash") "$ $body" else "[$name] $body"
+    }
+
+    /** 终端镜像：工具结束那一行（结果首行截断，方便一眼看出跑没跑通） */
+    private fun mirrorEndLine(name: String, failed: Boolean, result: String): String {
+        val head = result.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(120).orEmpty()
+        return "  ↳ " + (if (failed) "失败" else "完成") + (if (head.isNotEmpty()) " · $head" else "")
+    }
+
     /** 一条消息的可检索文本（内容检索用；工具类条目把名称与参数也算进去） */
     fun msgText(m: Msg): String = when (m) {
         is Msg.User -> m.text + (m.quote?.let { "\n" + it.text } ?: "")
@@ -1378,6 +1404,10 @@ class ChatState {
                         toolResAt[callId] = msgs.size
                         appendEntry(Msg.ToolResult(toolName = name, preview = ""))
                         Log.i(TAG_CHAT, "pi 工具开始：$name")
+                        // 终端镜像（2026-09-16）：与 Operit 的观感对齐 —— AI 在 Ubuntu 里跑什么，终端页看得见
+                        AppCtx.get()?.let {
+                            com.pient.app.runtime.TerminalSessions.mirror(it, mirrorStartLine(name, ev.optJSONObject("args")))
+                        }
                     }
                     "tool_execution_update" -> {
                         val callId = ev.optString("toolCallId")
@@ -1413,6 +1443,9 @@ class ChatState {
                             )
                         }
                         Log.i(TAG_CHAT, "pi 工具结束：$name 失败=$failed")
+                        AppCtx.get()?.let {
+                            com.pient.app.runtime.TerminalSessions.mirror(it, mirrorEndLine(name, failed, text))
+                        }
                     }
                     "agent_settled", "channel_closed" -> settled.complete(Unit)
                     "error" -> {
