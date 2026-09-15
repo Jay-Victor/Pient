@@ -512,44 +512,6 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                     .fillMaxWidth()
                                     .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
                             )
-                            ConfigFieldLabel("历史媒体保留")
-                            FieldHint("仅直连路径拼请求时生效：更早回合的图片/音视频替换为「已省略」（默认 2 / 1）")
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
-                            ) {
-                                PientInputBox(
-                                    value = cfg.maxImageHistoryTurns,
-                                    onValueChange = { v ->
-                                        updateConfig {
-                                            it.copy(
-                                                maxImageHistoryTurns = v.filter { c -> c.isDigit() }.take(2),
-                                            )
-                                        }
-                                    },
-                                    placeholder = "2",
-                                    number = true,
-                                    suffix = "图片 · 回合",
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Spacer(Modifier.width(10.dp))
-                                PientInputBox(
-                                    value = cfg.maxMediaHistoryTurns,
-                                    onValueChange = { v ->
-                                        updateConfig {
-                                            it.copy(
-                                                maxMediaHistoryTurns = v.filter { c -> c.isDigit() }.take(2),
-                                            )
-                                        }
-                                    },
-                                    placeholder = "1",
-                                    number = true,
-                                    suffix = "音视频 · 回合",
-                                    modifier = Modifier.weight(1f),
-                                )
-                            }
                         }
                     }
                 }

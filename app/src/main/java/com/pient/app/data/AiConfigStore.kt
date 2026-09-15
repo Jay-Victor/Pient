@@ -63,10 +63,6 @@ data class ProviderConfig(
     val reserveTokens: String = ContextPolicy.DEFAULT_RESERVE_TOKENS.toString(),
     /** 手动压缩时交给 pi 的指令（`compact` 的 `customInstructions`；Pient 侧字段） */
     val compactInstructions: String = "",
-    /** 历史中保留图片附件的最近用户回合数（请求侧附件裁剪用，Pient 侧字段） */
-    val maxImageHistoryTurns: String = "2",
-    /** 历史中保留音视频附件的最近用户回合数（同上） */
-    val maxMediaHistoryTurns: String = "1",
 ) {
     val models: List<String>
         get() = modelList.split(";").map { it.trim() }.filter { it.isNotEmpty() }
@@ -80,16 +76,6 @@ data class ProviderConfig(
     val reserveTokensValue: Int
         get() = reserveTokens.trim().toIntOrNull()?.coerceIn(1000, 1_000_000)
             ?: ContextPolicy.DEFAULT_RESERVE_TOKENS
-
-    /** 生效的图片保留回合数（非法输入回退 Operit 默认 2） */
-    val maxImageHistoryTurnsValue: Int
-        get() = maxImageHistoryTurns.trim().toIntOrNull()?.coerceIn(0, 50)
-            ?: ContextPolicy.DEFAULT_MAX_IMAGE_HISTORY_TURNS
-
-    /** 生效的音视频保留回合数（非法输入回退 Operit 默认 1） */
-    val maxMediaHistoryTurnsValue: Int
-        get() = maxMediaHistoryTurns.trim().toIntOrNull()?.coerceIn(0, 50)
-            ?: ContextPolicy.DEFAULT_MAX_MEDIA_HISTORY_TURNS
 }
 
 object AiConfigStore {
@@ -179,8 +165,6 @@ object AiConfigStore {
                 keepRecentTokens = o.optString("keepRecentTokens", ContextPolicy.DEFAULT_KEEP_RECENT_TOKENS.toString()),
                 reserveTokens = o.optString("reserveTokens", ContextPolicy.DEFAULT_RESERVE_TOKENS.toString()),
                 compactInstructions = o.optString("compactInstructions", ""),
-                maxImageHistoryTurns = o.optString("maxImageHistoryTurns", ContextPolicy.DEFAULT_MAX_IMAGE_HISTORY_TURNS.toString()),
-                maxMediaHistoryTurns = o.optString("maxMediaHistoryTurns", ContextPolicy.DEFAULT_MAX_MEDIA_HISTORY_TURNS.toString()),
             )
         }
         aiConfigured = root.optBoolean("aiConfigured", false)
@@ -216,16 +200,12 @@ object AiConfigStore {
                         audioDirectEnabled = o.optBoolean("audioDirectEnabled", false),
                         videoDirectEnabled = o.optBoolean("videoDirectEnabled", false),
                         compactInstructions = o.optString("compactInstructions", ""),
-                        maxImageHistoryTurns = o.optString("maxImageHistoryTurns", "2"),
-                        maxMediaHistoryTurns = o.optString("maxMediaHistoryTurns", "1"),
                     )
                 } else {
                     configs[id] = cur.copy(
                         audioDirectEnabled = o.optBoolean("audioDirectEnabled", cur.audioDirectEnabled),
                         videoDirectEnabled = o.optBoolean("videoDirectEnabled", cur.videoDirectEnabled),
                         compactInstructions = o.optString("compactInstructions", cur.compactInstructions),
-                        maxImageHistoryTurns = o.optString("maxImageHistoryTurns", cur.maxImageHistoryTurns),
-                        maxMediaHistoryTurns = o.optString("maxMediaHistoryTurns", cur.maxMediaHistoryTurns),
                     )
                 }
             }
@@ -284,9 +264,7 @@ object AiConfigStore {
                         .put("providerId", c.providerId)
                         .put("audioDirectEnabled", c.audioDirectEnabled)
                         .put("videoDirectEnabled", c.videoDirectEnabled)
-                        .put("compactInstructions", c.compactInstructions)
-                        .put("maxImageHistoryTurns", c.maxImageHistoryTurns)
-                        .put("maxMediaHistoryTurns", c.maxMediaHistoryTurns),
+                        .put("compactInstructions", c.compactInstructions),
                 )
             }
             root.put("providers", arr)

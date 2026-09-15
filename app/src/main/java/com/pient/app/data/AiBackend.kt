@@ -23,28 +23,6 @@ import kotlin.coroutines.resumeWithException
 /** AI 请求失败（网络/HTTP/协议错误；message 面向用户展示） */
 class AiException(message: String) : Exception(message)
 
-/** 流式事件 */
-sealed class ChatEvent {
-    data class TextDelta(val text: String) : ChatEvent()
-
-    /** 思考/推理增量（Anthropic thinking_delta / OpenAI 兼容 reasoning[_content|_text]） */
-    data class ThinkingDelta(val text: String) : ChatEvent()
-    data class UsageEvent(val usage: Usage) : ChatEvent()
-
-    data object Done : ChatEvent()
-    data class Failed(val message: String) : ChatEvent()
-}
-
-/**
- * 一次请求里的一个回合（比 `List<Pair<role, content>>` 更宽：直发附件需要独立字段）。
- * - [Text]：普通文本回合（历史都是这种）；
- * - [Rich]：带**直发附件**的回合（媒体能力开关开启时，[MediaInline.parts] 产出内容部件）。
- */
-sealed interface ChatTurn {
-    data class Text(val role: String, val content: String) : ChatTurn
-    data class Rich(val role: String, val text: String, val parts: List<WirePart>) : ChatTurn
-}
-
 /** 直发附件的一个部件（[type]：image / audio / video；[base64] 不含 data URL 前缀） */
 data class WirePart(val type: String, val mime: String, val base64: String)
 
@@ -75,13 +53,6 @@ object AiBackend {
 
     // 档位映射见下方 levelWire()/sampleIndex()（2026-09-12）：五档 → 服务商实际档位，
     // 旧的 thinkingBudget()/reasoningEffort() 一对一映射已被它取代（不再有 xhigh→high 这种硬收敛）。
-
-    private fun chatUrl(cfg: ProviderConfig): String {
-        val e = cfg.endpoint.trim().trimEnd('/')
-        return if (isAnthropicProtocol(e)) {
-            if (e.endsWith("/v1")) "$e/messages" else "$e/v1/messages"
-        } else "$e/chat/completions"
-    }
 
     private fun modelsUrl(cfg: ProviderConfig): String {
         val e = cfg.endpoint.trim().trimEnd('/')
@@ -133,79 +104,7 @@ object AiBackend {
         val thinking: String? = null,
     )
 
-    suspend fun chat(
-        cfg: ProviderConfig,
-        systemPrompt: String?,
-        turns: List<ChatTurn>,
-        thinkingLevel: ThinkingLevel?,
-    ): ChatResult {
-        val body = buildRequestBody(cfg, systemPrompt, turns, thinkingLevel, stream = false)
-        val req = Request.Builder().url(chatUrl(cfg)).post(body.toString().toRequestBody(JSON)).apply {
-            authHeaders(cfg, this)
-        }.build()
-        val resp = execute(req)
-        // ★ 响应体读取与 JSON 解析必须在 IO 线程（同 listModels，2026-09-09 修复）：
-        //   非流式 = 一次性读完整个响应，慢网络/长回答下在主线程做会卡死 UI → ANR/退出
-        return withContext(Dispatchers.IO) {
-            resp.use { r ->
-                val text = r.body?.string().orEmpty()
-                if (!r.isSuccessful) throw AiException(httpError(r.code, text))
-                if (isAnthropicProtocol(cfg.endpoint)) {
-                    parseAnthropicFull(JSONObject(text))
-                } else {
-                    parseOpenAiFull(JSONObject(text))
-                }
-            }
-        }
-    }
-
     // ───────────────────────── 对话（流式 SSE） ─────────────────────────
-
-    fun chatStream(
-        cfg: ProviderConfig,
-        systemPrompt: String?,
-        turns: List<ChatTurn>,
-        thinkingLevel: ThinkingLevel?,
-    ): Flow<ChatEvent> = callbackFlow {
-        val body = buildRequestBody(cfg, systemPrompt, turns, thinkingLevel, stream = true)
-        val req = Request.Builder().url(chatUrl(cfg)).post(body.toString().toRequestBody(JSON)).apply {
-            authHeaders(cfg, this)
-        }.build()
-        client.newCall(req).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                trySend(ChatEvent.Failed(e.message ?: "网络请求失败"))
-                close()
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                response.use { r ->
-                    if (!r.isSuccessful) {
-                        val text = r.body?.string().orEmpty()
-                        trySend(ChatEvent.Failed(httpError(r.code, text)))
-                        close()
-                        return
-                    }
-                    try {
-                        val source = r.body?.source() ?: run {
-                            trySend(ChatEvent.Failed("空响应"))
-                            close()
-                            return
-                        }
-                        if (isAnthropicProtocol(cfg.endpoint)) {
-                            parseAnthropicStream(source) { trySend(it) }
-                        } else {
-                            parseOpenAiStream(source) { trySend(it) }
-                        }
-                        trySend(ChatEvent.Done)
-                    } catch (e: Exception) {
-                        trySend(ChatEvent.Failed(e.message ?: "响应解析失败"))
-                    }
-                    close()
-                }
-            }
-        })
-        awaitClose { }
-    }
 
     // ───────────────────────── 请求体 ─────────────────────────
 
@@ -285,199 +184,7 @@ object AiBackend {
         return LevelWire.Unsupported
     }
 
-    /**
-     * 写入思考参数（2026-09-12 真实化）：**关闭思考模式 = 显式禁用；开启 = 显式启用**，
-     * 不再靠「省略参数」假装关闭（省略只对「默认不思考」的模型有效）。
-     *
-     * 各服务商写法取自 pi `thinkingFormat` 枚举（packages/ai/src/types.ts:578）与 Operit
-     * 各 Provider 类的实测口径（DeepseekProvider/KimiProvider/DoubaoAIProvider 发
-     * `thinking:{"type":"disabled"}`；Qwen/Nvidia/MNN 发 `enable_thinking=false`）：
-     * - OPENAI：`reasoning_effort`=档位词 / `"none"`
-     * - DEEPSEEK：`thinking.enabled` + `reasoning_effort`（词表 low/high/max）/ `thinking.disabled`
-     * - ZAI：`thinking.enabled` / `thinking.disabled`（智谱不下发档位——GLM-4.5/4.6 的
-     *   `reasoning_effort` 不认，仅 GLM-5.2+ 支持；不发即不报错，UI 会置灰滑轨说明）
-     * - QWEN / SILICONFLOW：`enable_thinking` 布尔 +（开启时）`thinking_budget` 预算
-     * - OPENROUTER：`reasoning.effort` / `reasoning.enabled=false`
-     * - ANTHROPIC（OpenAI 兼容端点上的等价形态）：只发 `thinking.type`
-     * - NONE：什么都不发（模型自带推理且不吃禁用字面量时的逃生口）
-     *
-     * Anthropic Messages 协议固定用官方 `thinking.type`（enabled+budget / disabled），
-     * 但仍受 NONE 逃生口约束。
-     */
-    private fun applyReasoningParams(
-        body: JSONObject,
-        cfg: ProviderConfig,
-        thinkingLevel: ThinkingLevel?,
-    ) {
-        if (cfg.reasoningFormat == ReasoningFormat.NONE) return
-        if (isAnthropicProtocol(cfg.endpoint)) {
-            body.put(
-                "thinking",
-                if (thinkingLevel != null) {
-                    val budget = (levelWire(cfg, thinkingLevel) as? LevelWire.Budget)?.tokens
-                        ?: BUDGET_LADDER.last()
-                    JSONObject().put("type", "enabled").put("budget_tokens", budget)
-                } else {
-                    JSONObject().put("type", "disabled")
-                },
-            )
-            return
-        }
-        // 未开启 = 不发档位；不支持档位的服务商（Unsupported）也只发开关
-        val word = thinkingLevel?.let { (levelWire(cfg, it) as? LevelWire.Word)?.value }
-        val budget = thinkingLevel?.let { (levelWire(cfg, it) as? LevelWire.Budget)?.tokens }
-        when (effectiveReasoningFormat(cfg)) {
-            ReasoningFormat.NONE, ReasoningFormat.AUTO -> Unit   // AUTO 已被 effectiveReasoningFormat 解析
-            ReasoningFormat.OPENAI -> body.put("reasoning_effort", word ?: if (thinkingLevel == null) "none" else "medium")
-            ReasoningFormat.DEEPSEEK -> {
-                body.put("thinking", JSONObject().put("type", if (thinkingLevel != null) "enabled" else "disabled"))
-                if (word != null) body.put("reasoning_effort", word)
-            }
-            ReasoningFormat.ZAI ->
-                body.put("thinking", JSONObject().put("type", if (thinkingLevel != null) "enabled" else "disabled"))
-            ReasoningFormat.QWEN, ReasoningFormat.SILICONFLOW -> {
-                body.put("enable_thinking", thinkingLevel != null)
-                if (budget != null) body.put("thinking_budget", budget)
-            }
-            // Anthropic 写法在 OpenAI 兼容端点上的等价形态（中转/代理端常见）
-            ReasoningFormat.ANTHROPIC ->
-                body.put("thinking", JSONObject().put("type", if (thinkingLevel != null) "enabled" else "disabled"))
-            ReasoningFormat.OPENROUTER ->
-                body.put(
-                    "reasoning",
-                    if (thinkingLevel != null) {
-                        JSONObject().put("effort", word ?: "medium")
-                    } else {
-                        JSONObject().put("enabled", false)
-                    },
-                )
-        }
-    }
-
-    private fun buildRequestBody(
-        cfg: ProviderConfig,
-        systemPrompt: String?,
-        turns: List<ChatTurn>,
-        thinkingLevel: ThinkingLevel?,
-        stream: Boolean,
-    ): JSONObject {
-        val maxTokens = cfg.maxOutK.toIntOrNull()?.let { (it * 1024).coerceIn(1, 128000) }
-        val thinking = thinkingLevel != null
-        return if (isAnthropicProtocol(cfg.endpoint)) {
-            JSONObject().apply {
-                put("model", modelNameOf(cfg))
-                if (maxTokens != null) put("max_tokens", maxTokens)
-                if (!systemPrompt.isNullOrBlank()) put("system", systemPrompt)
-                put("messages", anthropicMessages(turns))
-                put("stream", stream)
-                applyReasoningParams(this, cfg, thinkingLevel)
-                if (thinking) {
-                    // Anthropic：思考开启时 temperature 必须为 1 且不可传 top_p/top_k
-                    put("temperature", 1.0)
-                } else {
-                    if (cfg.tempEnabled) cfg.tempValue.toFloatOrNull()?.let { put("temperature", it) }
-                    if (cfg.topPEnabled) cfg.topPValue.toFloatOrNull()?.let { put("top_p", it) }
-                    if (cfg.topKEnabled) cfg.topKValue.toIntOrNull()?.let { put("top_k", it) }
-                }
-            }
-        } else {
-            JSONObject().apply {
-                put("model", modelNameOf(cfg))
-                put("messages", openAiMessages(systemPrompt, turns))
-                put("stream", stream)
-                if (maxTokens != null) put("max_tokens", maxTokens)
-                applyReasoningParams(this, cfg, thinkingLevel)
-                if (cfg.tempEnabled) cfg.tempValue.toFloatOrNull()?.let { put("temperature", it) }
-                if (cfg.topPEnabled) cfg.topPValue.toFloatOrNull()?.let { put("top_p", it) }
-            }
-        }
-    }
-
     // ───────────────────────── 回合 → 协议报文 ─────────────────────────
-
-    /** OpenAI 兼容：system 作为首条消息 */
-    private fun openAiMessages(systemPrompt: String?, turns: List<ChatTurn>): JSONArray {
-        val msgs = JSONArray()
-        if (!systemPrompt.isNullOrBlank()) {
-            msgs.put(JSONObject().put("role", "system").put("content", systemPrompt))
-        }
-        for (t in turns) {
-            when (t) {
-                is ChatTurn.Text -> msgs.put(JSONObject().put("role", t.role).put("content", t.content))
-                is ChatTurn.Rich -> msgs.put(
-                    JSONObject().put("role", t.role).put("content", openAiContent(t)),
-                )
-            }
-        }
-        return msgs
-    }
-
-    /**
-     * 直发附件的 OpenAI 兼容形态（与 Operit `OpenAIProvider.buildContentField` 逐形对齐）：
-     * 图片 `image_url`（data URL）、音频 `input_audio`（base64 + format）、视频 `video_url`（data URL）。
-     */
-    private fun openAiContent(turn: ChatTurn.Rich): Any {
-        if (turn.parts.isEmpty()) return turn.text
-        val arr = JSONArray()
-        for (p in turn.parts) {
-            when (p.type) {
-                "image" -> arr.put(
-                    JSONObject().put("type", "image_url")
-                        .put("image_url", JSONObject().put("url", "data:${p.mime};base64,${p.base64}")),
-                )
-                "audio" -> arr.put(
-                    JSONObject().put("type", "input_audio")
-                        .put(
-                            "input_audio",
-                            JSONObject().put("data", p.base64).put("format", audioFormat(p.mime)),
-                        ),
-                )
-                "video" -> arr.put(
-                    JSONObject().put("type", "video_url")
-                        .put("video_url", JSONObject().put("url", "data:${p.mime};base64,${p.base64}")),
-                )
-            }
-        }
-        if (turn.text.isNotBlank()) arr.put(JSONObject().put("type", "text").put("text", turn.text))
-        return arr
-    }
-
-    private fun audioFormat(mime: String): String = when (mime.lowercase()) {
-        "audio/wav", "audio/x-wav" -> "wav"
-        "audio/mpeg", "audio/mp3" -> "mp3"
-        "audio/ogg" -> "ogg"
-        "audio/webm" -> "webm"
-        else -> mime.substringAfter("/", "wav")
-    }
-
-    /** Anthropic Messages：system 独立字段 */
-    private fun anthropicMessages(turns: List<ChatTurn>): JSONArray {
-        val msgs = JSONArray()
-        for (t in turns) {
-            when (t) {
-                is ChatTurn.Text -> msgs.put(JSONObject().put("role", t.role).put("content", t.content))
-                is ChatTurn.Rich -> {
-                    val blocks = JSONArray()
-                    for (p in t.parts) {
-                        // Anthropic Messages 只吃图片；音频/视频无对应块（Operit 同样只给 OpenAI 兼容端发）
-                        if (p.type != "image") continue
-                        blocks.put(
-                            JSONObject().put("type", "image").put(
-                                "source",
-                                JSONObject().put("type", "base64")
-                                    .put("media_type", p.mime).put("data", p.base64),
-                            ),
-                        )
-                    }
-                    if (t.text.isNotBlank()) blocks.put(JSONObject().put("type", "text").put("text", t.text))
-                    msgs.put(JSONObject().put("role", t.role).put("content", blocks))
-                }
-            }
-        }
-        return msgs
-    }
-
-    private fun modelNameOf(cfg: ProviderConfig): String = cfg.models.firstOrNull().orEmpty()
 
     // ───────────────────────── 响应解析 ─────────────────────────
 
@@ -490,46 +197,6 @@ object AiBackend {
         if (isNull(key)) "" else optString(key)
 
     /**
-     * OpenAI 协议 usage → Usage（pi 同口径，见 packages/ai/src/api/openai-completions.ts）：
-     * 输入 = prompt_tokens − 缓存读取 − 缓存写入（缓存单独计费）；缓存读取取值链
-     * prompt_tokens_details.cached_tokens → prompt_cache_hit_tokens（DeepSeek）→ cached_tokens（Kimi）。
-     */
-    private fun openAiUsage(u: JSONObject): Usage {
-        val details = u.optJSONObject("prompt_tokens_details")
-        val cacheRead = details?.optInt("cached_tokens")
-            ?: u.optInt("prompt_cache_hit_tokens").takeIf { it > 0 }
-            ?: u.optInt("cached_tokens")
-        val cacheWrite = details?.optInt("cache_write_tokens") ?: 0
-        return Usage(
-            inTokens = maxOf(0, u.optInt("prompt_tokens") - cacheRead - cacheWrite),
-            outTokens = u.optInt("completion_tokens"),
-            cacheTokens = cacheRead,
-            costUsd = 0.0,
-            cacheWriteTokens = cacheWrite,
-        )
-    }
-
-    /** Anthropic 协议 usage → Usage（input_tokens 本身不含缓存读取；缓存写入 = cache_creation_input_tokens） */
-    private fun anthropicUsage(u: JSONObject): Usage = Usage(
-        inTokens = u.optInt("input_tokens"),
-        outTokens = u.optInt("output_tokens"),
-        cacheTokens = u.optInt("cache_read_input_tokens"),
-        costUsd = 0.0,
-        cacheWriteTokens = u.optInt("cache_creation_input_tokens"),
-    )
-
-    private fun parseOpenAiFull(root: JSONObject): ChatResult {
-        val message = root.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
-        val text = message?.let { it.strOrEmpty("content") } ?: ""
-        val usage = root.optJSONObject("usage")?.let { openAiUsage(it) }
-        // 非流式：推理内容同样按 pi 的字段优先级取第一个非空（见 reasoningField）
-        val thinking = message?.let { m ->
-            REASONING_FIELDS.firstNotNullOfOrNull { f -> m.strOrEmpty(f).takeIf { it.isNotEmpty() } }
-        }
-        return ChatResult(text, usage, thinking)
-    }
-
-    /**
      * OpenAI 兼容协议的推理字段优先级（逐项对齐 pi `openai-completions.ts` 的
      * OPENAI_COMPLETIONS_REASONING_FIELDS）：llama.cpp 走 reasoning_content、多数
      * 国内服务商走 reasoning_content（DeepSeek）/ reasoning（GLM 等）、少数走
@@ -538,104 +205,10 @@ object AiBackend {
      */
     private val REASONING_FIELDS = listOf("reasoning_content", "reasoning", "reasoning_text")
 
-    private fun parseAnthropicFull(root: JSONObject): ChatResult {
-        val sb = StringBuilder()
-        val thinking = StringBuilder()
-        val content = root.optJSONArray("content")
-        if (content != null) {
-            for (i in 0 until content.length()) {
-                val b = content.optJSONObject(i) ?: continue
-                when (b.optString("type")) {
-                    "text" -> sb.append(b.strOrEmpty("text"))
-                    // 非流式思考块（Anthropic content 里的 thinking block）
-                    "thinking" -> thinking.append(b.strOrEmpty("thinking"))
-                }
-            }
-        }
-        val usage = root.optJSONObject("usage")?.let { anthropicUsage(it) }
-        return ChatResult(sb.toString(), usage, thinking.toString().takeIf { it.isNotEmpty() })
-    }
-
-    private fun parseOpenAiStream(source: okio.BufferedSource, emit: (ChatEvent) -> Unit) {
-        var usage: Usage? = null
-        while (true) {
-            val line = source.readUtf8Line() ?: break
-            if (!line.startsWith("data:")) continue
-            val payload = line.removePrefix("data:").trim()
-            if (payload == "[DONE]") break
-            try {
-                val o = JSONObject(payload)
-                val choices = o.optJSONArray("choices") ?: continue
-                val delta = choices.optJSONObject(0)?.optJSONObject("delta") ?: continue
-                val content = delta.strOrEmpty("content")
-                if (content.isNotEmpty()) emit(ChatEvent.TextDelta(content))
-                // 推理增量（思考模式开启时服务商才会回；按字段优先级取第一个非空）
-                for (f in REASONING_FIELDS) {
-                    val t = delta.strOrEmpty(f)
-                    if (t.isNotEmpty()) {
-                        emit(ChatEvent.ThinkingDelta(t))
-                        break
-                    }
-                }
-                o.optJSONObject("usage")?.let { usage = openAiUsage(it) }
-            } catch (_: Exception) {
-                // 忽略无法解析的分片
-            }
-        }
-        usage?.let { emit(ChatEvent.UsageEvent(it)) }
-    }
-
-    private fun parseAnthropicStream(source: okio.BufferedSource, emit: (ChatEvent) -> Unit) {
-        var inTokens = 0
-        var outTokens = 0
-        var cacheTokens = 0
-        var cacheWriteTokens = 0
-        while (true) {
-            val line = source.readUtf8Line() ?: break
-            if (!line.startsWith("data:")) continue
-            val payload = line.removePrefix("data:").trim()
-            try {
-                val o = JSONObject(payload)
-                when (o.optString("type")) {
-                    "content_block_delta" -> {
-                        val delta = o.optJSONObject("delta") ?: continue
-                        when (delta.optString("type")) {
-                            "text_delta" -> {
-                                val t = delta.strOrEmpty("text")
-                                if (t.isNotEmpty()) emit(ChatEvent.TextDelta(t))
-                            }
-                            // 思考增量（思考模式开启时 Anthropic 回 thinking_delta）
-                            "thinking_delta" -> {
-                                val t = delta.strOrEmpty("thinking")
-                                if (t.isNotEmpty()) emit(ChatEvent.ThinkingDelta(t))
-                            }
-                        }
-                    }
-                    "message_start" -> o.optJSONObject("message")?.optJSONObject("usage")?.let {
-                        inTokens = it.optInt("input_tokens")
-                        cacheTokens = it.optInt("cache_read_input_tokens")
-                        cacheWriteTokens = it.optInt("cache_creation_input_tokens")
-                    }
-                    "message_delta" -> o.optJSONObject("usage")?.let {
-                        outTokens = it.optInt("output_tokens")
-                    }
-                    "error" -> throw AiException(
-                        o.optJSONObject("error")?.strOrEmpty("message") ?: "未知错误",
-                    )
-                    "message_stop" -> break
-                }
-            } catch (e: AiException) {
-                throw e
-            } catch (_: Exception) {
-                // 忽略无法解析的分片
-            }
-        }
-        if (inTokens > 0 || outTokens > 0 || cacheTokens > 0 || cacheWriteTokens > 0) {
-            emit(ChatEvent.UsageEvent(Usage(inTokens, outTokens, cacheTokens, 0.0, cacheWriteTokens)))
-        }
-    }
-
     // ───────────────────────── 基础工具 ─────────────────────────
+
+    /** 服务商配置里的首个模型名（思考参数写法推断 / 历史代码共用） */
+    private fun modelNameOf(cfg: ProviderConfig): String = cfg.models.firstOrNull().orEmpty()
 
     /** HTTP 错误体 → 用户可读消息（OpenAI/Anthropic error 结构均可解析） */
     private fun httpError(code: Int, body: String): String {
