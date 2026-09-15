@@ -115,6 +115,13 @@ object SettingsStore {
 
     // ── 环境内软件（Ubuntu）：apt 镜像源 + 组件勾选（id 见 data/EnvCatalog.kt）──
     var aptMirror by mutableStateOf(DEFAULT_APT_MIRROR)
+
+    /**
+     * **切分支时让 pi 生成"被放弃分支"的摘要**（pi 的 branch summary，2026-09-14）：
+     * 开 = 会话内分支跳转时带 `--summarize`（pi 会**调用一次模型**把切走的那条分支摘成摘要，
+     * 挂到新位置上，保留"刚做过什么"的上下文）；关 = 纯切分支，不花这一次调用。
+     */
+    var branchSummarize by mutableStateOf(false)
     var selectedComponents by mutableStateOf(setOf("ca", "git", "curl"))
 
     // ── 首启环境安装（2026-09-13，对齐 Operit 的 SetupScreen）：首次进终端页弹一次「环境安装」，
@@ -202,6 +209,7 @@ object SettingsStore {
         selectedComponents = p.getStringSet("ubuntu_components", setOf("ca", "git", "curl"))
             ?.toSet() ?: setOf("ca", "git", "curl")
         envSetupDone = p.getBoolean("env_setup_done", false)
+        branchSummarize = p.getBoolean("branch_summarize", false)
         startupAnimation = p.getBoolean("startup_animation", true)
         filePreviewNoWrap = p.getBoolean("file_preview_no_wrap", false)
         customAccentEnabled = p.getBoolean("custom_accent_enabled", false)
@@ -279,6 +287,14 @@ object SettingsStore {
         androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
             .edit()
             .putString("drawer_mode", drawerMode.name)
+            .apply()
+    }
+
+    /** 保存「切分支时生成摘要」偏好（画布上的开关），重启后保持 */
+    fun saveBranchSummarize(androidCtx: android.content.Context) {
+        androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("branch_summarize", branchSummarize)
             .apply()
     }
 

@@ -1380,7 +1380,8 @@ class ChatState {
             // 画布的节点 id 就来自 pi 的树（= pi entry id），这里原样交给 pi
             leafBySession[sid] = nodeId
             bgScope.launch {
-                runCatching { PiRpc.navigate(nodeId) }
+                // 摘要是可选的：pi 会为此**调用一次模型**（用户偏好见 SettingsStore.branchSummarize）
+                runCatching { PiRpc.navigate(nodeId, summarize = SettingsStore.branchSummarize) }
                     .onFailure { Log.w(TAG_CHAT, "pi 会话内分支跳转失败：${it.message}") }
                 refreshPiTree()
                 syncMessagesFromPi()

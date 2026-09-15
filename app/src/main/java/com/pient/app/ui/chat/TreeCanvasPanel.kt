@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AltRoute
 import androidx.compose.material.icons.outlined.CallSplit
 import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
@@ -63,6 +64,7 @@ import com.pient.app.data.ChatState
 import com.pient.app.data.Msg
 import com.pient.app.data.Panel
 import com.pient.app.data.SessionTreeNode
+import com.pient.app.data.SettingsStore
 import com.pient.app.ui.components.MarkdownText
 import com.pient.app.ui.theme.PientPanel
 import kotlin.math.min
@@ -402,6 +404,25 @@ fun TreeCanvasPanel(chatState: ChatState) {
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
+                    // 摘要开关（pi 的 branch summary）：开启后切分支时 pi 调一次模型，
+                    // 把切走的那条分支摘成摘要挂到新位置 —— 保留"刚做过什么"的上下文
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { SettingsStore.branchSummarize = !SettingsStore.branchSummarize }
+                            .padding(top = 8.dp),
+                    ) {
+                        Checkbox(
+                            checked = SettingsStore.branchSummarize,
+                            onCheckedChange = { SettingsStore.branchSummarize = it },
+                        )
+                        Text(
+                            "切分支时生成摘要（pi 会调用一次模型）",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     // ── 节点动作（2026-09-14 会话映射）──
