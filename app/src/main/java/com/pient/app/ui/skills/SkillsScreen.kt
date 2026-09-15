@@ -215,6 +215,19 @@ fun SkillsScreen(nav: NavController) {
                     }
                 }
             },
+            // ZIP 页签（2026-09-16 真实化）：SAF 选的 zip → 解压 + 校验 + 整目录落盘
+            onImportZip = { uri ->
+                scope.launch {
+                    val (err, slug) = withContext(Dispatchers.IO) {
+                        PiSkills.importZip(context, uri, global = segment == 0)
+                    }
+                    toast(context, err ?: "已导入技能 $slug")
+                    if (err == null) {
+                        importOpen = false
+                        reload()
+                    }
+                }
+            },
         )
     }
 

@@ -22,45 +22,56 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.components.PientDialog
 import com.pient.app.ui.components.PientSegmented
 import com.pient.app.ui.theme.MonoFont
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import android.net.Uri
+import android.provider.OpenableColumns
 
 /**
  * 导入技能弹窗（设计计划第 4 章，Operit SkillConfigScreen 参考）：
  * ZIP 导入 / 手动输入两页签；手动 = 名称（frontmatter name：1–64 字符
  * 小写/数字/连字符，非法即校验提示）+ 简介（description ≤1024 必填）+
- * 技能内容（生成 SKILL.md）+ 技能附件列表。导入目标跟随分段（全局/项目）。
+ * 技能内容（生成 SKILL.md）。导入目标跟随分段（全局/项目）。
+ *
+ * **2026-09-16 两个页签都是真实现**：ZIP 页签走 SAF 文件选择器 + `PiSkills.importZip` 真解压；
+ * 原来的「原型」痕迹（假文件名 `my-skill.zip`、`delay(900)` 假进度、假描述、假附件列表）已删。
  */
 @Composable
 fun ImportSkillDialog(
     global: Boolean,
     onDismiss: () -> Unit,
     onImported: (name: String, desc: String, skillMd: String?) -> Unit,
+    /** ZIP 页签：把选中的 zip 交给屏幕侧做真实导入（IO + 落盘 + 刷新） */
+    onImportZip: (uri: Uri) -> Unit,
 ) {
     var tab by remember { mutableStateOf(0) }
     var name by remember { mutableStateOf("") }
     var desc by remember { mutableStateOf("") }
     var content by remember { mutableStateOf("") }
-    val attachments = remember { mutableStateListOf<String>() }
     var importing by remember { mutableStateOf(false) }
     var nameError by remember { mutableStateOf<String?>(null) }
-    var zipPicked by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
-
+    var zipUri by remember { mutableStateOf<Uri?>(null) }
+    var zipName by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val zipPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            zipUri = uri
+            zipName = zipDisplayName(context, uri)
+        }
+    }
     val nameRegex = Regex("^[a-z0-9-]{1,64}$")
     val valid = nameRegex.matches(name) && desc.isNotBlank() && desc.length <= 1024
 
@@ -69,18 +80,15 @@ fun ImportSkillDialog(
             title = "导入技能",
             onDismiss = onDismiss,
             confirmText = "导入",
-            confirmEnabled = (tab == 0 && zipPicked != null) || (tab == 1 && valid) && !importing,
+            confirmEnabled = (tab == 0 && zipUri != null) || (tab == 1 && valid) && !importing,
             showClose = false,
             onConfirm = {
                 importing = true
-                scope.launch {
-                    delay(900) // 原型导入进度
-                    if (tab == 0) {
-                        val n = zipPicked!!.removeSuffix(".zip")
-                        onImported(n, "由 ZIP 导入的技能", null)
-                    } else {
-                        onImported(name, desc, content.ifBlank { null })
-                    }
+                if (tab == 0) {
+                    // 真实导入：交给屏幕侧（IO 线程解压 + 落盘 + 刷新 + Toast）
+                    zipUri?.let { onImportZip(it) }
+                } else {
+                    onImported(name, desc, content.ifBlank { null })
                 }
             },
         ) {
@@ -106,7 +114,10 @@ fun ImportSkillDialog(
                             .padding(top = 6.dp)
                             .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(10.dp))
                             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-                            .clickable(onClick = { zipPicked = "my-skill.zip" })
+                            .clickable {
+                                // 真 SAF 选择器（原来这里是 `zipPicked = "my-skill.zip"` 的假动作）
+                                zipPicker.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+                            }
                             .padding(12.dp),
                     ) {
                         Icon(
@@ -115,15 +126,17 @@ fun ImportSkillDialog(
                             modifier = Modifier.size(18.dp),
                         )
                         Text(
-                            zipPicked ?: "选择 .zip 文件（解压导入）",
+                            zipName ?: "选择 .zip 文件（解压导入）",
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (zipPicked != null) MaterialTheme.colorScheme.primary
+                            color = if (zipName != null) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(start = 8.dp),
                         )
                     }
                     Text(
-                        "校验结构：需含 SKILL.md 或技能目录（原型演示）",
+                        "校验结构：压缩包需含 SKILL.md（可整体套一层目录）；导入后落在「${
+                            if (global) "全局 ~/.pi/agent/skills/" else "当前项目 .pi/skills/"
+                        }」",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp),
@@ -179,44 +192,6 @@ fun ImportSkillDialog(
                             modifier = Modifier.fieldStyle(),
                         )
                     }
-                    LabeledField("技能附件", "多附件列表（可删除）") {
-                        attachments.forEachIndexed { i, f ->
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .padding(top = 4.dp)
-                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                            ) {
-                                Text(f, style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFont), modifier = Modifier.weight(1f))
-                                Icon(
-                                    Icons.Outlined.Close, "移除",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier
-                                        .size(14.dp)
-                                        .clickable(onClick = { attachments.removeAt(i) }),
-                                )
-                            }
-                        }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .padding(top = 4.dp)
-                                .clickable(onClick = { attachments += "attachment_${attachments.size + 1}.py" }),
-                        ) {
-                            Icon(
-                                Icons.Outlined.Add, null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Text(
-                                "添加附件",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(start = 4.dp),
-                            )
-                        }
-                    }
                 }
 
                 if (importing) {
@@ -267,3 +242,10 @@ private fun Modifier.fieldStyle(): Modifier = this
     .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(10.dp))
     .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
     .padding(horizontal = 12.dp, vertical = 10.dp)
+
+/** SAF 显示名（DISPLAY_NAME；取不到时回退一个占位，但确认键仍受 zipUri != null 保护） */
+private fun zipDisplayName(context: android.content.Context, uri: Uri): String =
+    runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    }.getOrNull()?.takeIf { it.isNotBlank() } ?: "已选择压缩包"

@@ -1,8 +1,10 @@
 package com.pient.app.runtime
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import java.io.File
+import java.util.zip.ZipInputStream
 
 /**
  * pi 技能（Skills）—— 与 pi 的**文件约定**同源，不引入任何自有格式。
@@ -151,6 +153,64 @@ object PiSkills {
             null
         }.getOrElse { it.message ?: "写入失败" }
     }
+
+    /**
+     * **ZIP 导入**（2026-09-16 真实化，取代原型 mock：原来点选择只写死假文件名、导入只用
+     * 假描述写一个 SKILL.md，既不打开文件选择器也不解压）。
+     *
+     * 流程：SAF 选中的 .zip → 逐条读出 → 定位 SKILL.md（允许整体套一层目录）→
+     * 校验 frontmatter（name/description，与 pi 同规则）→ 只写 SKILL.md 所在目录下的文件
+     * 到 `<skills>/<slug>/`（顶层 __MACOSX、目录项、`..` 一律跳过）。
+     * @return (错误描述, 技能名)；错误为 null 表示成功
+     */
+    fun importZip(context: Context, uri: Uri, global: Boolean): Pair<String?, String> = runCatching {
+        val entries = linkedMapOf<String, ByteArray>()
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            ZipInputStream(input).use { zip ->
+                while (true) {
+                    val e = zip.nextEntry ?: break
+                    val name = e.name.replace('\\', '/').trimStart('/')
+                    if (e.isDirectory || name.isEmpty() ||
+                        name.contains("..") || name.startsWith("__MACOSX")
+                    ) {
+                        zip.closeEntry()
+                        continue
+                    }
+                    entries[name] = zip.readBytes()
+                    zip.closeEntry()
+                }
+            }
+        } ?: return "打不开所选文件" to ""
+        if (entries.isEmpty()) return "压缩包里没有文件" to ""
+
+        val skillPath = entries.keys.firstOrNull {
+            it.equals("SKILL.md", ignoreCase = true) || it.endsWith("/SKILL.md", ignoreCase = true)
+        } ?: return "压缩包里没有 SKILL.md（技能目录必须含 SKILL.md）" to ""
+        val prefix = skillPath.substring(0, skillPath.length - "SKILL.md".length)
+        val md = entries[skillPath]?.toString(Charsets.UTF_8) ?: return "SKILL.md 读取失败" to ""
+        val fm = parseFrontmatter(md)
+            ?: return "SKILL.md 缺少 frontmatter（文件要以 --- 开头，里面有 name 和 description）" to ""
+        if (fm.second.isBlank()) return "frontmatter 里的 description 不能为空（pi 靠它决定要不要加载）" to ""
+        val slug = slugOf(fm.first.ifBlank { prefix.trimEnd('/').substringAfterLast('/') })
+        if (slug.isBlank()) return "技能名不合法" to ""
+
+        val root = if (global) globalRoot(context) else projectRoot(context)
+        val dir = File(root, slug)
+        if (dir.exists()) return "已存在同名技能：$slug" to slug
+        dir.mkdirs()
+        var written = 0
+        entries.forEach { (path, bytes) ->
+            if (!path.startsWith(prefix, ignoreCase = true)) return@forEach
+            val rel = path.substring(prefix.length)
+            if (rel.isBlank()) return@forEach
+            val f = File(dir, rel)
+            f.parentFile?.mkdirs()
+            f.writeBytes(bytes)
+            written++
+        }
+        Log.i(TAG, "技能 ZIP 导入：$slug → ${dir.absolutePath}（$written 个文件）")
+        null to slug
+    }.getOrElse { (it.message ?: "解压失败") to "" }
 
     /** 从市场/其他仓库导入一个技能目录（把 [files] 里的相对路径 → 内容写下去） */
     fun importFiles(context: Context, slug: String, files: Map<String, String>, global: Boolean): String? {
