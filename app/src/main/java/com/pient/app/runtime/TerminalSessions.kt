@@ -103,6 +103,15 @@ object TerminalSessions {
         write(session, body)
     }
 
+    /**
+     * 前台保活的 key（一个会话一个）。
+     *
+     * 口径（2026-09-16）：**会话活着就挂着** —— 无 PTY 时应用无从得知「用户手打的那条命令」
+     * 何时结束（只有 app 自己发起的脚本能靠哨兵拿到退出码），而系统清进程不区分命令来源。
+     * 代价 = 终端页有会话时通知栏会有一条常驻通知（IMPORTANCE_LOW，不响不震）。
+     */
+    private fun keepAliveKey(session: Session): String = "term:${session.id}"
+
     /** 关闭会话（结束进程并移除） */
     @Synchronized
     fun close(session: Session) {
@@ -110,6 +119,8 @@ object TerminalSessions {
         session.process = null
         session.alive = false
         sessions.remove(session)
+        // 会话没了 → 释放它占的保活（pump 那条路径会因为 process 已置空而跳过，所以这里必须显式放）
+        appContext?.let { PiKeepAlive.release(it, keepAliveKey(session)) }
     }
 
     /** 中断当前命令：无 PTY 发不了 SIGINT → 结束进程重建（会话与已输出内容保留） */
@@ -240,6 +251,10 @@ object TerminalSessions {
         session.alive = true
         session.pending.setLength(0)
         Log.i(TAG, "会话${session.id} 启动 shell=${shell.name}")
+        // 前台保活（2026-09-16）：**手打命令也算在跑** —— 无 PTY 时应用不知道用户敲的那条命令
+        // 何时结束，只能按「会话活着」挂着（系统清进程是不区分命令来源的）；
+        // 释放点 = 关会话（close）/ 进程真退出（pump 末尾，且只认当前这个进程）。
+        appContext?.let { PiKeepAlive.acquire(it, keepAliveKey(session), "终端会话运行中…") }
         Thread({ pump(session, wrapped) }, "pient-term-${session.id}")
             .apply { isDaemon = true }
             .start()
@@ -269,6 +284,10 @@ object TerminalSessions {
         }.onFailure { Log.w(TAG, "读取会话${session.id} 输出失败：${it.message}") }
         val code = runCatching { proc.waitFor() }.getOrDefault(-1)
         session.alive = false
+        // 进程真退出了 → 释放保活。**只认「还是当前这个进程」**：中断 = 销毁旧进程 + 立刻重建
+        // （interrupt 先 destroy 再 start，start 里换上新的 process），旧 pump 线程收尾时
+        // 不能把新会话的保活一起关掉。
+        if (session.process === proc) appContext?.let { PiKeepAlive.release(it, keepAliveKey(session)) }
         main.post {
             flushPending(session)
             appendDirect(session, TerminalLine("[会话进程已退出，退出码 $code]", TerminalLineKind.OUTPUT))

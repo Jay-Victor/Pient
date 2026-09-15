@@ -2,6 +2,7 @@ package com.pient.app.runtime
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -10,6 +11,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.pient.app.MainActivity
 import com.pient.app.R
 import java.util.concurrent.ConcurrentHashMap
 
@@ -29,6 +31,12 @@ import java.util.concurrent.ConcurrentHashMap
 object PiKeepAlive {
     private const val TAG = "PientKeepAlive"
 
+    /** 终端会话保活的 key 前缀（`term:<会话id>`）；通知点开时要带回终端页 */
+    private const val TERM_KEY_PREFIX = "term:"
+
+    /** 通知携带的「打开哪个面板」值（MainActivity 消费，见 PiKeepAliveService.EXTRA_PANEL） */
+    const val PANEL_TERMINAL = "terminal"
+
     /** 正在干活的来源：key → 通知副标题（对话 = "chat"，终端脚本 = "script:<会话名>"） */
     private val active = ConcurrentHashMap<String, String>()
 
@@ -44,6 +52,11 @@ object PiKeepAlive {
         runCatching {
             val intent = Intent(ctx, PiKeepAliveService::class.java)
                 .putExtra(PiKeepAliveService.EXTRA_TEXT, text)
+                // 通知点开回哪个页（2026-09-16）：终端会话 → 终端页；聊天回合 → 打开应用即可
+                .putExtra(
+                    PiKeepAliveService.EXTRA_PANEL,
+                    if (key.startsWith(TERM_KEY_PREFIX)) PANEL_TERMINAL else "",
+                )
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(intent)
             else ctx.startService(intent)
             Log.i(TAG, "前台保活已开启（$key：$text）")
@@ -79,6 +92,9 @@ class PiKeepAliveService : Service() {
 
     companion object {
         const val EXTRA_TEXT = "text"
+
+        /** 「点通知回哪个面板」的 extra（值 = [PiKeepAlive.PANEL_TERMINAL]） */
+        const val EXTRA_PANEL = "pient_panel"
         const val CHANNEL_ID = "pient_runtime"
         const val NOTIF_ID = 1001
         private const val TAG = "PientKeepAlive"
@@ -88,11 +104,24 @@ class PiKeepAliveService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val text = intent?.getStringExtra(EXTRA_TEXT)?.takeIf { it.isNotBlank() } ?: "运行中"
+        // 点通知回到对应页面（2026-09-16）：终端会话 → 终端页；其余 → 只是把应用调到前台
+        val panel = intent?.getStringExtra(EXTRA_PANEL).orEmpty()
+        val open = Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+            .apply { if (panel.isNotEmpty()) putExtra(EXTRA_PANEL, panel) }
         ensureChannel()
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.pient_logo)
             .setContentTitle("Pient")
             .setContentText(text)
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    this,
+                    0,
+                    open,
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                ),
+            )
             .setOngoing(true)
             .setShowWhen(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)

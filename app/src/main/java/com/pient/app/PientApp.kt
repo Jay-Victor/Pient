@@ -125,6 +125,18 @@ fun PientApp() {
         if (!ready) return@LaunchedEffect
         AppCtx.set(context.applicationContext)
     }
+
+    // 通知点开回终端页（2026-09-16）：前台服务通知把面板请求留在 PientRuntime.pendingPanel
+    // （通知到达时 ChatState 还没建），这里就绪后消费一次。**key 里必须带 pendingPanel 本身**：
+    // 应用已在前台时只有它会变（见 PientRuntime.pendingPanel 注释）。
+    LaunchedEffect(chatState, ready, PientRuntime.pendingPanel) {
+        val panel = PientRuntime.pendingPanel ?: return@LaunchedEffect
+        if (!ready) return@LaunchedEffect
+        PientRuntime.pendingPanel = null
+        if (panel == com.pient.app.runtime.PiKeepAlive.PANEL_TERMINAL) {
+            chatState.activePanel = com.pient.app.data.Panel.TERMINAL
+        }
+    }
     val nav = rememberNavController()
 
     // 外观模式（深色 / 亮色 / 跟随系统）—— 状态感知，切换即时生效
@@ -363,6 +375,16 @@ fun PientApp() {
 internal object PientRuntime {
     var chatState: ChatState? = null
     var dataLoaded = false
+
+    /**
+     * 待消费的「打开哪个面板」请求（2026-09-16）：前台服务通知点开时由 MainActivity 写入，
+     * PientApp 在 ChatState 就绪后消费一次（通知到达时 ChatState 可能还没建，所以先存着）。
+     * 值 = [com.pient.app.runtime.PiKeepAlive.PANEL_TERMINAL] 等。
+     *
+     * **必须是 Compose 可观察状态**：应用已经在前台时点通知只会触发 onNewIntent（chatState/ready
+     * 都没变），普通变量不会让消费用的 LaunchedEffect 重跑 —— 面板就切不过去（实测踩到）。
+     */
+    var pendingPanel by androidx.compose.runtime.mutableStateOf<String?>(null)
 
     /** 读盘闸门（2026-09-15）：并发/重复组合只允许一次读盘，其余 await 同一份结果 */
     private val lock = Any()

@@ -108,7 +108,17 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
         }
     }
 
-    if (session == null) return Box(Modifier.fillMaxSize())
+    if (session == null) {
+        // 空状态（2026-09-16）：允许关闭**最后一个**会话后落在这里 ——
+        // 给一条新建入口，而不是一块空白（旧写法 `return Box(fillMaxSize())` 连「+」都没有＝死胡同）
+        EmptyTerminal(
+            onNew = {
+                TerminalSessions.newSession(context)
+                chatState.terminalIndex = TerminalSessions.sessions.lastIndex
+            },
+        )
+        return
+    }
 
     // 吸底：新输出自动跟随（用户上滚后可暂停）
     LaunchedEffect(session.lines.size) {
@@ -170,15 +180,20 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                                     color = if (sel) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                                // 仅剩一个会话时不可关闭（Operit 同款约束，防空列表）
-                                if (TerminalSessions.sessions.size > 1) {
+                                // 关闭会话（2026-09-16 起**最后一个也能关**）：会话活着就挂前台保活，
+                                // 不给关 = 通知栏那条常驻通知永远消不掉（用户报过）。全关完落空状态。
+                                // 触控目标 18dp（原 12dp 图标本体太小，违反「整块可点」口径）。
+                                Box(
+                                    modifier = Modifier
+                                        .padding(start = 4.dp)
+                                        .size(18.dp)
+                                        .clickable(onClick = { closeConfirmIndex = i }),
+                                    contentAlignment = Alignment.Center,
+                                ) {
                                     Icon(
                                         Icons.Outlined.Close, "关闭终端会话",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier
-                                            .padding(start = 4.dp)
-                                            .size(12.dp)
-                                            .clickable(onClick = { closeConfirmIndex = i }),
+                                        modifier = Modifier.size(12.dp),
                                     )
                                 }
                             }
@@ -408,6 +423,52 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                     chatState.terminalIndex =
                         TerminalSessions.sessions.indexOf(s).coerceAtLeast(0)
                 },
+            )
+        }
+    }
+}
+
+/**
+ * 终端页空状态（2026-09-16）：会话全被关掉时渲染 —— 顶部保留工具栏与「+」新建入口，
+ * 下面一句说明。**不能是空白盒**：否则用户关掉最后一个会话后就没有任何入口再建回来。
+ */
+@Composable
+private fun EmptyTerminal(onNew: () -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        PientPanel(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(40.dp),
+            shape = RoundedCornerShape(0.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 6.dp),
+            ) {
+                Text(
+                    "没有终端会话",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f).padding(start = 6.dp),
+                )
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clickable(onClick = onNew),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Outlined.Add, "新建终端会话", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Text(
+                "点右上角「+」新建一个终端会话\n会话运行时通知栏会有一条前台通知（保证进程不被系统清掉）",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 32.dp),
             )
         }
     }

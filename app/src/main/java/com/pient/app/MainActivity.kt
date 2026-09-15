@@ -1,5 +1,6 @@
 package com.pient.app
 
+import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
@@ -8,13 +9,34 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ThemeMode
+import com.pient.app.runtime.PiKeepAliveService
 import com.pient.app.runtime.PiRuntime
 import com.pient.app.ui.theme.preloadBackgroundImage
 
 class MainActivity : ComponentActivity() {
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        applyPanelIntent(intent)
+    }
+
+    /**
+     * 前台服务通知点开回终端页（2026-09-16）：通知带 `pient_panel=terminal` 进来。
+     * 这里只把请求**存进 PientRuntime.pendingPanel**（这时 ChatState 还没建），
+     * 由 PientApp 在就绪后消费一次；extra 同步移除，避免旋屏/重建时反复跳终端页。
+     */
+    private fun applyPanelIntent(intent: Intent?) {
+        val panel = intent?.getStringExtra(PiKeepAliveService.EXTRA_PANEL) ?: return
+        intent.removeExtra(PiKeepAliveService.EXTRA_PANEL)
+        PientRuntime.pendingPanel = panel
+        android.util.Log.i("PientMain", "收到面板请求：$panel")
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        applyPanelIntent(intent)
 
         // 恢复持久化主题（必须在 setContent 前，否则首帧用默认暗色渲染再闪切）
         SettingsStore.load(this)
