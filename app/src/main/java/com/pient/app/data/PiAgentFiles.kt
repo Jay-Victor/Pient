@@ -54,12 +54,15 @@ object PiAgentFiles {
             if (c.providerId.isBlank()) return@forEach
             val pj = JSONObject()
             if (c.endpoint.isNotBlank()) pj.put("baseUrl", c.endpoint.trim())
-            pj.put("api", ProviderCatalog.apiOf(c.providerId))
+            // api：页面显式选过就用它，否则用事实表（= pi-ai 的 provider 级默认值）
+            pj.put("api", c.apiType.trim().ifBlank { ProviderCatalog.apiOf(c.providerId) })
+            // radius = pi 的 OAuth 网关：provider 级要写 `oauth` 标记（docs/models.md「Provider Configuration」）
+            if (c.providerId == "radius") pj.put("oauth", "radius")
             reasoningCompat(c.reasoningFormat)?.let { compat ->
                 pj.put("compat", JSONObject(compat))
             }
             val models = JSONArray()
-            c.models.forEach { id -> models.put(modelJson(id, c)) }
+            c.models.forEach { entry -> models.put(modelJson(entry, c)) }
             pj.put("models", models)
             providers.put(c.providerId, pj)
         }
@@ -80,7 +83,13 @@ object PiAgentFiles {
             if (c.providerId.isBlank()) return@forEach
             val key = c.apiKey.trim()
             if (key.isBlank()) {
-                root.remove(c.providerId)
+                // 只删**我们写的那种** api_key 条目：auth.json 里还可能有别的形态（pi 自己写的带 env 的
+                // api_key、或别的工具留下的条目）—— 那些不是 Pient 写的，一律不动，
+                // 免得「把输入框清空」顺手删掉别人的凭据。
+                val cur = root.optJSONObject(c.providerId)
+                if (cur != null && cur.optString("type") == "api_key" && !cur.has("env")) {
+                    root.remove(c.providerId)
+                }
             } else {
                 root.put(c.providerId, JSONObject().put("type", "api_key").put("key", key))
             }
@@ -139,6 +148,8 @@ object PiAgentFiles {
                 configs[id] = ProviderConfig(
                     providerId = id,
                     endpoint = pj.optString("baseUrl", ""),
+                    // 页面读回的「API 类型」= 文件里那一份（用户在页面上选过 / 手改过都在这里）
+                    apiType = pj.optString("api", ""),
                     apiKey = "",
                     modelList = buildModelList(pj.optJSONArray("models")),
                     ctxLenK = kTokens(first?.optInt("contextWindow", 0) ?: 0),
@@ -173,14 +184,27 @@ object PiAgentFiles {
 
     // ─────────────────────────── 内部 ───────────────────────────
 
-    /** 单个模型的 JSON（页面字段 → pi 字段） */
-    private fun modelJson(id: String, c: ProviderConfig): JSONObject {
+    /**
+     * 单个模型的 JSON（页面字段 → pi 字段）。
+     * 模型条目语法：`id` 或 **`id=别名`**（别名写进 pi 的 `models[].name` —— 它用作 `--model` 匹配
+     * 与副标题展示；`id` 本身才是发给服务商的东西，两者不要混）。
+     */
+    private fun modelJson(entry: String, c: ProviderConfig): JSONObject {
+        val id = entry.substringBefore('=').trim()
+        val alias = entry.substringAfter('=', "").trim()
         val m = JSONObject().put("id", id)
+        if (alias.isNotEmpty()) m.put("name", alias)
         c.ctxLenK.trim().toIntOrNull()?.takeIf { it > 0 }?.let { m.put("contextWindow", it * 1000) }
         c.maxOutK.trim().toIntOrNull()?.takeIf { it > 0 }?.let { m.put("maxTokens", it * 1000) }
         val input = JSONArray().put("text")
         if (c.imageDirectEnabled) input.put("image")
         m.put("input", input)
+        // 思考：pi 用 `model.reasoning` 标记「支持扩展思考」，不写 = 不支持。
+        // 页面选了**具体写法**（非 NONE / AUTO）就标上；AUTO（按模型名推断）与 NONE 留给 pi 自己判 —— 
+        // 内置目录里已有的事实不该被我们覆盖成 false（那会把思考能力关掉）。
+        if (c.reasoningFormat != ReasoningFormat.NONE && c.reasoningFormat != ReasoningFormat.AUTO) {
+            m.put("reasoning", true)
+        }
         val sampling = JSONObject()
         if (c.tempEnabled) sampling.put("temperature", c.tempValue.trim().toDoubleOrNull() ?: 1.0)
         if (c.topKEnabled) sampling.put("top_k", c.topKValue.trim().toIntOrNull() ?: 0)
@@ -221,11 +245,16 @@ object PiAgentFiles {
         }
     }
 
+    /** 模型清单 → 页面输入框口径：`id`，别名不同时写 `id=别名`（与 [modelJson] 同一套语法） */
     private fun buildModelList(models: JSONArray?): String {
         if (models == null) return ""
         val ids = ArrayList<String>()
         for (i in 0 until models.length()) {
-            models.optJSONObject(i)?.optString("id", "")?.takeIf { it.isNotBlank() }?.let { ids += it }
+            val o = models.optJSONObject(i) ?: continue
+            val id = o.optString("id", "")
+            if (id.isBlank()) continue
+            val name = o.optString("name", "").trim()
+            ids += if (name.isNotEmpty() && name != id) "$id=$name" else id
         }
         return ids.joinToString(";")
     }

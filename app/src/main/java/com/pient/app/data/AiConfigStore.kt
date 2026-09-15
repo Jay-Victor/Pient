@@ -22,6 +22,12 @@ data class ProviderConfig(
     val providerId: String,
     val endpoint: String = "",
     val apiKey: String = "",
+    /**
+     * **API 类型**（pi-ai 的 `api`，2026-09-15 要求 3 加）：空串 = 跟随服务商预设（[ProviderCatalog.apiOf]）。
+     * pi 的 `api` 是 per-model 的、provider 级是默认值；配置页把它做成显式旋钮，
+     * 网关/自建端点（一个 URL 能说多种协议）才有得选。
+     */
+    val apiType: String = "",
     /** 模型列表（英文分号分隔，与配置页输入框同口径） */
     val modelList: String = "",
     /** 上下文长度（K Tokens；字符串承载输入框态） */

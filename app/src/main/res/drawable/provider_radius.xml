@@ -1,0 +1,24 @@
+<!-- Radius（pi 的自有网关，动态 baseUrl + OAuth）：lobehub 图标集里没有它，
+     这里用一个中性「网关节点」图形（同心圆 + 中心点）占位；mono=true 由主题文字色着色。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 外环 -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#000000"
+        android:strokeWidth="1.6"
+        android:pathData="M12,4 a8,8 0 1,0 0,16 a8,8 0 1,0 0,-16" />
+    <!-- 内环 -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#000000"
+        android:strokeWidth="1.4"
+        android:pathData="M12,8.6 a3.4,3.4 0 1,0 0,6.8 a3.4,3.4 0 1,0 0,-6.8" />
+    <!-- 中心点 -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M12,10.9 a1.1,1.1 0 1,0 0,2.2 a1.1,1.1 0 1,0 0,-2.2" />
+</vector>

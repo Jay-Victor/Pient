@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.Api
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Compress
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.ExpandLess
@@ -82,6 +83,7 @@ import androidx.navigation.NavController
 import com.pient.app.data.AiBackend
 import com.pient.app.data.AiConfigStore
 import com.pient.app.data.ChatState
+import com.pient.app.data.PiAgentFiles
 import com.pient.app.data.ProviderCatalog
 import com.pient.app.data.ProviderConfig
 import com.pient.app.data.ReasoningFormat
@@ -139,12 +141,35 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     var testState by remember { mutableStateOf<String?>(null) } // 测试连接/刷新反馈
     var refreshing by remember { mutableStateOf(false) }       // 模型列表刷新中
     var reasoningFormatOpen by remember { mutableStateOf(false) } // 思考参数格式下拉
+    var apiTypeOpen by remember { mutableStateOf(false) }        // API 类型下拉（pi-ai 的 provider.api）
 
     /** 更新当前服务商配置（写入 AiConfigStore，自动持久化） */
     fun updateConfig(transform: (ProviderConfig) -> ProviderConfig) {
         val id = selectedId ?: return
         val cur = AiConfigStore.configs[id] ?: return
         AiConfigStore.configs[id] = transform(cur)
+    }
+
+    /**
+     * 改「上下文压缩」三参（2026-09-15 要求 3）。
+     *
+     * 为什么单独一个入口：**这三项在 pi 侧是全局一份**（`~/.pi/agent/settings.json` 的 `compaction` 块，
+     * settings-manager 里没有 per-provider 的概念）。页面原来把它画在「上下文设置」卡里、跟着当前服务商走，
+     * 于是编辑第二个服务商的那份值其实不生效 —— 那是界面与 pi 不对味的地方。
+     * 现在的口径：改任意一处 = 镜像到所有服务商配置（界面不出现两种值）+ 立即写盘（不等统一落盘的 debounce）。
+     */
+    fun setCompaction(enabled: Boolean? = null, reserve: String? = null, keep: String? = null) {
+        val ids = AiConfigStore.configs.keys.toList()
+        if (ids.isEmpty()) return
+        ids.forEach { id ->
+            val cur = AiConfigStore.configs[id] ?: return@forEach
+            AiConfigStore.configs[id] = cur.copy(
+                compactionEnabled = enabled ?: cur.compactionEnabled,
+                reserveTokens = reserve ?: cur.reserveTokens,
+                keepRecentTokens = keep ?: cur.keepRecentTokens,
+            )
+        }
+        PiAgentFiles.writeSettings(context, AiConfigStore.configs.values.firstOrNull())
     }
 
     /**
@@ -382,7 +407,86 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 onOpenPicker = { endpointPickerOpen = true },
                             )
                             DividerLine()
-                            // 2.2 API密钥
+                            // 2.2 API 类型（pi-ai 的 `api`：provider 级默认值，逐模型可在 JSON 里覆盖）
+                            ConfigFieldLabel("API 类型")
+                            FieldHint("pi-ai 的协议类型 · 默认取服务商预设；网关 / 自建端点可在这里改")
+                            Box {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { apiTypeOpen = true }
+                                        .padding(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 12.dp),
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            cfg.apiType.ifBlank { ProviderCatalog.apiOf(provider.id) },
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = MonoFont),
+                                        )
+                                        Text(
+                                            if (cfg.apiType.isBlank()) {
+                                                "服务商预设（${ProviderCatalog.apiOf(provider.id)}）"
+                                            } else if (cfg.apiType == ProviderCatalog.apiOf(provider.id)) {
+                                                "与 pi 侧该服务商的事实表一致"
+                                            } else {
+                                                "已覆盖 pi 侧的事实表（写进 models.json 的 provider.api）"
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(top = 2.dp),
+                                        )
+                                    }
+                                    Icon(
+                                        Icons.Outlined.ExpandMore, null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = apiTypeOpen,
+                                    onDismissRequest = { apiTypeOpen = false },
+                                    modifier = Modifier.width(320.dp),
+                                ) {
+                                    // 第一项 = 跟随预设（空串）；其余是该服务商可用的 api 集合
+                                    val options = listOf("") + ProviderCatalog.apiOptions(provider.id, cfg.apiType)
+                                    for ((i, api) in options.withIndex()) {
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Column(Modifier.weight(1f)) {
+                                                        Text(
+                                                            api.ifBlank { "跟随服务商预设" },
+                                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                                fontFamily = if (api.isBlank()) null else MonoFont,
+                                                            ),
+                                                        )
+                                                        Text(
+                                                            if (api.isBlank()) ProviderCatalog.apiOf(provider.id)
+                                                            else if (i == 1 && options.size > 2) "该服务商可用的协议之一"
+                                                            else "provider.api",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        )
+                                                    }
+                                                    if (api == cfg.apiType) {
+                                                        Icon(
+                                                            Icons.Outlined.Check, null,
+                                                            tint = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.size(16.dp),
+                                                        )
+                                                    }
+                                                }
+                                            },
+                                            onClick = {
+                                                updateConfig { it.copy(apiType = api) }
+                                                apiTypeOpen = false
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                            DividerLine()
+                            // 2.3 API密钥
                             ConfigFieldLabel("API密钥")
                             FieldHint("仅保存在本机 · 用于请求签名，界面不回显")
                             ApiKeyField(
@@ -392,9 +496,9 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 onToggleVisible = { keyVisible = !keyVisible },
                             )
                             DividerLine()
-                            // 2.3 模型列表
+                            // 2.4 模型列表
                             ConfigFieldLabel("模型列表")
-                            FieldHint("多个模型用英文分号 ; 分隔 · 点击右侧按钮批量选择")
+                            FieldHint("多个模型用英文分号 ; 分隔 · 点击右侧按钮批量选择 · 需要别名时写 模型id=别名（pi 的 models[].name）")
                             ModelListField(
                                 value = cfg.modelList,
                                 onValueChange = { v -> updateConfig { it.copy(modelList = v) } },
@@ -465,52 +569,6 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                     updateConfig { it.copy(maxOutK = v.filter { c -> c.isDigit() }) }
                                 },
                                 placeholder = "64",
-                            )
-                            DividerLine()
-                            // ── 3.3~3.5 上下文压缩（内核自实现，pi 口径）──
-                            // 触发条件 = 估算 tokens > 上下文窗口 − reserveTokens；三个旋钮直接由
-                            // 内核读取（见 data/Compaction.kt）。
-                            ParamBlock(
-                                label = "自动压缩上下文",
-                                hint = "上下文接近上限时由 pi 自动摘要旧内容（关闭后仍可在用量卡手动压缩）",
-                                enabled = cfg.compactionEnabled,
-                                onToggle = { updateConfig { it.copy(compactionEnabled = !it.compactionEnabled) } },
-                            )
-                            if (cfg.compactionEnabled) {
-                                ConfigFieldLabel("为回复预留 Tokens")
-                                FieldHint("已用超过「上下文长度 − 预留」时触发压缩（pi 默认 16384）")
-                                ContextNumberField(
-                                    value = cfg.reserveTokens,
-                                    onValueChange = { v ->
-                                        updateConfig {
-                                            it.copy(reserveTokens = v.filter { c -> c.isDigit() }.take(7))
-                                        }
-                                    },
-                                    placeholder = "16384",
-                                    suffix = "Tokens",
-                                )
-                                ConfigFieldLabel("保留最近 Tokens")
-                                FieldHint("压缩时最近这一段不摘要、原样保留（pi 默认 20000）")
-                                ContextNumberField(
-                                    value = cfg.keepRecentTokens,
-                                    onValueChange = { v ->
-                                        updateConfig {
-                                            it.copy(keepRecentTokens = v.filter { c -> c.isDigit() }.take(7))
-                                        }
-                                    },
-                                    placeholder = "20000",
-                                    suffix = "Tokens",
-                                )
-                            }
-                            ConfigFieldLabel("压缩指令")
-                            FieldHint("用量卡点「压缩上下文」时交给 pi 的指令；留空 = pi 默认的 Goal / Progress / Next Steps 口径")
-                            PientTextArea(
-                                value = cfg.compactInstructions,
-                                onValueChange = { v -> updateConfig { it.copy(compactInstructions = v) } },
-                                placeholder = "例如：重点保留文件路径与命令；忽略寒暄",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
                             )
                         }
                     }
@@ -665,6 +723,60 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                         }
                     }
                 }
+            }
+
+            // ── ⑤ 上下文压缩（**全局一份**）──
+            // pi 侧只有一份：`~/.pi/agent/settings.json` 的 `compaction` 块（settings-manager 里没有
+            // per-provider 的概念）。原来它画在「上下文设置」卡里、跟着当前服务商走 —— 改第二个服务商
+            // 那份值其实不生效，是界面与 pi 不对味的地方。2026-09-15（要求 3）单独成卡 + 改完立即写盘。
+            if (provider != null && cfg != null) {
+                item {
+                    Column {
+                        SectionHeader("上下文压缩（全局）", icon = Icons.Outlined.Compress)
+                        ConfigCard {
+                            FieldHint("pi 侧是全局设置（~/.pi/agent/settings.json 的 compaction）· 所有服务商共用 · 改完立即生效")
+                            ParamBlock(
+                                label = "自动压缩上下文",
+                                hint = "上下文接近上限时由 pi 自动摘要旧内容（关闭后仍可在用量卡手动压缩）",
+                                enabled = cfg.compactionEnabled,
+                                onToggle = { setCompaction(enabled = !cfg.compactionEnabled) },
+                            )
+                            if (cfg.compactionEnabled) {
+                                ConfigFieldLabel("为回复预留 Tokens")
+                                FieldHint("已用超过「上下文长度 − 预留」时触发压缩（pi 默认 16384）")
+                                ContextNumberField(
+                                    value = cfg.reserveTokens,
+                                    onValueChange = { v ->
+                                        setCompaction(reserve = v.filter { c -> c.isDigit() }.take(7))
+                                    },
+                                    placeholder = "16384",
+                                    suffix = "Tokens",
+                                )
+                                ConfigFieldLabel("保留最近 Tokens")
+                                FieldHint("压缩时最近这一段不摘要、原样保留（pi 默认 20000）")
+                                ContextNumberField(
+                                    value = cfg.keepRecentTokens,
+                                    onValueChange = { v ->
+                                        setCompaction(keep = v.filter { c -> c.isDigit() }.take(7))
+                                    },
+                                    placeholder = "20000",
+                                    suffix = "Tokens",
+                                )
+                            }
+                            ConfigFieldLabel("压缩指令")
+                            FieldHint("用量卡点「压缩上下文」时交给 pi 的指令；留空 = pi 默认的 Goal / Progress / Next Steps 口径")
+                            PientTextArea(
+                                value = cfg.compactInstructions,
+                                onValueChange = { v -> updateConfig { it.copy(compactInstructions = v) } },
+                                placeholder = "例如：重点保留文件路径与命令；忽略寒暄",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+                            )
+                        }
+                    }
+                }
+
             }
 
         }

@@ -163,6 +163,11 @@ object ProviderCatalog {
             "https://opencode.ai/zen"),
         p("opencode-go", "OpenCode Go", R.drawable.provider_opencode, mono = true,
             "https://opencode.ai/zen"),
+        // Radius：pi 官方的**动态网关**（provider 级 `oauth: "radius"` + 用户自备 baseUrl，api = pi-messages）。
+        // 补它是因为 pi-ai 的 provider 表里有这一家而 Pient 目录缺（2026-09-15 要求 3）。
+        // 思考写法给 AUTO：网关后面挂什么模型都可能，按模型名推断、识别不出就不发参数。
+        p("radius", "Radius（pi 网关）", R.drawable.provider_radius, mono = true,
+            "", reasoningFormat = ReasoningFormat.AUTO),
     )
 
     /**
@@ -192,6 +197,43 @@ object ProviderCatalog {
 
     /** 该服务商在 pi 里使用的 api 类型（见 [API_BY_ID]） */
     fun apiOf(id: String): String = API_BY_ID[id] ?: "openai-completions"
+
+    /**
+     * pi-ai 的 api 类型全集（`docs/models.md`「Supported APIs」+ 各 provider 源码里的 api 集合）。
+     * 配置页的「API 类型」下拉用它；**默认取 [apiOf]（= pi 侧的事实表）**，只在用户显式改过时才写别的值。
+     */
+    val API_TYPES = listOf(
+        "openai-completions",
+        "openai-responses",
+        "openai-codex-responses",
+        "azure-openai-responses",
+        "anthropic-messages",
+        "google-generative-ai",
+        "google-vertex",
+        "bedrock-converse-stream",
+        "mistral-conversations",
+        "pi-messages",
+    )
+
+    /**
+     * 一个服务商**可用的** api 类型（pi-ai 里 api 是 per-model 的，provider 给出可用集合）。
+     * 多 api 的家（网关/代理类）按 §4.1 事实表列出；其余只有一个默认值。
+     */
+    private val API_SETS: Map<String, List<String>> = mapOf(
+        "fireworks" to listOf("anthropic-messages", "openai-completions"),
+        "github-copilot" to listOf("anthropic-messages", "openai-completions", "openai-responses"),
+        "opencode" to listOf("anthropic-messages", "google-generative-ai", "openai-completions", "openai-responses"),
+        "opencode-go" to listOf("anthropic-messages", "openai-completions", "openai-responses"),
+        "openrouter" to listOf("anthropic-messages", "openai-completions"),
+        "cloudflare-ai-gateway" to listOf("anthropic-messages", "openai-completions", "openai-responses"),
+    )
+
+    /** 下拉里给某个服务商列出的候选：可用集合 ∪ 当前值（保证当前值一定在列表里） */
+    fun apiOptions(id: String, current: String = ""): List<String> {
+        val base = API_SETS[id] ?: listOf(apiOf(id))
+        val cur = current.trim()
+        return if (cur.isNotEmpty() && cur !in base) base + cur else base
+    }
 
     val byId: Map<String, ProviderInfo> = all.associateBy { it.id }
 
