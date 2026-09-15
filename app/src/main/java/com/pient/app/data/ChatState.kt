@@ -23,8 +23,11 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.withContext
+
+private const val TAG_CHAT = "PientChat"
 
 /** 顶栏右下方区域内容（消息区 / 文件内容预览区 / 终端页 / 分支画布 四态切换） */
 enum class Panel { MESSAGES, FILES, TERMINAL, TREE }
@@ -628,6 +631,7 @@ class ChatState {
         if (piChannelEnabled) {
             val modelId = cfg.models.firstOrNull()
             if (!modelId.isNullOrBlank() && PiRpc.usable() && PiRpc.start(cfg.providerId, modelId)) {
+                bindPiSession()          // 会话映射：懒建 / 切到本会话对应的 pi 会话文件（失败不阻断本轮）
                 return runChatViaPi(cfg, history, onDelta, onThinking)
             }
         }
@@ -681,6 +685,195 @@ class ChatState {
         return ChatOutcome(text, usage?.takeIf { it.inTokens + it.outTokens > 0 }, streamThinking)
     }
 
+
+    // ─────────────── 会话映射与分支（2026-09-14）───────────────
+    //
+    // 口径（对照 pi 的会话模型）：
+    //   Pient 会话            ↔  pi 的一个 session 文件（`~/.pi/agent/sessions/*.jsonl`）
+    //   Pient 会话内分支      ↔  **同一个文件里的树导航**（移动活跃叶；pi 的 /tree，走扩展命令 /pient-nav）
+    //   Pient 会话外分支      ↔  **新文件**（pi 的 /fork = 从某条用户消息分叉；/clone = 复制活跃分支）
+    // 内容真相源仍是 pi 的文件；Pient 侧的条目树只做展示镜像（逐步退役）。
+
+    /** 当前会话（或指定会话）的记录 */
+    fun sessionRecord(id: String = currentSessionId.orEmpty()): Session? =
+        sessions.values.firstOrNull { list -> list.any { it.id == id } }?.firstOrNull { it.id == id }
+
+    /** pi 会话树（画布数据源；null = 未绑 pi 或还没拉） */
+    var piTree by mutableStateOf<SessionTreeNode?>(null)
+        private set
+
+    /** pi 侧的活跃叶（画布上标"当前位置"） */
+    var piLeafId by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * 绑（或切到）当前 Pient 会话对应的 pi 会话文件。
+     * **懒建**：没有就让 pi `new_session`（顺带把 Pient 的标题 `set_session_name` 同步过去），
+     * 拿到 sessionFile 记回会话记录并立刻落盘；已有则 `switch_session`。
+     */
+    suspend fun bindPiSession() {
+        val id = currentSessionId ?: return
+        val rec = sessionRecord(id) ?: return
+        runCatching {
+            val file = rec.piSessionFile
+            if (file.isNullOrBlank()) {
+                PiRpc.newSession()
+                PiRpc.setSessionName(rec.title)
+                val newFile = PiRpc.getSessionStats()?.optString("sessionFile").orEmpty()
+                if (newFile.isNotBlank()) {
+                    updateSessionPiFile(id, newFile)
+                    Log.i(TAG_CHAT, "会话已映射到 pi 文件：$newFile")
+                }
+            } else {
+                PiRpc.switchSession(file)
+            }
+            refreshPiTree()
+        }.onFailure { Log.w(TAG_CHAT, "绑 pi 会话失败：${it.message}") }
+    }
+
+    private fun updateSessionPiFile(id: String, file: String) {
+        sessions.values.forEach { list ->
+            val i = list.indexOfFirst { it.id == id }
+            if (i >= 0) list[i] = list[i].copy(piSessionFile = file)
+        }
+        AppCtx.get()?.let { ChatStore.save(it, this) }
+    }
+
+    /** 拉 pi 的会话树，转成画布用的 [SessionTreeNode]（节点 id **就是 pi 的 entry id**） */
+    suspend fun refreshPiTree() {
+        val rec = sessionRecord() ?: return
+        if (rec.piSessionFile.isNullOrBlank() || !PiRpc.usable()) return
+        val data = PiRpc.getTree() ?: return
+        piLeafId = data.optString("leafId").takeIf { it.isNotBlank() && it != "null" }
+        piTree = piTreeFromJson(data)
+    }
+
+    /** pi `get_tree` → [SessionTreeNode]（只把**用户消息**当节点，与其后的助手文本做 exchange —— 与本地画布同口径） */
+    private fun piTreeFromJson(data: JSONObject): SessionTreeNode? {
+        val roots = data.optJSONArray("tree") ?: return null
+        // 拍平成 (id → {entry, children})，并记下"到叶的路径"用于标 active
+        val parentOf = HashMap<String, String?>()
+        val entryById = LinkedHashMap<String, JSONObject>()
+        val childrenOf = HashMap<String, MutableList<String>>()
+        val order = ArrayList<String>()
+        fun walk(node: JSONObject) {
+            val e = node.optJSONObject("entry") ?: return
+            val id = e.optString("id")
+            if (id.isBlank()) return
+            entryById[id] = e
+            order += id
+            parentOf[id] = e.optString("parentId").takeIf { it.isNotBlank() && it != "null" }
+            val kids = node.optJSONArray("children") ?: JSONArray()
+            for (i in 0 until kids.length()) kids.optJSONObject(i)?.let { walk(it) }
+        }
+        for (i in 0 until roots.length()) roots.optJSONObject(i)?.let { walk(it) }
+        if (entryById.isEmpty()) return null
+
+        val activePath = HashSet<String>()
+        var cur = piLeafId
+        while (cur != null) {
+            activePath += cur
+            cur = parentOf[cur]
+        }
+
+        val userIds = order.filter { piRole(entryById[it]) == "user" }
+        if (userIds.isEmpty()) return null
+        fun textOf(id: String) = piText(entryById[id]?.optJSONObject("message"))
+        // 每个用户消息的 exchange = 它之后、下一个用户消息之前的所有助手/工具文本
+        val idxOf = HashMap<String, Int>().apply { userIds.forEachIndexed { i, u -> put(u, i) } }
+        val exchangeOf = HashMap<String, MutableList<Msg>>()
+        run {
+            var pending: String? = null
+            val buf = ArrayList<Msg>()
+            for (id in order) {
+                val role = piRole(entryById[id])
+                if (role == "user") {
+                    pending?.let { exchangeOf[it] = ArrayList(buf) }
+                    buf.clear()
+                    pending = id
+                } else if (pending != null) {
+                    val t = textOf(id).trim()
+                    if (t.isNotEmpty() && role == "assistant") buf += Msg.Assistant(t, null)
+                }
+            }
+            pending?.let { exchangeOf[it] = ArrayList(buf) }
+        }
+        // 父节点 = 该用户消息上游最近的那个用户消息
+        fun nearestUserAncestor(id: String): String? {
+            var p = parentOf[id]
+            while (p != null) {
+                if (idxOf.containsKey(p)) return p
+                p = parentOf[p]
+            }
+            return null
+        }
+        fun build(id: String): SessionTreeNode {
+            val kids = order.filter { nearestUserAncestor(it) == id }
+            return SessionTreeNode(
+                id = id,
+                userText = textOf(id).trim(),
+                exchange = exchangeOf[id].orEmpty(),
+                children = kids.map { build(it) },
+                active = activePath.contains(id),
+            )
+        }
+        val topNodes = userIds.filter { nearestUserAncestor(it) == null }
+        val built = topNodes.map { build(it) }
+        // 画布只认单根：多个根（分叉起点不同）时包一个合成根
+        return if (built.size == 1) built[0] else SessionTreeNode(
+            id = "pi-root",
+            userText = "",
+            exchange = emptyList(),
+            children = built,
+            active = built.any { it.active },
+        )
+    }
+
+    private fun piRole(entry: JSONObject?): String =
+        entry?.optJSONObject("message")?.optString("role").orEmpty()
+
+    /** pi 条目里的文本（content 可能是字符串，也可能是 [{type:"text",text:…}]） */
+    private fun piText(msg: JSONObject?): String {
+        msg ?: return ""
+        return when (val c = msg.opt("content")) {
+            is String -> c
+            is JSONArray -> buildString {
+                for (i in 0 until c.length()) {
+                    val b = c.optJSONObject(i) ?: continue
+                    if (b.optString("type") == "text") append(b.optString("text"))
+                }
+            }
+            else -> ""
+        }
+    }
+
+    /**
+     * **会话外分支**：从 [entryId]（一条用户消息）在 pi 侧 fork 出一个新会话文件，
+     * 并在 Pient 里建一个绑定它的新会话（标题带「分支」前缀，便于认）。
+     * 返回新会话 id（异步建，失败返回空串）。
+     */
+    fun forkPiSession(entryId: String): String {
+        val proj = currentProject ?: return ""
+        val newId = "s-${System.currentTimeMillis()}"
+        bgScope.launch {
+            runCatching {
+                PiRpc.fork(entryId)
+                val file = PiRpc.getSessionStats()?.optString("sessionFile").orEmpty()
+                if (file.isBlank()) return@runCatching
+                val title = "分支 · " + (sessionRecord()?.title ?: "会话")
+                sessions.getOrPut(proj) { mutableStateListOf() }
+                    .add(0, Session(newId, title, proj, updatedAt = System.currentTimeMillis(), piSessionFile = file))
+                messagesBySession[newId] = mutableStateListOf()
+                entriesBySession[newId] = mutableStateListOf()
+                leafBySession[newId] = null
+                currentSessionId = newId
+                refreshPiTree()
+                AppCtx.get()?.let { ChatStore.save(it, this@ChatState) }
+                Log.i(TAG_CHAT, "会话外分支已建：$file")
+            }.onFailure { Log.w(TAG_CHAT, "fork 失败：${it.message}") }
+        }
+        return newId
+    }
 
     /**
      * **走 pi 通道跑一轮**（2026-09-14）：只送最后一条用户消息 —— pi 在同一条 RPC 会话里
@@ -1062,7 +1255,8 @@ class ChatState {
      * active = 当前 leaf 上溯路径上的节点（活跃分支）。
      * 接入 pi 运行时后改由 SDK `getTree()` 同源数据驱动。
      */
-    val branchTree: SessionTreeNode? get() = buildBranchTree(currentSessionId)
+    val branchTree: SessionTreeNode?
+        get() = piTree ?: buildBranchTree(currentSessionId)   // 绑了 pi：画布直接用 pi 的树
 
     fun buildBranchTree(sid: String?): SessionTreeNode? {
         if (sid == null) return null
@@ -1127,6 +1321,20 @@ class ChatState {
      */
     fun navigateToNode(nodeId: String): Boolean {
         val sid = currentSessionId ?: return false
+        // ── 绑了 pi 会话 → **会话内分支交给 pi**（同一个文件里移动活跃叶，TUI /tree 同款）──
+        // 走扩展命令 /pient-nav：pi 侧会切换上下文（必要时还能生成被放弃分支的摘要），
+        // 之后我们只拉一次 pi 的树刷新画布；本地 leaf 同步一份让 UI 立刻响应。
+        val rec = sessionRecord(sid)
+        if (piChannelEnabled && piTree != null && !rec?.piSessionFile.isNullOrBlank() && PiRpc.usable()) {
+            // 画布的节点 id 就来自 pi 的树（= pi entry id），这里原样交给 pi
+            leafBySession[sid] = nodeId
+            bgScope.launch {
+                runCatching { PiRpc.navigate(nodeId) }
+                    .onFailure { Log.w(TAG_CHAT, "pi 会话内分支跳转失败：${it.message}") }
+                refreshPiTree()
+            }
+            return true
+        }
         val entries = entriesBySession[sid]?.toList().orEmpty()
         val u = entries.firstOrNull { it.id == nodeId && it.msg is Msg.User } ?: return false
         var end = u

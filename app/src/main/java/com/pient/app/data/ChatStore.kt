@@ -47,7 +47,8 @@ object ChatStore {
                             .put("project", s.project)
                             .put("updatedAt", s.updatedAt)
                             .put("running", s.running)
-                            .put("pinned", s.pinned),
+                            .put("pinned", s.pinned)
+                            .apply { if (!s.piSessionFile.isNullOrBlank()) put("piSessionFile", s.piSessionFile) },
                     )
                 }
                 sessions.put(project, arr)
@@ -139,6 +140,7 @@ object ChatStore {
                             running = false, // 运行态不跨重启
                             pinned = s.optBoolean("pinned", false),
                             updatedAt = updatedAt,
+                            piSessionFile = s.optString("piSessionFile").takeIf { it.isNotBlank() },
                         )
                     }
                 }

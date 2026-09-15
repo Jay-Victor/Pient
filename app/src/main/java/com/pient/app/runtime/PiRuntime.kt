@@ -240,6 +240,7 @@ object PiRuntime {
         // （实测：重装后 `env: exec …/bin/proot: No such file or directory`，
         //  要等首次进终端页才被 prepareTerminal 修好 —— 应用启动就该修）
         ensureLinks(context)
+        installPiExtension(context)   // 应用启动即装（内容变了才重写；rootfs 没就绪也只是先写好文件）
         if (rootfsReady(context) || isUnpacking()) return false
         if (!rootfsArchiveAvailable(context)) {
             Log.w(TAG, "rootfs 未就绪，且 APK 未内置归档（构建时没跑 fetch_rootfs.py --abi ${abiLabel()}）")
@@ -416,6 +417,7 @@ object PiRuntime {
         }.onFailure { Log.w(TAG, "执行环境写入失败：${it.message}") }
         appDir(context).mkdirs()
         ensureLinks(context)
+        installPiExtension(context)
         ensureRootfsAsync(context)
         ensurePiAsync(context)      // rootfs 未就绪时它会直接返回，等解包完的链式调用再补
     }
@@ -451,6 +453,36 @@ object PiRuntime {
     /** 本 APK 是否内置了 pi 归档 */
     fun piArchiveAvailable(context: Context): Boolean =
         runCatching { context.assets.list("")?.contains(PI_ARCHIVE_ASSET) == true }.getOrDefault(false)
+
+    /** Pient 的 pi 扩展文件名（注册 `/pient-nav`，补 RPC 缺的"会话内分支跳转"） */
+    private const val PI_EXTENSION_ASSET = "pient-pi-extension.ts"
+
+    /** guest 里扩展该落的位置（pi 的全局扩展目录，jiti 直接加载，不需要编译） */
+    fun piExtensionFile(context: Context): File =
+        File(rootfsDir(context), "root/.pi/agent/extensions/pient.ts")
+
+    /**
+     * 把 Pient 的 pi 扩展装进 guest（**幂等**：内容变了才重写）。
+     *
+     * 为什么走扩展：pi 官方 RPC 有树/分叉的大部分命令，却没有「把活跃叶移到树里另一个节点」
+     * （那是 TUI `/tree` 的能力，只作为内部 API `ctx.navigateTree` 暴露给扩展）。
+     * Pient 的「会话内分支」正是它，所以用一条扩展命令 `/pient-nav <entryId>` 补上，
+     * 再经 RPC 的 `prompt` 触发。
+     */
+    fun installPiExtension(context: Context): Boolean = runCatching {
+        val target = piExtensionFile(context)
+        val text = context.assets.open(PI_EXTENSION_ASSET).use {
+            it.readBytes().toString(Charsets.UTF_8)
+        }
+        if (target.isFile && target.readText() == text) return@runCatching true
+        target.parentFile?.mkdirs()
+        target.writeText(text)
+        Log.i(TAG, "pi 扩展已安装：${target.absolutePath}")
+        true
+    }.getOrElse {
+        Log.w(TAG, "pi 扩展安装失败：${it.message}")
+        false
+    }
 
     /** pi 的版本（读解出来的 package.json；读不到返回空串） */
     fun piVersion(context: Context): String = runCatching {

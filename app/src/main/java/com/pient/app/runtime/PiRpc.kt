@@ -188,6 +188,75 @@ object PiRpc {
     }
 
     suspend fun abort(): JSONObject? = send(JSONObject().put("type", "abort"), awaitMs = 10_000)
+
+    // ─────────────── 会话 / 树 / 分叉（2026-09-14 会话映射用）───────────────
+    // pi 官方 RPC 提供：get_tree / get_entries / get_fork_messages / fork / clone /
+    // new_session / switch_session / set_session_name / get_session_stats / get_commands。
+    // **唯一缺的是"移动活跃叶"**（TUI 的 /tree）——那走我们预置的扩展命令 `/pient-nav`
+    // （见 PiRuntime.installPiExtension 与 assets/pient-pi-extension.ts），用 prompt 触发。
+
+    /** data 段（命令成功时的负载）；失败/超时返回 null */
+    private fun dataOf(resp: JSONObject?): JSONObject? =
+        if (resp != null && resp.optBoolean("success", false)) resp.optJSONObject("data") else null
+
+    /** 会话树（节点 = entry，含 id/parentId；leafId = 当前活跃叶） */
+    suspend fun getTree(): JSONObject? = dataOf(send(JSONObject().put("type", "get_tree")))
+
+    /** 全部条目（append 序；传 since = 增量拉取，pi 用它当游标） */
+    suspend fun getEntries(since: String? = null): JSONObject? {
+        val cmd = JSONObject().put("type", "get_entries")
+        if (!since.isNullOrBlank()) cmd.put("since", since)
+        return dataOf(send(cmd))
+    }
+
+    /** 可 fork 的用户消息（会话外分支的候选点） */
+    suspend fun getForkMessages(): JSONObject? = dataOf(send(JSONObject().put("type", "get_fork_messages")))
+
+    /** **会话外分支**：从活跃分支上的某条用户消息开一个新会话文件（pi 口径 = /fork） */
+    suspend fun fork(entryId: String): JSONObject? =
+        dataOf(send(JSONObject().put("type", "fork").put("entryId", entryId)))
+
+    /** **会话外分支（另一种）**：把当前活跃分支复制成新会话文件（pi 口径 = /clone） */
+    suspend fun clone(): JSONObject? = dataOf(send(JSONObject().put("type", "clone")))
+
+    /** 会话统计（含 sessionFile / sessionId / contextUsage —— 会话映射靠它拿文件名） */
+    suspend fun getSessionStats(): JSONObject? = dataOf(send(JSONObject().put("type", "get_session_stats")))
+
+    /** 新建会话（可指定父会话文件 = 从某个会话派生） */
+    suspend fun newSession(parentSession: String? = null): JSONObject? {
+        val cmd = JSONObject().put("type", "new_session")
+        if (!parentSession.isNullOrBlank()) cmd.put("parentSession", parentSession)
+        return dataOf(send(cmd))
+    }
+
+    /** 切到某个会话文件（Pient 切会话时用） */
+    suspend fun switchSession(sessionPath: String): JSONObject? =
+        dataOf(send(JSONObject().put("type", "switch_session").put("sessionPath", sessionPath)))
+
+    /** 给会话起名（把 Pient 的会话标题同步给 pi） */
+    suspend fun setSessionName(name: String): JSONObject? =
+        dataOf(send(JSONObject().put("type", "set_session_name").put("name", name)))
+
+    /** 可用命令（扩展命令也在里面 —— 含我们的 /pient-nav） */
+    suspend fun getCommands(): JSONObject? = dataOf(send(JSONObject().put("type", "get_commands")))
+
+    /**
+     * **会话内分支**：把活跃叶移动到 entryId（= TUI 的 /tree 选择）。
+     * 走扩展命令 `/pient-nav <id> [--summarize] [--label x] [--instructions y]`
+     * —— pi 的 RPC 文档写明扩展命令「available for invocation via prompt」。
+     */
+    suspend fun navigate(
+        entryId: String,
+        summarize: Boolean = false,
+        label: String? = null,
+        instructions: String? = null,
+    ): JSONObject? {
+        val sb = StringBuilder("/pient-nav ").append(entryId)
+        if (summarize) sb.append(" --summarize")
+        if (!label.isNullOrBlank()) sb.append(" --label ").append(label.replace(' ', '_'))
+        if (!instructions.isNullOrBlank()) sb.append(" --instructions ").append(instructions)
+        return send(JSONObject().put("type", "prompt").put("message", sb.toString()), awaitMs = 120_000)
+    }
     suspend fun newSession(): JSONObject? = send(JSONObject().put("type", "new_session"))
     suspend fun getState(): JSONObject? = send(JSONObject().put("type", "get_state"))
 

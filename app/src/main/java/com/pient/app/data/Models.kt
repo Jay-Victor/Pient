@@ -437,6 +437,13 @@ data class Session(
     val project: String,
     val running: Boolean = false,
     val pinned: Boolean = false,
+    /**
+     * **这个 Pient 会话绑的 pi 会话文件**（2026-09-14 会话映射；guest 里的绝对路径）。
+     * 懒建：首次真正用到该会话（发第一条消息）时才让 pi `new_session` 并把文件名记回来；
+     * 之后的切会话 = `switch_session`，会话内分支 = 在同一个文件里移动活跃叶（`/pient-nav`），
+     * 会话外分支（fork/clone）= 新文件 → 新的 Pient 会话。
+     */
+    val piSessionFile: String? = null,
     /** 最后活动时间（epoch ms；会话记录持久化与侧栏相对时间/时间分组依据，0 = 创建时刻） */
     val updatedAt: Long = 0,
 )
