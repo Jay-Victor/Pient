@@ -1,6 +1,7 @@
 package com.pient.app.ui.chat
 
 import androidx.compose.foundation.Canvas
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -84,6 +85,14 @@ import kotlin.math.min
 @Composable
 fun TreeCanvasPanel(chatState: ChatState) {
     val tree = chatState.branchTree
+    // 打点：画布吃的是哪棵树、节点数对不对（文档口径：节点数 = 用户消息数）
+    LaunchedEffect(tree, chatState.piTree) {
+        runCatching {
+            fun count(n: SessionTreeNode?): Int = if (n == null) 0 else 1 + n.children.sumOf { count(it) }
+            // 画布内容 uiautomator 取不到，这行是唯一能核「节点数 = 用户消息数」的地方（《分支功能设计》§7）
+            android.util.Log.i("PientChat", "画布数据源：${count(tree)} 节点（pi 树=${chatState.piTree != null}）")
+        }
+    }
     // 进画布即拉一次 pi 的会话树（会话映射下这才是真相源；失败不影响本地回落）
     LaunchedEffect(Unit) {
         // bind 而不是只 refresh：通道没起时先起（否则 get_tree 落空 → 整页空白）
@@ -137,6 +146,7 @@ fun TreeCanvasPanel(chatState: ChatState) {
     fun xOf(depth: Int) = pad + depth * colStep
     fun yOf(row: Float) = pad + row * rowStep
 
+
     var selectedId by remember { mutableStateOf<String?>(null) }
     var detailOpen by remember { mutableStateOf(false) }
     var zoom by remember { mutableStateOf(1f) }
@@ -150,11 +160,16 @@ fun TreeCanvasPanel(chatState: ChatState) {
     val zoomNow by rememberUpdatedState(zoom)
     val selectedNow by rememberUpdatedState(selectedId)
 
-    // 初始视口：缩放使活跃路径尽量完整可见；长链在最小缩放下仍放不下时，
-    // 锚定**活跃叶子**（当前所在节点 = 最右节点）——否则两端都会被裁掉、看不到当前位置
+    // 树换了（切会话、切分支、pi 树刚到位）→ 重置适配标记，让下面的视口逻辑重新算一遍。
+    // 否则会沿用上一棵树的 pan/zoom：新树可能整棵都在屏幕外（实测：切到 12 节点的树后画布看着是空的）。
+    LaunchedEffect(tree) { fitted = false }
+
+    // 初始视口（《Pient 分支功能设计》§3.3）：先按**活跃路径**包围盒 fit（0.6×–1.5× clamp）；
+    // 放不下时**锚定活跃叶子**（当前所在节点贴右侧 32dp、垂直居中）—— 否则长会话两端都被裁掉、
+    // 看不到自己当前位置。（"尽量看到全树"是 §8.6 尚未拍板的项，这里不擅自改。）
     LaunchedEffect(viewport, tree) {
         if (fitted || viewport == IntSize.Zero || layout.isEmpty()) return@LaunchedEffect
-        // 空活跃集兜底：pi 侧还没给出 leaf（新会话/刚切换）时，树里可能一个 active 都没有 ——
+        // 空活跃集兜底：pi 侧还没给出 leaf（新会话/刚切换）时可能一个 active 都没有 ——
         // 原写法 `actives.minOf{}` 会抛 NoSuchElementException 直接崩（实测崩过）。
         val actives = layout.filter { it.node.active }.ifEmpty { layout }
         val minX = actives.minOf { xOf(it.depth) }
@@ -179,6 +194,14 @@ fun TreeCanvasPanel(chatState: ChatState) {
             )
         }
         fitted = true
+        // 打点：视口算完看得到哪些节点（画布内容 uiautomator 取不到，验证只能靠这行）
+        runCatching {
+            val x0 = -pan.x / zoom
+            val x1 = (viewport.width - pan.x) / zoom
+            val visible = layout.filter { xOf(it.depth) + cardW in x0..x1 || xOf(it.depth) in x0..x1 }
+            Log.i("PientChat", "画布视口 zoom=%.2f 节点 ${layout.size} 个，可见 ${visible.size} 个：" .format(zoom)
+                + visible.joinToString(" | ") { "${it.node.id.take(8)}「${it.node.userText.take(8)}」" })
+        }
     }
 
     val selectedLayout = layout.firstOrNull { it.node.id == selectedId }
@@ -236,7 +259,9 @@ fun TreeCanvasPanel(chatState: ChatState) {
                             transformOrigin = TransformOrigin(0f, 0f)
                         },
                 ) {
-                    // 连线（三次贝塞尔曲线；活跃路径 primary，其余 outlineVariant）
+                    // 连线（三次贝塞尔曲线）：**当前会话内分支**（聊天页正在显示的那条）用 primary，
+                    // 其余一律中性 —— 口径（2026-09-15 用户定稿）：
+                    // 「聊天页显示的那一个会话内分支，在画布上从第一个节点起、每层一个节点串成一条线，用蓝色表示」
                     // 颜色在 Composable 上下文取好再传入 DrawScope（Canvas lambda 非 @Composable）
                     val primary = MaterialTheme.colorScheme.primary
                     val faint = MaterialTheme.colorScheme.outlineVariant
@@ -509,8 +534,13 @@ private fun TreeFab(
 }
 
 /**
- * 节点卡片：左侧入点圆点（非根）/ 右侧出点圆点（有子节点）为连线端点；
- * 活跃路径 = primary 20% 底 + primary 35% 描边；选中 = 纯 primary 1.5dp 描边。
+ * 节点卡片：左侧入点圆点（非根）/ 右侧出点圆点（有子节点）为连线端点。
+ *
+ * 着色口径（2026-09-15 用户定稿）：**蓝 = 聊天页正在显示的那一个会话内分支** ——
+ * 即从第一个节点起、每层一个节点串成的那条线（= 活跃路径，`node.active`）。
+ * 其余分支中性。点选（纯 primary 1.5dp 描边）优先级最高，用于打开节点详情/切分支。
+ * 注意：这条口径成立的前提是**一层一个节点**（每个回合一张卡），
+ * 若画布吃的是"每条消息一张卡"的回退树，蓝色就会扭成一条穿过多张卡的折线（实测踩过）。
  */
 @Composable
 private fun NodeCard(

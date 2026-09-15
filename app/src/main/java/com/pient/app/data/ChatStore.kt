@@ -132,9 +132,17 @@ object ChatStore {
                     val arr = sessions.getJSONArray(key)
                     for (i in 0 until arr.length()) {
                         val s = arr.getJSONObject(i)
+                        val sid = s.optString("id")
+                        // 自愈：同一项目里重复的会话 id（历史 bug：同一毫秒内新建/fork 会撞 id）会让会话列表
+                        // LazyColumn 的 key 重复 → `Key "s-…" was already used` 直接闪退（实测踩过）。
+                        // 载入时按 id 去重（保留先出现的那条），并把 state 里其余同名键留给它们各自的表。
+                        if (sid.isBlank() || list.any { it.id == sid }) {
+                            android.util.Log.w("Pient", "载入时丢弃重复/空 id 的会话记录：$sid")
+                            continue
+                        }
                         val updatedAt = s.optLong("updatedAt", 0)
                         list += Session(
-                            id = s.optString("id"),
+                            id = sid,
                             title = s.optString("title", "新建会话"),
                             project = s.optString("project", key),
                             running = false, // 运行态不跨重启

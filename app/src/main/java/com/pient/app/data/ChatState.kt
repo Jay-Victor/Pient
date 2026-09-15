@@ -271,7 +271,7 @@ class ChatState {
     fun newSession(): String {
         val proj = currentProject ?: return "" // 未绑定项目：调用方 Toast 提示
         val list = sessions.getOrPut(proj) { mutableStateListOf() }
-        val id = "s-${System.currentTimeMillis()}"
+        val id = newSessionId()
         list.add(0, Session(id, "新建会话", proj, updatedAt = System.currentTimeMillis()))
         currentSessionId = id
         messagesBySession[id] = mutableStateListOf()
@@ -299,6 +299,20 @@ class ChatState {
             if (firstUserText.trim().length > 20) "$t…" else t
         } else old.title
         list[i] = old.copy(title = autoTitle, updatedAt = now)
+    }
+
+    /**
+     * 会话 id：`s-<epochMs>`（《分支功能设计》§4.2 口径），**同毫秒冲突时加 `-2/-3…` 后缀**。
+     * 为什么必须防撞：会话列表是 LazyColumn，key 重复会直接抛
+     * `Key "s-…" was already used` 闪退（实测踩过：同一毫秒内建了两个会话）。
+     */
+    private fun newSessionId(): String {
+        val used = sessions.values.flatten().map { it.id }.toHashSet()
+        val base = "s-${System.currentTimeMillis()}"
+        if (base !in used) return base
+        var n = 2
+        while ("$base-$n" in used) n++
+        return "$base-$n"
     }
 
     fun renameSession(id: String, title: String) {
@@ -738,6 +752,14 @@ class ChatState {
                 val current = PiRpc.getSessionStats()?.optString("sessionFile").orEmpty()
                 if (current != file) PiRpc.switchSession(file)
             }
+            // 会话标题**回流**：pi 里的 `sessionName` 是真相源（改名的去程是 set_session_name，
+            // 但会话可能在别处被改名 —— pi 的 TUI/脚本、或同一文件的另一处引用），这里拉回来对齐，
+            // 免得两边标题长期不一致（对齐后两边相等，下次进来就是 no-op）。
+            val piName = PiRpc.getState()?.optString("sessionName").orEmpty()
+            if (piName.isNotBlank() && piName != rec.title) {
+                renameSession(id, piName)
+                Log.i(TAG_CHAT, "会话标题按 pi 回流：$piName")
+            }
             refreshPiTree()
             syncMessagesFromPi()
         }.onFailure { Log.w(TAG_CHAT, "绑 pi 会话失败：${it.message}") }
@@ -835,7 +857,10 @@ class ChatState {
             if (id.isBlank()) return
             entryById[id] = e
             order += id
-            parentOf[id] = e.optString("parentId").takeIf { it.isNotBlank() && it != "null" }
+            val pid = e.optString("parentId").takeIf { it.isNotBlank() && it != "null" }
+            parentOf[id] = pid
+            // childrenOf 以前只声明没填（这棵树的解析全靠 parentOf 反查），按子树取回合内容时才发现 —— 实测踩过
+            if (pid != null) childrenOf.getOrPut(pid) { mutableListOf() } += id
             val kids = node.optJSONArray("children") ?: JSONArray()
             for (i in 0 until kids.length()) kids.optJSONObject(i)?.let { walk(it) }
         }
@@ -849,28 +874,47 @@ class ChatState {
             cur = parentOf[cur]
         }
 
-        val userIds = order.filter { piRole(entryById[it]) == "user" }
-        if (userIds.isEmpty()) return null
-        fun textOf(id: String) = piText(entryById[id]?.optJSONObject("message"))
-        // 每个用户消息的 exchange = 它之后、下一个用户消息之前的所有助手/工具文本
-        val idxOf = HashMap<String, Int>().apply { userIds.forEachIndexed { i, u -> put(u, i) } }
-        val exchangeOf = HashMap<String, MutableList<Msg>>()
-        run {
-            var pending: String? = null
-            val buf = ArrayList<Msg>()
-            for (id in order) {
-                val role = piRole(entryById[id])
-                if (role == "user") {
-                    pending?.let { exchangeOf[it] = ArrayList(buf) }
-                    buf.clear()
-                    pending = id
-                } else if (pending != null) {
-                    val t = textOf(id).trim()
-                    if (t.isNotEmpty() && role == "assistant") buf += Msg.Assistant(t, null)
+        // 《Pient 分支功能设计》§2.1/§7：**节点 = 一条用户消息**，该回合的 AI 回答/思考/工具条目
+        // 压缩进节点（不各自建卡）。pi 条目里 role 有 user/assistant/toolResult，且**工具结果也是
+        // role=user 的条目**（内容块是 toolResult）—— 所以三重判定：message 条目 + role=user +
+        // 有文本块且无 toolResult 块，避免助手/工具结果被当成节点（实测踩过：画布 28 个节点）。
+        fun isUserTurn(id: String): Boolean {
+            val e = entryById[id] ?: return false
+            if (e.optString("type") != "message") return false
+            val msg = e.optJSONObject("message") ?: return false
+            if (msg.optString("role") != "user") return false
+            val arr = msg.optJSONArray("content") ?: return msg.optString("content").isNotBlank()
+            var hasText = false
+            for (i in 0 until arr.length()) {
+                val b = arr.optJSONObject(i) ?: continue
+                when (b.optString("type")) {
+                    "toolResult" -> return false            // 工具结果载体，不算用户消息
+                    "text" -> if (b.optString("text").isNotBlank()) hasText = true
                 }
             }
-            pending?.let { exchangeOf[it] = ArrayList(buf) }
+            return hasText
         }
+        val userIds = order.filter { isUserTurn(it) }
+        fun textOf(id: String) = piText(entryById[id]?.optJSONObject("message"))
+        val idxOf = HashMap<String, Int>().apply { userIds.forEachIndexed { i, u -> put(u, i) } }
+        // 每个用户消息的 exchange = **它自己这一回合**里的助手文本：从它往下走，遇到下一个用户消息就停。
+        // 早先按拍平顺序（order）切段，分叉后会串味（另一条支的助手文本被算给上一个用户消息、
+        // 新支末尾的用户消息拿到空段显示「（暂无回答）」）—— 实测踩过。
+        fun assistantTextsInTurn(rootId: String): List<Msg> {
+            val out = ArrayList<Msg>()
+            val queue = ArrayDeque<String>()
+            childrenOf[rootId]?.forEach { queue += it }
+            while (queue.isNotEmpty()) {
+                val id = queue.removeFirst()
+                if (idxOf.containsKey(id)) continue          // 下一个用户消息 = 本回合的边界
+                val t = textOf(id).trim()
+                if (t.isNotEmpty() && piRole(entryById[id]) == "assistant") out += Msg.Assistant(t, null)
+                childrenOf[id]?.forEach { queue += it }
+            }
+            return out
+        }
+        val exchangeOf = HashMap<String, List<Msg>>()
+        userIds.forEach { exchangeOf[it] = assistantTextsInTurn(it) }
         // 父节点 = 该用户消息上游最近的那个用户消息
         fun nearestUserAncestor(id: String): String? {
             var p = parentOf[id]
@@ -881,7 +925,10 @@ class ChatState {
             return null
         }
         fun build(id: String): SessionTreeNode {
-            val kids = order.filter { nearestUserAncestor(it) == id }
+            // ⚠️ 必须再加 `idxOf.containsKey(it)`：光判「最近用户祖先 = id」的话，**所有助手/工具条目**
+            // 都会挂成子节点（它们的最近用户祖先也是这个 id）→ 画布节点数从 11 变 28、蓝色扭成折线。
+            // 文档 §7：节点数 = 用户消息数（回合内容压缩进节点，走 exchange）。
+            val kids = order.filter { idxOf.containsKey(it) && nearestUserAncestor(it) == id }
             return SessionTreeNode(
                 id = id,
                 userText = textOf(id).trim(),
@@ -932,7 +979,7 @@ class ChatState {
      */
     fun forkPiSession(entryId: String): String {
         val proj = currentProject ?: return ""
-        val newId = "s-${System.currentTimeMillis()}"
+        val newId = newSessionId()
         bgScope.launch {
             runCatching {
                 PiRpc.fork(entryId)
@@ -1523,7 +1570,7 @@ class ChatState {
         val id = currentSessionId ?: return ""
         val src = messagesBySession[id]?.toList() ?: return ""
         if (entryIndex !in src.indices) return ""
-        val newId = "s-${System.currentTimeMillis()}"
+        val newId = newSessionId()
         val prefix = src.subList(0, entryIndex + 1).toMutableStateList()
         val list = sessions.getOrPut(proj) { mutableStateListOf() }
         list.add(0, Session(newId, forkTitle(src, entryIndex), proj, updatedAt = System.currentTimeMillis()))
