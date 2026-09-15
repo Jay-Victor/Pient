@@ -37,6 +37,22 @@ object PiAgentFiles {
     fun authFile(context: Context): File = File(agentDir(context), "auth.json")
     fun settingsFile(context: Context): File = File(agentDir(context), "settings.json")
 
+    /** 会话记录的宿主落点（pi 给的是 guest 绝对路径，如 /root/.pi/agent/sessions/xx.jsonl） */
+    fun hostSessionFile(context: Context, guestPath: String): File =
+        File(PiRuntime.rootfsDir(context), guestPath.trimStart('/'))
+
+    /**
+     * 删除 pi 侧的会话记录（2026-09-16）：Pient 删会话时同步清掉那份 jsonl。
+     *
+     * 不清的后果（用户点名要修的缺口）：agent 目录里越堆越多孤儿会话文件 —— 一旦会话记录被
+     * 重建映射（或画布/fork 重新绑定），旧文件里的上下文又被拉回来，等于「删了没删干净」。
+     * 返回是否真的删掉了一个文件（文件本就不存在时返回 false，不算失败）。
+     */
+    fun deleteSessionFile(context: Context, guestPath: String): Boolean = runCatching {
+        val f = hostSessionFile(context, guestPath)
+        f.exists() && f.delete()
+    }.getOrDefault(false)
+
     /** 配置文件是否已经落在 guest 里（环境没解包时为 false） */
     fun available(context: Context): Boolean = PiRuntime.rootfsReady(context)
 

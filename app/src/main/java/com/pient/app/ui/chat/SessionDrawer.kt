@@ -169,8 +169,20 @@ fun SessionDrawer(
     val sessionGroups = groupSessionsByRecency(projectSessions.filter { !it.pinned })
     val allSelected = projectSessions.isNotEmpty() && selectedIds.containsAll(projectSessions.map { it.id })
     val searching = searchOpen && searchQuery.isNotBlank()
+    // 内容检索（2026-09-16）：标题之外再搜消息正文 —— 命中片段显示在会话行下方。
+    // 放 LaunchedEffect（按 query 触发）+ IO 线程：搜索要遍历会话消息，不能在组合里做。
+    var contentHits by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    LaunchedEffect(searchQuery, searching) {
+        contentHits = if (!searching) {
+            emptyMap()
+        } else {
+            withContext(Dispatchers.IO) { chatState.searchSessionContents(searchQuery) }
+        }
+    }
     val visibleSessions = if (searching) {
-        projectSessions.filter { it.title.contains(searchQuery.trim(), ignoreCase = true) }
+        projectSessions.filter {
+            it.title.contains(searchQuery.trim(), ignoreCase = true) || contentHits.containsKey(it.id)
+        }
     } else projectSessions
 
     // ── 侧边栏外观（侧边栏设置，2026-09-12）──
@@ -664,20 +676,33 @@ fun SessionDrawer(
                     }
                 }
                 items(visibleSessions, key = { it.id }) { s ->
-                    SessionRow(
-                        session = s,
-                        active = s.id == chatState.currentSessionId,
-                        batchMode = false,
-                        selected = false,
-                        onClick = {
-                            chatState.selectSession(s.id)
-                            onClose()
-                        },
-                        onToggleSelect = {},
-                        onTogglePin = { chatState.togglePin(s.id) },
-                        onRename = { renameFor = s.id },
-                        onDeleteRequest = { deleteConfirmFor = s.id },
-                    )
+                    Column {
+                        SessionRow(
+                            session = s,
+                            active = s.id == chatState.currentSessionId,
+                            batchMode = false,
+                            selected = false,
+                            onClick = {
+                                chatState.selectSession(s.id)
+                                onClose()
+                            },
+                            onToggleSelect = {},
+                            onTogglePin = { chatState.togglePin(s.id) },
+                            onRename = { renameFor = s.id },
+                            onDeleteRequest = { deleteConfirmFor = s.id },
+                        )
+                        // 内容命中片段（标题没匹配上是靠正文命中的；给用户一句「为什么它在这」）
+                        contentHits[s.id]?.let { snip ->
+                            Text(
+                                snip,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(start = 14.dp, end = 10.dp, bottom = 6.dp),
+                            )
+                        }
+                    }
                 }
             } else {
                 val pinned = pinnedSessions

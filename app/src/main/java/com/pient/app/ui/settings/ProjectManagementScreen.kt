@@ -478,11 +478,33 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                 onConfirm = {
                     actionDialogOpen = false
                     when (actionChoice) {
-                        0 -> Toast.makeText(
-                            context,
-                            "已导出 ${selectedSessions.size} 个会话（原型占位）",
-                            Toast.LENGTH_SHORT,
-                        ).show()
+                        0 -> {
+                            // 真实导出（2026-09-16；此前是原型占位 Toast）：
+                            // Markdown 落到系统「下载/Pient/」，全部会话合成一个文档。
+                            val picks = allSessions.filter { selectedSessions.contains(it.id) }
+                            val appCtx = context.applicationContext
+                            val count = picks.size
+                            Thread {
+                                val md = com.pient.app.data.SessionExport.markdown(
+                                    chatState, picks, "Pient 会话导出",
+                                )
+                                val where = com.pient.app.data.SessionExport.writeToDownloads(
+                                    appCtx, com.pient.app.data.SessionExport.fileName(count), md,
+                                )
+                                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                    Toast.makeText(
+                                        appCtx,
+                                        if (where != null) {
+                                            "已导出 $count 个会话 → $where"
+                                        } else {
+                                            "导出失败：下拉目录不可写"
+                                        },
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                }
+                            }.start()
+                            selectedSessions.clear()
+                        }
                         1 -> {
                             selectedSessions.toList().forEach { chatState.deleteSessionById(it) }
                             Toast.makeText(

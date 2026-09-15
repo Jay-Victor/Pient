@@ -647,6 +647,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
 
         // ── 上下文用量卡（与模型选择器同款浮层：点外关闭、无 scrim、贴右下） ──
         if (contextCardOpen) {
+            // 打开时拉一次 pi 的上下文用量真值（get_session_stats.contextUsage；2026-09-16）
+            LaunchedEffect(Unit) { chatState.requestContextUsage() }
             Box(Modifier.fillMaxSize().zIndex(3f)) {
                 // ★ 点外关闭层必须在卡片之下（先画），否则会拦截卡片内所有点击
                 Box(

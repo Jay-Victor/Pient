@@ -26,17 +26,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.pient.app.data.AiConfigStore
 import com.pient.app.data.ChatState
-import com.pient.app.data.ContextCategory
 import com.pient.app.data.ContextPolicy
 import com.pient.app.ui.components.PientButton
-import com.pient.app.ui.theme.DarkBrandPurple
 import com.pient.app.ui.theme.DarkCategoryConversation
-import com.pient.app.ui.theme.DarkCategoryRules
-import com.pient.app.ui.theme.DarkWarn
-import com.pient.app.ui.theme.LightBrandPurple
 import com.pient.app.ui.theme.LightCategoryConversation
-import com.pient.app.ui.theme.LightCategoryRules
-import com.pient.app.ui.theme.LightWarn
 import com.pient.app.ui.theme.LocalPientIsDark
 import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
@@ -63,9 +56,11 @@ fun ContextUsageCard(
     onCompact: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    val categories = chatState.contextCategories
     val used = chatState.windowTokens
     val max = chatState.maxWindowTokens
+    // 用量是否已知（pi 压缩后还没有新回复时给不出 tokens；2026-09-16）
+    val known = chatState.contextUsageKnown
+    val windowLabel = if (max > 0) formatCompact(max) else "—"
 
     PientPanel(
         modifier = modifier
@@ -90,26 +85,25 @@ fun ContextUsageCard(
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    "~${formatCompact(used)} / ${formatCompact(max)} Tokens",
+                    if (known) "~${formatCompact(used)} / $windowLabel Tokens" else "? / $windowLabel Tokens",
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = MonoFont,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
-            // ② 已用百分比（Hermes copy.percentFull）
+            // ② 已用百分比（Hermes copy.percentFull；数值 = pi 的 contextUsage.percent）
             Text(
-                "已用 ${chatState.contextPercent.toInt()}%",
+                if (known) "已用 ${chatState.contextPercent.toInt()}%" else "已用 ?（压缩后还没有新回复）",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.padding(top = 6.dp),
             )
 
-            // ③ 堆叠进度条（Hermes ContextUsageBar：h-1.5 rounded-full，轨道 stroke-tertiary）
-            // 单画布绘制：float 宽度按 token 占比精确到亚像素，避免 weight+Box 方案
-            // 的整数取整（硬边界无 AA、尾部 1px 残缝）
-            val totalTokens = categories.sumOf { it.tokens }.coerceAtLeast(1).toFloat()
-            val segmentColors = categories.map { categoryColor(it.id) }
+            // ③ 单段进度条（2026-09-16 用户拍板：**分类明细整块删掉、进度条保留**）：
+            // 宽度 = pi 的 contextUsage.percent；未知时留空条（不编数字）
+            val usedFrac = (chatState.contextPercent / 100f).coerceIn(0f, 1f)
+            val barColor = usageColor()
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -118,30 +112,12 @@ fun ContextUsageCard(
                     .clip(RoundedCornerShape(3.dp))
                     .background(MaterialTheme.colorScheme.outlineVariant)
                     .drawWithCache {
-                        val segWidths = categories.map { size.width * it.tokens / totalTokens }
+                        val w = size.width * usedFrac
                         onDrawBehind {
-                            var x = 0f
-                            categories.forEachIndexed { i, cat ->
-                                drawRect(
-                                    color = segmentColors[i],
-                                    topLeft = Offset(x, 0f),
-                                    size = Size(segWidths[i], size.height),
-                                )
-                                x += segWidths[i]
-                            }
+                            if (w > 0f) drawRect(color = barColor, size = Size(w, size.height))
                         }
                     },
             )
-
-            // ④ 分类明细（Hermes category list：色块 8px/2px 圆角 + 标签 + token 数）
-            Column(
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.padding(top = 10.dp),
-            ) {
-                categories.forEach { cat ->
-                    CategoryRow(cat)
-                }
-            }
 
             // ⑤ 压缩（**pi 原生**，2026-09-15 收口）：触发线 = `估算 tokens > 上下文窗口 − reserveTokens`
             // （pi 在 settings.json 的 `compaction` 里自己判，App 不参与）；这里只做等价换算展示。
@@ -185,49 +161,13 @@ fun ContextUsageCard(
     }
 }
 
+/**
+ * 进度条颜色（2026-09-16）：只剩单段「上下文占用」——用原「对话」分类色，
+ * 即 Hermes `--context-usage-conversation` 的语义映射（青）。
+ */
 @Composable
-private fun CategoryRow(cat: ContextCategory) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Box(
-            Modifier
-                .size(8.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(categoryColor(cat.id)),
-        )
-        Text(
-            cat.label,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .weight(1f)
-                .padding(start = 8.dp),
-        )
-        Text(
-            formatCompact(cat.tokens),
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = MonoFont,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
-    }
-}
-
-/** 分类色：Hermes --context-usage-* 语义 → Pient GitHub 色系映射 */
-@Composable
-private fun categoryColor(id: String): Color {
-    val dark = LocalPientIsDark.current
-    return when (id) {
-        "tool_definitions" -> if (dark) DarkBrandPurple else LightBrandPurple // 紫
-        "skills" -> if (dark) DarkWarn else LightWarn                         // 黄
-        "rules" -> if (dark) DarkCategoryRules else LightCategoryRules         // 绿
-        "conversation" -> if (dark) DarkCategoryConversation else LightCategoryConversation // 青
-        else -> MaterialTheme.colorScheme.onSurfaceVariant                    // 系统提示词=灰
-    }
-}
+private fun usageColor(): Color =
+    if (LocalPientIsDark.current) DarkCategoryConversation else LightCategoryConversation
 
 /** Hermes compactNumber 同规则：999→"999"，1000→"1k"，1230→"1.2k"，10000→"10k"，1.5M */
 private fun formatCompact(value: Int): String {

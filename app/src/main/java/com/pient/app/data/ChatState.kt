@@ -335,6 +335,8 @@ class ChatState {
 
     fun deleteSession(id: String) {
         val proj = currentProject ?: return
+        // pi 侧那份会话记录也要清（2026-09-16）：先取出来，再删本地记录
+        val piFile = sessions[proj]?.firstOrNull { it.id == id }?.piSessionFile
         sessions[proj]?.removeAll { it.id == id }
         messagesBySession.remove(id)
         entriesBySession.remove(id)
@@ -347,10 +349,12 @@ class ChatState {
         }
         // 删除最后一个会话后自动新建（2026-09-09 用户定：侧边栏会话列表恒有会话）
         if (sessionsFor(proj).isEmpty()) newSession()
+        discardPiSession(piFile)
     }
 
     /** 跨项目按 id 删除会话（项目管理页使用；含消息记录与当前会话指针处理） */
     fun deleteSessionById(id: String) {
+        val piFile = sessions.values.firstNotNullOfOrNull { list -> list.firstOrNull { it.id == id } }?.piSessionFile
         for (list in sessions.values) {
             if (list.removeAll { it.id == id }) break
         }
@@ -365,6 +369,137 @@ class ChatState {
         }
             currentSessionId = sessionsFor(currentProject ?: "").firstOrNull()?.id
         }
+        discardPiSession(piFile)
+    }
+
+    /**
+     * 清理 pi 侧那份会话记录（2026-09-16）。
+     *
+     * 两件事：① 如果删的正是 pi **当前打开**的那个文件，先让 pi 换到新会话 —— 否则它还会
+     * 往这个已删文件追加，下一次「按 sessionFile 映射」又把旧上下文拉回来；② 删文件本体。
+     * 走 IO 线程（文件删除 + 两次 RPC 往返），失败只记日志、不影响本地删除结果。
+     */
+    private fun discardPiSession(file: String?) {
+        val f = file?.takeIf { it.isNotBlank() } ?: return
+        val ctx = AppCtx.get() ?: return
+        bgScope.launch(Dispatchers.IO) {
+            runCatching {
+                if (PiRpc.usable()) {
+                    val current = PiRpc.getSessionStats()?.optString("sessionFile").orEmpty()
+                    if (current == f) {
+                        PiRpc.newSession()
+                        Log.i(TAG_CHAT, "删除的正是 pi 当前会话 → 已让 pi 换到新会话")
+                    }
+                }
+                val gone = PiAgentFiles.deleteSessionFile(ctx, f)
+                Log.i(TAG_CHAT, "清理 pi 侧会话记录：$f → ${if (gone) "已删除" else "文件不存在"}")
+            }.onFailure { Log.w(TAG_CHAT, "清理 pi 侧会话记录失败：${it.message}") }
+        }
+    }
+
+    /** 会话的消息（内容检索 / 导出用；未上屏过的会话返回空表） */
+    fun messagesIn(id: String): List<Msg> = messagesBySession[id].orEmpty()
+
+    /**
+     * 导出用的消息序列（2026-09-16）：**优先上屏流，空则回退条目树**。
+     *
+     * 为什么必须回退：有条目树的会话**不写扁平消息流**（`ChatStore` 那条「不再重复存」的优化），
+     * 所以「没在本次运行里打开过的会话」`messagesBySession` 是空的 —— 直接用它导出会得到
+     * 一个只有标题的空文档（真机实测：36 条条目的会话导出后只有 715 字节）。
+     */
+    fun messagesForExport(id: String): List<Msg> =
+        messagesIn(id).ifEmpty { entriesBySession[id].orEmpty().map { it.msg } }
+
+    /** 一条消息的可检索文本（内容检索用；工具类条目把名称与参数也算进去） */
+    fun msgText(m: Msg): String = when (m) {
+        is Msg.User -> m.text + (m.quote?.let { "\n" + it.text } ?: "")
+        is Msg.Assistant -> m.markdown
+        is Msg.Thinking -> m.text
+        is Msg.ToolCall -> m.name + " " + m.params + (m.detail?.let { " " + it } ?: "")
+        is Msg.ToolResult -> m.toolName + " " + m.preview + (m.full?.let { " " + it } ?: "")
+        is Msg.Compaction -> m.summary
+    }
+
+    /**
+     * 会话**内容检索**（2026-09-16，此前只搜标题）：标题之外再搜消息正文与条目文本，
+     * 返回 会话 id → 命中片段（抽屉行做副标题用）。
+     *
+     * 只在用户输入搜索词时调用（IO 线程由调用方保证），命中即停（一条会话只报第一处）。
+     */
+    fun searchSessionContents(query: String): Map<String, String> {
+        val q = query.trim()
+        if (q.isEmpty()) return emptyMap()
+        val out = LinkedHashMap<String, String>()
+        sessions.values.forEach { list ->
+            for (s in list) {
+                if (out.containsKey(s.id)) continue
+                val pool = messagesIn(s.id) + entriesBySession[s.id].orEmpty().map { it.msg }
+                for (m in pool) {
+                    val t = msgText(m)
+                    val at = t.indexOf(q, ignoreCase = true)
+                    if (at >= 0) {
+                        out[s.id] = snippetAround(t, at, q.length)
+                        break
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    /** 命中片段：前后各留一点上下文、压平换行（正文里的 \n → 空格，长度不变所以下标仍然有效） */
+    private fun snippetAround(text: String, at: Int, len: Int): String {
+        val flat = text.replace('\n', ' ')
+        val start = (at - 14).coerceAtLeast(0)
+        val end = (at + len + 24).coerceAtMost(flat.length)
+        return (if (start > 0) "…" else "") + flat.substring(start, end) + (if (end < flat.length) "…" else "")
+    }
+
+    /**
+     * 供 UI 调用的**非挂起**入口：刷新挂在 ChatState 自己的 scope 上 ——
+     * 面板关掉/重组导致组合域取消时，这次刷新不会半途夭折
+     * （2026-09-16 实测日志：`命令发送失败：The coroutine scope left the composition`）。
+     */
+    fun requestContextUsage() {
+        bgScope.launch { runCatching { refreshContextUsage() } }
+    }
+
+    /**
+     * 上下文用量（**pi 真值**；2026-09-16 取代两个原型常量）。
+     *
+     * 来源 = pi 官方 `get_session_stats` 的 `contextUsage { tokens, contextWindow, percent }`
+     * （pi 侧 `agent-session.ts:getContextUsage`：按**最后一次压缩之后**的助手 usage 反推，
+     * 所以压缩后还没再对话时它会给 null —— 此时卡上照 pi-web 口径显示 `?`，不编数字）。
+     * pi 不提供分类明细（pi-web 也只显示聚合百分比），故分类明细收成一行「对话」。
+     */
+    suspend fun refreshContextUsage() {
+        // **先真问一次**，拿不到才起通道 —— 不能用 `PiRpc.usable()` 当「进程活着」的判据：
+        // 它的实现是 `process?.isAlive || (rootfsReady && piReady)`，只要运行时部署齐全就返回 true
+        // （2026-09-16 实测踩到：新装包、还没发过消息时 usable()=true 但进程没起 → 卡片只有 `? / —`，
+        // 而直连 pi 问 get_session_stats 明明回了 tokens/contextWindow/percent）。
+        var data = PiRpc.getSessionStats()
+        if (data == null) {
+            piChannelTarget()?.let { t -> PiRpc.start(t.first, t.second) }
+            data = PiRpc.getSessionStats()
+        }
+        // 绑到「当前会话」那个文件（通道刚起时 pi 可能还停在上次的文件上；不绑会读到别的会话的用量）
+        val file = sessionRecord(currentSessionId ?: "")?.piSessionFile
+        if (!file.isNullOrBlank() && data?.optString("sessionFile").orEmpty() != file) {
+            PiRpc.switchSession(file)
+            data = PiRpc.getSessionStats()
+        }
+        val cu = data?.optJSONObject("contextUsage")
+        contextUsageKnown = cu != null
+        if (cu == null) {
+            windowTokens = 0
+            contextPercent = 0f
+            return
+        }
+        val tokens = cu.optInt("tokens", 0)
+        val win = cu.optInt("contextWindow", 0)
+        if (win > 0) maxWindowTokens = win
+        windowTokens = tokens
+        contextPercent = cu.optDouble("percent", 0.0).toFloat().coerceIn(0f, 100f)
     }
 
     /** 置顶/取消置顶会话 */
@@ -1519,7 +1654,11 @@ class ChatState {
         // 挂在 markRunning 上是因为它是「本轮是否在跑」的唯一收口点：
         // 开始 / 正常结束 / 中止 / 出错 / 「重新生成」都经过它。
         if (running) PiKeepAlive.acquire(AppCtx.get(), "chat", "AI 正在回复…")
-        else PiKeepAlive.release(AppCtx.get(), "chat")
+        else {
+            PiKeepAlive.release(AppCtx.get(), "chat")
+            // 回合收尾时刷新上下文用量真值（get_session_stats.contextUsage；2026-09-16）
+            bgScope.launch { runCatching { refreshContextUsage() } }
+        }
         val proj = currentProject ?: return
         val list = sessions[proj] ?: return
         val id = currentSessionId ?: return
@@ -1851,24 +1990,19 @@ class ChatState {
      * 始终指向目标回答的当前位置（见 [appendEntry] / [insertEntryAt]）。
      */
     private var runInsertAt: Int? = null
-    var windowTokens by mutableStateOf(61200)
-    var maxWindowTokens by mutableStateOf(180000)
+    // 上下文用量（**pi 真值**，2026-09-16 取代原型常量 61200 / 180000）：
+    // 由 [refreshContextUsage] 从 `get_session_stats.contextUsage` 填；窗口未知时卡上显示 `—`。
+    var windowTokens by mutableStateOf(0)
+    var maxWindowTokens by mutableStateOf(0)
+    // 用量是否已知：pi 在「压缩后还没有新回复」时给不出 tokens（agent-session.ts 的口径），
+    // 此时卡上照 pi-web 显示 `?`，不编数字。
+    var contextUsageKnown by mutableStateOf(false)
     var connectionLabel by mutableStateOf("已连接")
     // 系统提示词只读展示（2026-09-01，对齐 pi-web system 面板）：
     // **真实值 = pi 当前生效的那一份**（base prompt + 项目 context 文件 + 扩展改写），
     // 打开面板时由 [refreshSystemPrompt] 经扩展命令 `/pient-sysprompt` 回流写入 ——
     // 面板显示的必须是模型真正收到的内容（App 侧不再持有自己的提示词）。
     var systemPrompt by mutableStateOf("")
-    // 上下文用量分类明细（Hermes 上下文卡片口径；UI 原型 mock，合计 = windowTokens）
-    // 分类经 pi 源码核实：「记忆」「子代理」不参与；2026-09-14 工具 / 技能整体移除后
-    // 「工具定义」「技能」两行一并去掉。
-    var contextCategories by mutableStateOf(
-        listOf(
-            ContextCategory("conversation", "对话", 40000),
-            ContextCategory("system_prompt", "系统提示词", 9200),
-            ContextCategory("rules", "规则", 1100),
-        )
-    )
 
     // ── 输入栏：附件 chip ─────────────────────────────────
     val attachments = mutableStateListOf<Attachment>()
@@ -2107,13 +2241,3 @@ class ChatState {
     // ── 终端页状态 ────────────────────────────────────────
     var terminalIndex by mutableIntStateOf(0)
 }
-
-/**
- * 上下文用量分类明细（Hermes 上下文卡片同源结构）：
- * 接入 Pi 运行时后由 get_state / 后端 context breakdown 驱动，替换 mock。
- */
-data class ContextCategory(
-    val id: String,
-    val label: String,
-    val tokens: Int,
-)
