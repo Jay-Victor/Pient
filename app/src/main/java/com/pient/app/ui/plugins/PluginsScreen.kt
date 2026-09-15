@@ -25,6 +25,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,8 +37,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
-import com.pient.app.data.MockStore
 import com.pient.app.data.PluginItem
+import com.pient.app.runtime.PiPackages
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.components.PientDialog
 import com.pient.app.ui.components.PientSegmented
@@ -46,10 +47,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * 插件管理（**UI 壳**，2026-09-14 用户拍板：插件功能（读 settings.packages / 安装 / 更新 /
- * 移除）整体移除，保留 UI 设计与交互）：
- * 全局/项目分段；列表 = 名称+来源+开关（读 [MockStore] 占位数据，只在内存里改）；
- * FAB 安装弹窗：安装源输入框 + 官方市场说明；安装 / 更新 / 删除只作用于占位数据。
+ * 插件管理（**真数据层**，2026-09-15 接回 pi）：
+ *
+ * 页面上的每个动作 = 一条 pi 官方命令（[PiPackages]，口径见那里的 KDoc）：
+ * 列表 = `pi list`（全局段 = 用户设置里的包，项目段 = 项目设置里的包）；
+ * 安装 = `pi install <source>`（项目分段带 `-l`）；更新 = `pi update <source>` / 全部 = `pi update --extensions`；
+ * 移除 = `pi remove <source>`。装/删/更新都在终端会话「pi 包管理」里跑 —— 切到终端页就能看全过程。
+ *
+ * 行上的开关是**只读状态**（pi 里「配置了」即生效，没有包级开关）：保持 `enabled` 真值 +
+ * `onCheckedChange = null`（不灰、不改），真正的动作在详情弹窗里。
  */
 @Composable
 fun PluginsScreen(nav: NavController) {
@@ -58,6 +64,17 @@ fun PluginsScreen(nav: NavController) {
     var detailFor by remember { mutableStateOf<PluginItem?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    // ── 真数据：pi list 的结果（装/删/更新后重拉） ──
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var loadedOnce by remember { mutableStateOf(false) }
+    fun reload() {
+        scope.launch {
+            loadError = PiPackages.refresh(context)
+            loadedOnce = true
+        }
+    }
+    LaunchedEffect(Unit) { reload() }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -95,8 +112,8 @@ fun PluginsScreen(nav: NavController) {
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
             )
 
-            // 插件列表（占位数据；开关只在内存里改）
-            val list = if (segment == 0) MockStore.globalPlugins else MockStore.projectPlugins
+            // 插件列表（pi list 的真结果）
+            val list = if (segment == 0) PiPackages.global else PiPackages.project
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
@@ -109,12 +126,24 @@ fun PluginsScreen(nav: NavController) {
                 if (list.isEmpty()) {
                     item {
                         Text(
-                            if (segment == 0)
-                                "还没有配置任何插件。点右下 + 安装（npm: 包 / 本地路径）。"
-                            else
-                                "当前项目没有插件。",
+                            when {
+                                loadError != null -> "读取失败：$loadError"
+                                !loadedOnce -> "正在读取 pi 的包列表…"
+                                segment == 0 -> "还没有配置任何插件。点右下 + 安装（npm: 包 / git: / 本地路径）。"
+                                else -> "当前项目没有插件（pi install -l 装到项目里）。"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                }
+                if (PiPackages.running) {
+                    item {
+                        Text(
+                            "⏳ ${PiPackages.step}（终端页「${PiPackages.SESSION}」会话可看全过程）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(top = 8.dp),
                         )
                     }
@@ -141,23 +170,10 @@ fun PluginsScreen(nav: NavController) {
             global = segment == 0,
             onDismiss = { installOpen = false },
             onInstalled = { source ->
-                // 占位安装：往当前分段的列表里加一条（内存态；不跑 pi CLI）
+                // 真安装：pi install <source>（项目分段加 -l），跑完重拉 pi list
                 val name = parsePluginName(source)
-                val target = if (segment == 0) MockStore.globalPlugins else MockStore.projectPlugins
-                if (target.none { it.source == source }) {
-                    target.add(
-                        0,
-                        PluginItem(
-                            name = name,
-                            source = source,
-                            enabled = true,
-                            global = segment == 0,
-                            desc = "（占位数据）由安装弹窗添加",
-                            version = "1.0.0",
-                        ),
-                    )
-                }
-                toast(context, "已安装：$name")
+                PiPackages.install(context, source, local = segment == 1, onDone = { reload() })
+                toast(context, "已开始安装 $name —— 终端页「${PiPackages.SESSION}」可看进度")
                 installOpen = false
             },
         )
@@ -169,21 +185,14 @@ fun PluginsScreen(nav: NavController) {
             item = item,
             onDismiss = { detailFor = null },
             onDelete = {
-                (if (item.global) MockStore.globalPlugins else MockStore.projectPlugins)
-                    .removeAll { it.source == item.source }
-                toast(context, "已移除插件 ${item.name}")
+                PiPackages.remove(context, item.source, local = !item.global, onDone = { reload() })
+                toast(context, "已开始移除 ${item.name}")
                 detailFor = null
             },
             onUpdate = {
-                // 占位更新：把版本对齐到「最新版本」（内存态）
-                val oldList = if (item.global) MockStore.globalPlugins else MockStore.projectPlugins
-                val idx = oldList.indexOfFirst { it.source == item.source }
-                val updated = if (idx >= 0) {
-                    oldList[idx] = oldList[idx].copy(version = oldList[idx].latestVersion ?: oldList[idx].version)
-                    oldList[idx]
-                } else item
-                toast(context, "已更新 ${item.name}")
-                detailFor = updated
+                PiPackages.update(context, item.source, onDone = { reload() })
+                toast(context, "已开始更新 ${item.name}")
+                detailFor = null
             },
         )
     }
@@ -206,7 +215,8 @@ private fun toast(context: android.content.Context, msg: String) {
 
 @Composable
 private fun PluginRow(item: PluginItem, onClick: () -> Unit) {
-    var enabled by remember(item.name) { mutableStateOf(item.enabled) }
+    // 只读状态：pi 没有包级开关，「配置了」即生效（保持真值 + onCheckedChange=null，不灰不改）
+    val enabled = item.enabled
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -238,7 +248,7 @@ private fun PluginRow(item: PluginItem, onClick: () -> Unit) {
         // 溢出，会向左侵入内容文字造成视觉重叠（实测溢出 ~10dp）
         Switch(
             checked = enabled,
-            onCheckedChange = { enabled = it },
+            onCheckedChange = null,
             colors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary),
         )
     }

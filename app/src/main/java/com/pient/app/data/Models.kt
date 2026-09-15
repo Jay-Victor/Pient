@@ -888,6 +888,8 @@ data class PluginItem(
     val version: String? = null,              // 已安装版本（mock；null = 未知）
     val latestVersion: String? = null,        // 远端最新版本（mock；null = 未知/不可查）—— 「检查更新」的比对基准
     val configuredVersion: String? = null,    // 已配置版本/pinned ref（mock；null = 未配置）
+    /** pi 实际解开的落点（`pi list` 的 installedPath 行；null = 未装/未知） */
+    val installedPath: String? = null,
     val status: PluginStatus = PluginStatus.LOADED,  // 包级状态（enabled=false 时显示「已禁用」）
     val resources: List<PluginResource> = emptyList(),  // 已解析资源（mock）
 )
