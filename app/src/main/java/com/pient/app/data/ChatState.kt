@@ -779,11 +779,38 @@ class ChatState {
         val rebuilt = ArrayList<Msg>(arr.length())
         for (i in 0 until arr.length()) {
             val m = arr.optJSONObject(i) ?: continue
-            val text = piText(m).trim()
-            if (text.isEmpty()) continue
             when (m.optString("role")) {
-                "user" -> rebuilt += Msg.User(text)
-                "assistant" -> rebuilt += Msg.Assistant(text, null)
+                "user" -> {
+                    val text = piText(m).trim()
+                    if (text.isNotEmpty()) rebuilt += Msg.User(text)
+                }
+                "assistant" -> {
+                    val text = piText(m).trim()
+                    if (text.isNotEmpty()) rebuilt += Msg.Assistant(text, null)
+                    // 助手消息里带的**工具调用块**（pi 的 content 里 type="toolCall"）→ 还原成工具行。
+                    // 不做这一步，每轮开头的重建就会把工具行冲掉（实测踩过：第二轮进来看不到上一轮的工具卡）。
+                    val content = m.opt("content")
+                    if (content is JSONArray) {
+                        for (j in 0 until content.length()) {
+                            val b = content.optJSONObject(j) ?: continue
+                            if (b.optString("type") != "toolCall") continue
+                            rebuilt += Msg.ToolCall(
+                                name = b.optString("name"),
+                                // params 存原样 JSON 串（ToolRows 按 JSON 解析出 command/path/…）
+                                params = b.opt("arguments")?.toString().orEmpty(),
+                                status = ToolStatus.DONE,
+                            )
+                        }
+                    }
+                }
+                "toolResult" -> {
+                    val text = piText(m).trim()
+                    rebuilt += Msg.ToolResult(
+                        toolName = m.optString("toolName"),
+                        preview = piPreview(text),
+                        full = text.takeIf { it.isNotBlank() },
+                    )
+                }
             }
         }
         if (rebuilt.isEmpty()) return
@@ -948,6 +975,9 @@ class ChatState {
         var usage: Usage? = null
         val settled = CompletableDeferred<Unit>()
         lastPiError = null
+        // pi 的工具事件 → 消息区（这两类消息的 UI 一直都在：ToolRows 渲染 ToolCall + 紧跟的 ToolResult）
+        val toolCallAt = HashMap<String, Int>()   // toolCallId → ToolCall 消息下标
+        val toolResAt = HashMap<String, Int>()    // toolCallId → ToolResult 消息下标
         val collector = launch {
             PiRpc.events.collect { ev ->
                 when (ev.optString("type")) {
@@ -965,11 +995,60 @@ class ChatState {
                             }
                         }
                     }
-                    "tool_execution_start" -> Log.i("PientChat", "pi 工具开始：${ev.optString("toolName")}")
-                    "tool_execution_end" -> Log.i(
-                        "PientChat",
-                        "pi 工具结束：${ev.optString("toolName")} 失败=${ev.optBoolean("isError")}",
-                    )
+                    "tool_execution_start" -> {
+                        val callId = ev.optString("toolCallId")
+                        val name = ev.optString("toolName")
+                        val msgs = currentMessages
+                        toolCallAt[callId] = msgs.size
+                        appendEntry(
+                            Msg.ToolCall(
+                                name = name,
+                                // **存原样的 args JSON**：ToolRows 用 JSONObject(params) 解析出
+                                // command/path/pattern 来渲染标题（实测踩过：塞纯命令串 → 标题只剩「已运行命令」）
+                                params = ev.optJSONObject("args")?.toString().orEmpty(),
+                                status = ToolStatus.RUNNING,
+                                startedAtMs = System.currentTimeMillis(),
+                            ),
+                        )
+                        toolResAt[callId] = msgs.size
+                        appendEntry(Msg.ToolResult(toolName = name, preview = ""))
+                        Log.i(TAG_CHAT, "pi 工具开始：$name")
+                    }
+                    "tool_execution_update" -> {
+                        val callId = ev.optString("toolCallId")
+                        val idx = toolResAt[callId] ?: return@collect
+                        val text = piResultText(ev.optJSONObject("partialResult"))
+                        if (text.isNotBlank()) {
+                            replaceMessageAt(idx, Msg.ToolResult(ev.optString("toolName"), piPreview(text), text))
+                        }
+                    }
+                    "tool_execution_end" -> {
+                        val callId = ev.optString("toolCallId")
+                        val name = ev.optString("toolName")
+                        val failed = ev.optBoolean("isError")
+                        val text = piResultText(ev.optJSONObject("result"))
+                        val callIdx = toolCallAt[callId]
+                        val resIdx = toolResAt[callId]
+                        if (resIdx != null && resIdx < currentMessages.size) {
+                            replaceMessageAt(resIdx, Msg.ToolResult(name, piPreview(text), text.ifBlank { null }))
+                        }
+                        if (callIdx != null && callIdx < currentMessages.size) {
+                            val old = currentMessages[callIdx] as? Msg.ToolCall ?: Msg.ToolCall(name, "")
+                            val started = old.startedAtMs
+                            val dur = started?.let { System.currentTimeMillis() - it }
+                            replaceMessageAt(
+                                callIdx,
+                                old.copy(
+                                    status = if (failed) ToolStatus.FAILED else ToolStatus.DONE,
+                                    durationMs = dur,
+                                    // pi `edit` 会在 details 里给 unified diff（文件卡的 +N/−M 与 diff 面板靠它）
+                                    diff = ev.optJSONObject("result")?.optJSONObject("details")
+                                        ?.optString("diff")?.takeIf { it.isNotBlank() } ?: old.diff,
+                                ),
+                            )
+                        }
+                        Log.i(TAG_CHAT, "pi 工具结束：$name 失败=$failed")
+                    }
                     "agent_settled", "channel_closed" -> settled.complete(Unit)
                     "error" -> {
                         val msg = ev.optJSONObject("error")?.optString("message").orEmpty()
@@ -999,6 +1078,21 @@ class ChatState {
         if (out.isNotEmpty()) onDelta(out)
         ChatOutcome(out, usage?.takeIf { it.inTokens + it.outTokens > 0 }, think.toString())
     }
+
+    /** pi 工具结果里的文本（content 是 [{type:"text",text:…}] 形态） */
+    private fun piResultText(result: JSONObject?): String {
+        val arr = result?.optJSONArray("content") ?: return ""
+        return buildString {
+            for (i in 0 until arr.length()) {
+                val b = arr.optJSONObject(i) ?: continue
+                if (b.optString("type") == "text") append(b.optString("text"))
+            }
+        }
+    }
+
+    /** 工具行预览（截断；全文进 [Msg.ToolResult.full]，点开才看） */
+    private fun piPreview(text: String): String =
+        if (text.length <= 800) text else text.take(800) + "\n…（共 ${text.length} 字）"
 
     /** pi 事件的 usage → Pient 的 [Usage]（pi 口径：input 不含 cacheRead/cacheWrite） */
     private fun piUsage(u: JSONObject): Usage? {
