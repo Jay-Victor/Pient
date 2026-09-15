@@ -1,6 +1,7 @@
 package com.pient.app.data
 
 import com.pient.app.AppCtx
+import com.pient.app.runtime.PiKeepAlive
 
 import android.content.Context
 import android.util.Log
@@ -1513,6 +1514,12 @@ class ChatState {
     }
 
     private fun markRunning(running: Boolean) {
+        // 前台保活（2026-09-16，M5）：一轮在跑时把进程挂进前台服务 —— 用户切走 / 熄屏后
+        // pi 子进程与它的管道不会被系统清掉（清掉 = 本轮直接消失）。
+        // 挂在 markRunning 上是因为它是「本轮是否在跑」的唯一收口点：
+        // 开始 / 正常结束 / 中止 / 出错 / 「重新生成」都经过它。
+        if (running) PiKeepAlive.acquire(AppCtx.get(), "chat", "AI 正在回复…")
+        else PiKeepAlive.release(AppCtx.get(), "chat")
         val proj = currentProject ?: return
         val list = sessions[proj] ?: return
         val id = currentSessionId ?: return

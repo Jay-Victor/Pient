@@ -16,6 +16,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Shizuku 调试通道（2026-09-12）：向 Shizuku 服务申请 ADB 级授权 -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+    <!-- 前台服务保活（2026-09-16，M5）：pi 与终端会话都是应用子进程，退后台/熄屏被清即断；
+         只在「有活干」时前台化（AI 回合 / 终端脚本），见 runtime/PiKeepAlive.kt -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 通知权限（Android 13+）：没有它前台服务的通知不显示（服务本身仍可运行）；
+         是否主动申请留给「基础权限页」后续决定 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
 
     <!-- 包可见性（Android 11+）：权限页要探测 Shizuku 与各 Root 管理器是否安装，
@@ -55,6 +62,13 @@
             android:exported="false"
             android:theme="@style/Theme.Pient.CropImage"
             tools:replace="android:exported" />
+
+        <!-- 前台服务保活（2026-09-16，M5）：只在「有活干」时前台化（AI 回合 / 终端脚本），
+             pi 子进程与 stdin/stdout 管道退后台不被系统清掉；见 runtime/PiKeepAlive.kt -->
+        <service
+            android:name=".runtime.PiKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- Shizuku binder 接收 Provider（dev.rikka.shizuku:provider）：
              缺此声明时 Shizuku SDK 抛 "Please add dev.rikka.shizuku:provider"，运行/授权状态读不到 -->
