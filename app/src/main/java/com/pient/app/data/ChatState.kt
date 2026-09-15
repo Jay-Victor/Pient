@@ -565,24 +565,44 @@ class ChatState {
         groups.forEach { timeGroupRevealed[it.key] = it.sessions.size }
     }
 
-    /** 重命名项目：迁移 sessions 键、同步会话 project 字段与 currentProject；空名/重名忽略 */
-    fun renameProject(oldName: String, newNameRaw: String) {
+    /**
+     * 重命名项目。返回 null = 成功；非空 = 失败原因（调用方直接 Toast 原文）。
+     *
+     * **本地项目要连磁盘目录一起改名**（2026-09-16 修 bug）：旧实现只改记录里的 name/path ——
+     * 目录不动 → 改名后 path 指向一个不存在的目录（文件树变空、Ubuntu workspace 静默回退到随包目录），
+     * 而原目录会以「已解绑项目」的身份在本页冒出来（它的名字对不上任何项目的 path）。
+     * SAF 项目（content:// tree URI）无法按文件名重建 URI，保持「只改显示名、path 不变」。
+     */
+    fun renameProject(oldName: String, newNameRaw: String): String? {
         val newName = newNameRaw.trim()
-        if (newName.isBlank() || newName == oldName) return
-        if (projects.any { it.name == newName }) return
+        if (newName.isBlank()) return "项目名不能为空"
+        if (newName == oldName) return null
+        if (projects.any { it.name == newName }) return "已存在同名项目"
         val i = projects.indexOfFirst { it.name == oldName }
-        if (i < 0) return
+        if (i < 0) return "项目不存在"
         val old = projects[i]
-        projects[i] = old.copy(
-            name = newName,
-            // SAF 项目（content:// tree URI）重命名不改 path：URI 无法按文件名拼接重建
-            path = if (old.path.startsWith("content://")) old.path
-            else old.path.substringBeforeLast('/', old.path) + "/" + newName,
-        )
+        val saf = old.path.startsWith("content://")
+        var newPath = old.path
+        if (!saf) {
+            val src = java.io.File(old.path)
+            val parent = src.parentFile ?: return "项目路径异常，无法改名"
+            val dst = java.io.File(parent, newName)
+            if (src.exists()) {
+                if (dst.exists()) return "目录已存在同名文件夹：$newName"
+                if (!src.renameTo(dst)) return "目录改名失败（可能被占用）"
+            }
+            newPath = dst.absolutePath
+        }
+        projects[i] = old.copy(name = newName, path = newPath)
         val moved = sessions.remove(oldName) ?: mutableStateListOf()
         for (j in moved.indices) moved[j] = moved[j].copy(project = newName)
         sessions[newName] = moved
-        if (currentProject == oldName) currentProject = newName
+        if (currentProject == oldName) {
+            currentProject = newName
+            // 当前项目改了目录名：工作区指针（$P/workspace）跟着走，否则终端 / pi 还指着旧路径
+            AppCtx.get()?.let { PiRuntime.setWorkspace(it, java.io.File(newPath)) }
+        }
+        return null
     }
 
     /**

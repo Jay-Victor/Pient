@@ -448,6 +448,53 @@ object ProjectFiles {
     }
 
     /**
+     * 项目级统计（详细信息用；2026-09-16）：返回 `总字节数 to 最近修改时间`。
+     *
+     * **必须走这里，不要在 UI 组合期用 DocumentFile 递归**（旧 `computeProjectInfo` 就是那样：
+     * SAF 分支每文件 2~3 次 IPC → 几千文件的目录一打开详情弹窗就卡死/ANR，与 2026-09-12 那次
+     * 4080 文件事故同一成因）。这里复用 [listSafChildren] 的「每目录一次 cursor 查询」+
+     * [MAX_NODES] 预算；**调用方须在 IO 线程执行**。
+     */
+    fun projectStat(context: Context, project: Project): Pair<Long, Long> {
+        val uriStr = project.uri
+        if (!uriStr.isNullOrBlank()) {
+            val treeUri = runCatching { Uri.parse(uriStr) }.getOrNull() ?: return 0L to 0L
+            val rootDocId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull()
+                ?: return 0L to 0L
+            var bytes = 0L
+            var modified = 0L
+            var visited = 0
+            val stack = ArrayDeque<String>()
+            stack.addLast(rootDocId)
+            while (stack.isNotEmpty() && visited < MAX_NODES) {
+                val children = runCatching { listSafChildren(context, treeUri, stack.removeLast()) }
+                    .getOrDefault(emptyList())
+                for (e in children) {
+                    visited++
+                    if (e.isDir) {
+                        stack.addLast(e.docId)
+                    } else {
+                        bytes += e.size
+                        modified = maxOf(modified, e.modified)
+                    }
+                }
+            }
+            return bytes to modified
+        }
+        val dir = File(project.path)
+        if (!dir.exists()) return 0L to 0L
+        var bytes = 0L
+        var modified = 0L
+        dir.walkTopDown().take(MAX_NODES).forEach { f ->
+            if (f.isFile) {
+                bytes += f.length()
+                modified = maxOf(modified, f.lastModified())
+            }
+        }
+        return bytes to maxOf(modified, dir.lastModified())
+    }
+
+    /**
      * 节点统计（详细信息，2026-09-02）：返回 大小 to 最近修改时间；目录递归汇总。
      *
      * SAF 目录走 [listSafChildren]（每目录一次 query + 直接读游标里的 size/时间）；

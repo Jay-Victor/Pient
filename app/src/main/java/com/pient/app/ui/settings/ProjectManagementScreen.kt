@@ -42,6 +42,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -64,6 +65,7 @@ import com.pient.app.ui.components.DetailRow
 import com.pient.app.ui.components.DividerLine
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.components.PientDialog
+import com.pient.app.ui.components.ProjectInfo
 import com.pient.app.ui.components.SectionHeader
 import com.pient.app.ui.components.computeProjectInfo
 import java.io.File
@@ -76,7 +78,8 @@ import java.io.File
  * - 会话记录：搜索框（placeholder 说明）+ 「已选择 0/N 条」/「全选」「取消」（取消仅在
  *   已选择后亮蓝）+ 全部会话列表（跨项目，圆形选择框，选中圆内 √；行尾三点菜单 = 重命名 / 删除）+
  *   选中后底部出现「操作已选会话（N）」→ 弹窗（导出会话 / 删除会话 选择项 + 取消 / 确定）。
- *   导出为原型占位 Toast；删除真实执行。
+ *   导出与删除都是真实执行（导出 → 系统「下载/Pient/」的 Markdown，2026-09-16 真实化）。
+ *   2026-09-16 另修两处：① 项目重命名现在会连磁盘目录一起改；② 「详细信息」统计下放 IO 线程。
  */
 @Composable
 fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
@@ -544,7 +547,9 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
         // ── 项目详细信息弹窗 ──
         projectDetailFor?.let { name ->
             val project = chatState.projects.firstOrNull { it.name == name } ?: return@let
-            val info = remember(project.path, project.uri) { computeProjectInfo(context, project) }
+            // 统计放 IO 线程（2026-09-16 修）：SAF 大目录几千文件，组合期直接扫会卡死/ANR
+            var info by remember(project.path, project.uri) { mutableStateOf<ProjectInfo?>(null) }
+            LaunchedEffect(project.path, project.uri) { info = computeProjectInfo(context, project) }
             Box(Modifier.fillMaxSize()) {
                 PientDialog(
                     title = "详细信息",
@@ -558,8 +563,8 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         DetailRow("位置", project.path)
-                        DetailRow("大小", info.size)
-                        DetailRow("修改时间", info.modified)
+                        DetailRow("大小", info?.size ?: "统计中…")
+                        DetailRow("修改时间", info?.modified ?: "统计中…")
                     }
                 }
             }
@@ -577,7 +582,10 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                     confirmEnabled = newName.isNotBlank() &&
                         (newName.trim() == name || chatState.projects.none { it.name == newName.trim() }),
                     onConfirm = {
-                        chatState.renameProject(name, newName)
+                        // 失败（目录被占用 / 同名目录）如实提示（2026-09-16 起 renameProject 会连目录一起改）
+                        chatState.renameProject(name, newName)?.let { err ->
+                            Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                        }
                         projectRenameFor = null
                     },
                 ) {

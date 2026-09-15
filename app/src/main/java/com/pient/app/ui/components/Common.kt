@@ -602,43 +602,24 @@ fun DividerLine(modifier: Modifier = Modifier) {
 
 data class ProjectInfo(val size: String, val modified: String)
 
-/** 递归统计项目文件夹大小与最近修改时间；目录不存在时返回 0 B / — */
-fun computeProjectInfo(context: android.content.Context, project: com.pient.app.data.Project): ProjectInfo {
-    var bytes = 0L
-    var modified = 0L
-    val uriStr = project.uri
-    if (uriStr != null) {
-        // SAF 项目：DocumentFile 递归（listFiles 依赖持久化授权）
-        val doc = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, android.net.Uri.parse(uriStr))
-        fun walk(d: androidx.documentfile.provider.DocumentFile) {
-            for (child in d.listFiles()) {
-                if (child.isDirectory) walk(child) else {
-                    bytes += child.length()
-                    modified = maxOf(modified, child.lastModified())
-                }
-            }
-        }
-        try {
-            if (doc != null) {
-                walk(doc)
-                modified = maxOf(modified, doc.lastModified())
-            }
-        } catch (e: Exception) {
-            // 授权缺失/IO 异常：保持 0 B
-        }
-    } else {
-        val dir = java.io.File(project.path)
-        if (dir.exists()) {
-            dir.walkTopDown().forEach { f ->
-                if (f.isFile) {
-                    bytes += f.length()
-                    modified = maxOf(modified, f.lastModified())
-                }
-            }
-            modified = maxOf(modified, dir.lastModified())
-        }
+/**
+ * 项目文件夹统计：大小 / 最近修改时间（位置由调用方展示）。
+ *
+ * **suspend + IO 线程**（2026-09-16 修）：旧实现是普通函数、SAF 分支用 `DocumentFile.listFiles()`
+ * 逐项取 length/lastModified（每文件 2~3 次 IPC），而两个调用点都在**组合期主线程**用
+ * `remember { computeProjectInfo(...) }` 直接调 —— 几千文件的 SAF 目录一打开详情弹窗就卡死/ANR
+ * （与 2026-09-12 那次 4080 文件事故同一成因）。现在统一走 [ProjectFiles.projectStat]
+ * （每目录一次 cursor 查询 + 节点预算），并在 IO 线程执行；调用点改为 LaunchedEffect + 加载态。
+ */
+suspend fun computeProjectInfo(
+    context: android.content.Context,
+    project: com.pient.app.data.Project,
+): ProjectInfo {
+    val (bytes, modified) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        com.pient.app.data.ProjectFiles.projectStat(context, project)
     }
-    val sizeText = if (bytes > 0 || (uriStr == null && java.io.File(project.path).exists())) formatSize(bytes) else "0 B"
+    val exists = project.uri != null || java.io.File(project.path).exists()
+    val sizeText = if (bytes > 0 || exists) formatSize(bytes) else "0 B"
     val timeText = if (modified > 0) {
         java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date(modified))
     } else {

@@ -866,7 +866,9 @@ fun SessionDrawer(
     // 项目详细信息弹窗（2026-09-02 新增：位置 / 大小 / 修改时间；单「确定」按钮）
     projectDetailFor?.let { name ->
         val project = chatState.projects.firstOrNull { it.name == name } ?: return@let
-        val info = remember(project.path, project.uri) { computeProjectInfo(context, project) }
+        // 统计放 IO 线程（2026-09-16 修；与项目管理页同一口径）
+        var info by remember(project.path, project.uri) { mutableStateOf<ProjectInfo?>(null) }
+        LaunchedEffect(project.path, project.uri) { info = computeProjectInfo(context, project) }
         Box(Modifier.fillMaxSize()) {
             PientDialog(
                 title = "详细信息",
@@ -880,8 +882,8 @@ fun SessionDrawer(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     DetailRow("位置", ProjectFiles.readablePath(project.path))
-                    DetailRow("大小", info.size)
-                    DetailRow("修改时间", info.modified)
+                    DetailRow("大小", info?.size ?: "统计中…")
+                    DetailRow("修改时间", info?.modified ?: "统计中…")
                 }
             }
         }
@@ -1026,7 +1028,10 @@ fun SessionDrawer(
                 confirmEnabled = newName.isNotBlank() &&
                     (newName.trim() == name || chatState.projects.none { it.name == newName.trim() }),
                 onConfirm = {
-                    chatState.renameProject(name, newName)
+                    // 失败（目录被占用 / 同名目录）如实提示，不再静默「只改记录」（2026-09-16）
+                    chatState.renameProject(name, newName)?.let { err ->
+                        android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_SHORT).show()
+                    }
                     projectRenameFor = null
                 },
             ) {
