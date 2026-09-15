@@ -202,6 +202,9 @@ object PiRpc {
     /** 会话树（节点 = entry，含 id/parentId；leafId = 当前活跃叶） */
     suspend fun getTree(): JSONObject? = dataOf(send(JSONObject().put("type", "get_tree")))
 
+    /** 当前活跃路径上的消息（`get_messages`；切分支/切会话后用来重建界面消息流） */
+    suspend fun getMessages(): JSONObject? = dataOf(send(JSONObject().put("type", "get_messages")))
+
     /** 全部条目（append 序；传 since = 增量拉取，pi 用它当游标） */
     suspend fun getEntries(since: String? = null): JSONObject? {
         val cmd = JSONObject().put("type", "get_entries")

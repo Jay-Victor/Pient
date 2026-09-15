@@ -82,6 +82,11 @@ import kotlin.math.min
 @Composable
 fun TreeCanvasPanel(chatState: ChatState) {
     val tree = chatState.branchTree
+    // 进画布即拉一次 pi 的会话树（会话映射下这才是真相源；失败不影响本地回落）
+    LaunchedEffect(Unit) {
+        // bind 而不是只 refresh：通道没起时先起（否则 get_tree 落空 → 整页空白）
+        runCatching { chatState.bindPiSession() }
+    }
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
 
@@ -147,7 +152,9 @@ fun TreeCanvasPanel(chatState: ChatState) {
     // 锚定**活跃叶子**（当前所在节点 = 最右节点）——否则两端都会被裁掉、看不到当前位置
     LaunchedEffect(viewport, tree) {
         if (fitted || viewport == IntSize.Zero || layout.isEmpty()) return@LaunchedEffect
-        val actives = layout.filter { it.node.active }
+        // 空活跃集兜底：pi 侧还没给出 leaf（新会话/刚切换）时，树里可能一个 active 都没有 ——
+        // 原写法 `actives.minOf{}` 会抛 NoSuchElementException 直接崩（实测崩过）。
+        val actives = layout.filter { it.node.active }.ifEmpty { layout }
         val minX = actives.minOf { xOf(it.depth) }
         val maxX = actives.maxOf { xOf(it.depth) } + cardW
         val minY = actives.minOf { yOf(it.row) }
@@ -296,7 +303,14 @@ fun TreeCanvasPanel(chatState: ChatState) {
                 icon = Icons.Outlined.CallSplit,
                 desc = "从此处分支",
                 enabled = selectedNode != null,
-                onClick = { switchTo(chatState, selectedId) },
+                // **会话外分支**（2026-09-14）：pi 的 fork → 新会话文件 → Pient 建一个绑定它的新会话。
+                // 与左边那个「切换分支」（会话内分支 = 同一个文件里移动活跃叶）是两件事：
+                // 前者留档案、后者就地换路。
+                onClick = {
+                    selectedId?.let { chatState.forkPiSession(it) }
+                    detailOpen = false
+                    chatState.activePanel = Panel.MESSAGES
+                },
             )
             TreeFab(
                 icon = Icons.Outlined.AltRoute,
@@ -388,6 +402,38 @@ fun TreeCanvasPanel(chatState: ChatState) {
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
+                    // ── 节点动作（2026-09-14 会话映射）──
+                    // 左：会话内分支（同一个 pi 会话文件里移动活跃叶 = pi 的 /tree）
+                    // 右：会话外分支（pi 的 fork → 新会话文件 → Pient 里新建一个绑它的会话）
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(top = 14.dp),
+                    ) {
+                        Text(
+                            "切换到此分支",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .clickable {
+                                    detailOpen = false
+                                    switchTo(chatState, selectedId)
+                                }
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                        )
+                        Text(
+                            "从此处分叉新会话",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .padding(start = 10.dp)
+                                .clickable {
+                                    detailOpen = false
+                                    chatState.forkPiSession(selectedNode.id)
+                                    chatState.activePanel = Panel.MESSAGES
+                                }
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
                         )
                     }
                 }

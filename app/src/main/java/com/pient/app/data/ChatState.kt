@@ -715,6 +715,13 @@ class ChatState {
         val id = currentSessionId ?: return
         val rec = sessionRecord(id) ?: return
         runCatching {
+            // 通道没起就自己起（画布、切会话这些入口没有"发送"那一路的启动逻辑）——
+            // 否则 getTree/switchSession 全落空，画布会是空的
+            val cfg = selectedModel?.provider?.let { AiConfigStore.configs[it] }
+            val model = cfg?.models?.firstOrNull()
+            if (PiRpc.usable() && cfg != null && !model.isNullOrBlank()) {
+                PiRpc.start(cfg.providerId, model)
+            }
             val file = rec.piSessionFile
             if (file.isNullOrBlank()) {
                 PiRpc.newSession()
@@ -728,6 +735,7 @@ class ChatState {
                 PiRpc.switchSession(file)
             }
             refreshPiTree()
+            syncMessagesFromPi()
         }.onFailure { Log.w(TAG_CHAT, "绑 pi 会话失败：${it.message}") }
     }
 
@@ -746,6 +754,40 @@ class ChatState {
         val data = PiRpc.getTree() ?: return
         piLeafId = data.optString("leafId").takeIf { it.isNotBlank() && it != "null" }
         piTree = piTreeFromJson(data)
+    }
+
+    /**
+     * **用 pi 的当前上下文重建消息流**（2026-09-14）：切会话 / 切分支之后调用。
+     *
+     * 为什么需要：pi 的会话文件才是真相源 —— 用户在画布上切了分支，pi 的上下文已经换了，
+     * 界面必须跟着换（否则会「pi 在 A 分支、界面还停在 B 分支」）。rpc 的 `get_messages`
+     * 返回的就是**当前活跃路径**上的消息。
+     *
+     * 本切片只做**文本消息**的镜像（工具卡/附件等内容部件的还原是下一步），
+     * 因此只在 pi 侧发生结构性变化（切会话/切分支）时调用，**不在每轮结束后调用** ——
+     * 免得把流式过程中本地渲染的工具卡冲掉。
+     */
+    suspend fun syncMessagesFromPi() {
+        val id = currentSessionId ?: return
+        val rec = sessionRecord(id) ?: return
+        if (rec.piSessionFile.isNullOrBlank() || !PiRpc.usable()) return
+        val arr = PiRpc.getMessages()?.optJSONArray("messages") ?: return
+        val rebuilt = ArrayList<Msg>(arr.length())
+        for (i in 0 until arr.length()) {
+            val m = arr.optJSONObject(i) ?: continue
+            val text = piText(m).trim()
+            if (text.isEmpty()) continue
+            when (m.optString("role")) {
+                "user" -> rebuilt += Msg.User(text)
+                "assistant" -> rebuilt += Msg.Assistant(text, null)
+            }
+        }
+        if (rebuilt.isEmpty()) return
+        val list = messagesBySession.getOrPut(id) { mutableStateListOf() }
+        list.clear()
+        list.addAll(rebuilt)
+        leafBySession[id] = piLeafId
+        Log.i(TAG_CHAT, "消息流已按 pi 上下文重建：${rebuilt.size} 条")
     }
 
     /** pi `get_tree` → [SessionTreeNode]（只把**用户消息**当节点，与其后的助手文本做 exchange —— 与本地画布同口径） */
@@ -818,7 +860,12 @@ class ChatState {
             )
         }
         val topNodes = userIds.filter { nearestUserAncestor(it) == null }
-        val built = topNodes.map { build(it) }
+        val built = topNodes.map { build(it) }.toMutableList()
+        // 兜底：pi 侧还没给 leaf（或 leaf 不在任何用户节点路径上）时，把最后一个顶层节点标成"当前"，
+        // 保证画布至少有一个 active（否则画布的初始视口适配会抛 NoSuchElementException，实测崩过）
+        if (built.isNotEmpty() && built.none { it.active }) {
+            built[built.lastIndex] = built.last().copy(active = true)
+        }
         // 画布只认单根：多个根（分叉起点不同）时包一个合成根
         return if (built.size == 1) built[0] else SessionTreeNode(
             id = "pi-root",
@@ -1332,6 +1379,7 @@ class ChatState {
                 runCatching { PiRpc.navigate(nodeId) }
                     .onFailure { Log.w(TAG_CHAT, "pi 会话内分支跳转失败：${it.message}") }
                 refreshPiTree()
+                syncMessagesFromPi()
             }
             return true
         }
