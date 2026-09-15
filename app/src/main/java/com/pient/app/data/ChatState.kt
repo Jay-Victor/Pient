@@ -632,7 +632,7 @@ class ChatState {
             val modelId = cfg.models.firstOrNull()
             if (!modelId.isNullOrBlank() && PiRpc.usable() && PiRpc.start(cfg.providerId, modelId)) {
                 bindPiSession()          // 会话映射：懒建 / 切到本会话对应的 pi 会话文件（失败不阻断本轮）
-                return runChatViaPi(cfg, history, onDelta, onThinking)
+                return runChatViaPi(cfg, history, media, onDelta, onThinking)
             }
         }
         // 思考模式的总开关：null = 不给服务商发思考参数、且**服务商自带的推理内容一律不展示不落库**
@@ -966,10 +966,24 @@ class ChatState {
     private suspend fun runChatViaPi(
         cfg: ProviderConfig,
         history: List<Pair<String, String>>,
+        media: List<WirePart>,
         onDelta: (String) -> Unit,
         onThinking: (String) -> Unit,
     ): ChatOutcome = coroutineScope {
         val userText = history.lastOrNull { it.first == "user" }?.second.orEmpty()
+        // 附件直发：pi 的 `prompt` 支持 images（ImageContent = {type,data,mimeType}，见 pi docs/rpc.md）。
+        // media 里已经是 base64 部件（[MediaInline] 按媒体开关与上限筛过），这里只挑图片 ——
+        // pi 的 ImageContent 只有图片这一种；音频/视频在 pi 通道给一行占位说明，不让用户误以为发出去了。
+        val piImages = media.filter { it.type == "image" }.map { part ->
+            JSONObject()
+                .put("type", "image")
+                .put("data", part.base64)
+                .put("mimeType", part.mime.ifBlank { "image/png" })
+        }
+        val skippedMedia = media.count { it.type != "image" }
+        val promptText = if (skippedMedia > 0) {
+            "$userText\n\n[附件未直发] 另有 $skippedMedia 个非图片附件（pi 通道只直发图片）"
+        } else userText
         val text = StringBuilder()
         val think = StringBuilder()
         var usage: Usage? = null
@@ -1061,7 +1075,7 @@ class ChatState {
                 }
             }
         }
-        val res = PiRpc.prompt(userText)
+        val res = PiRpc.prompt(promptText, piImages)
         if (res != null && !res.optBoolean("success", true)) {
             collector.cancel()
             throw AiException(res.optString("error").ifBlank { "pi 拒绝了这次请求" })
