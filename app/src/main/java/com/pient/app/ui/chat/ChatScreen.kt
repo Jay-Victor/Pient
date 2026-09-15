@@ -462,6 +462,10 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                                 attachSheetOpen = false
                                 nav.navigate("model_config")
                             },
+                            onOpenEnvSetup = {
+                                attachSheetOpen = false
+                                nav.navigate("terminal_setup")
+                            },
                         )
                         Panel.FILES -> FilesPanel(chatState)
                         Panel.TERMINAL -> TerminalPanel(chatState, nav)
@@ -977,6 +981,7 @@ private fun MessagesPanel(
     onOpenLocator: () -> Unit,
     onMessageLongPress: (Int, Rect) -> Unit,
     onConfigureAi: () -> Unit,
+    onOpenEnvSetup: () -> Unit,
 ) {
     if (!startupReady) {
         // 首屏数据未就绪：先留空（等待期间由开屏页盖住；关掉开屏动画时也不显示引导清单，
@@ -986,7 +991,15 @@ private fun MessagesPanel(
     if (chatState.currentProject == null || !chatState.aiConfigured) {
         // 2026-09-08 用户定：项目与 AI 配置两者齐备前，消息区显示引导清单
         // （任一未完成即显示，已完成步骤打勾提示）
-        FirstRunGuide(chatState = chatState, onConfigureAi = onConfigureAi)
+        // **环境（pi 就绪）不参与这条判定**（2026-09-15 修）：`piReadiness` 冷启动时是 Unknown，
+        // 拿它当门会「每次打开都先闪一屏引导」；而且 pi 起不来时会把用户已有的会话整个顶掉。
+        // 环境问题的唯一出口 = 聊天页上方那条就绪条（PiUnreadyStrip：说明 + 重试 + 环境配置，
+        // 并负责拦发送、保住草稿）；引导清单里那一步只是给「全新用户」看的清单项。
+        FirstRunGuide(
+            chatState = chatState,
+            onConfigureAi = onConfigureAi,
+            onOpenEnvSetup = onOpenEnvSetup,
+        )
         return
     }
     ChatMessages(

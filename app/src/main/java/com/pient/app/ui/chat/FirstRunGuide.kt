@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -52,17 +53,22 @@ import java.io.File
  * 聊天页首次引导（2026-09-08 用户定：移除 mock 后初次进入无项目，2026-09-08 晚迭代为
  * 双步骤清单——两个条件任一未满足即显示引导，已完成步骤打勾提示，两者齐备才进入聊天）：
  * ① 创建项目（新建文件夹；2026-09-14 用户拍板：移除 SAF「选择本地文件夹」）；
- * ② 配置 AI 模型：跳转服务商与模型配置页，「测试连接」成功后标记完成。
+ * ② 配置 AI 模型：跳转服务商与模型配置页，「测试连接」成功后标记完成；
+ * ③ 配置 Ubuntu 环境（2026-09-15 加，要求 2）：pi 本体随 Pient 预置，但**跑 pi 的 Node 环境不随包**，
+ *    首次要在「环境配置」里装一次（node + rg/fd）；这一项以 **pi 通道就绪** 为判据 ——
+ *    因为它正是「环境配好了、pi 真的起得来」的唯一可信信号（与聊天页的就绪条同源）。
  */
 @Composable
 fun FirstRunGuide(
     chatState: ChatState,
     onConfigureAi: () -> Unit,
+    onOpenEnvSetup: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var createDialogOpen by remember { mutableStateOf(false) }
     val projectDone = chatState.currentProject != null
     val aiDone = chatState.aiConfigured
+    val envDone = chatState.piReadiness == ChatState.PiReadiness.Ready
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -112,6 +118,24 @@ fun FirstRunGuide(
                 desc = if (aiDone) "已通过连接测试" else "接入服务商与模型，测试连接成功后即可对话",
                 done = aiDone,
                 onClick = onConfigureAi,
+                modifier = Modifier.padding(top = 10.dp),
+            )
+            GuideActionCard(
+                icon = Icons.Outlined.Terminal,
+                title = "配置 Ubuntu 环境",
+                // 三态文案（2026-09-15 修）：
+                // - 已完成 → 打勾 + 一句结论；
+                // - **上一步（AI 模型）还没配时不说"检测中/未就绪"**：那时 pi 根本没法起，
+                //   探针给的原因会是「没有可用的服务商 / 模型」—— 那是第二步的事，摆在环境这一步会串味；
+                // - 其余 → 探针给的真实原因（rootfs 未解 / 缺 Node / 通道起不来…）。
+                desc = when {
+                    envDone -> "环境已就绪：Node 与 pi 可用"
+                    !aiDone -> "到「环境配置」装 Node.js（pi 是 Node 程序；rg/fd 是它的搜索工具）"
+                    chatState.piUnreadyReason.isNotBlank() -> chatState.piUnreadyReason
+                    else -> "到「环境配置」装 Node.js（pi 是 Node 程序；rg/fd 是它的搜索工具）"
+                },
+                done = envDone,
+                onClick = onOpenEnvSetup,
                 modifier = Modifier.padding(top = 10.dp),
             )
         }
