@@ -980,7 +980,10 @@ class ChatState {
         val toolResAt = HashMap<String, Int>()    // toolCallId → ToolResult 消息下标
         val collector = launch {
             PiRpc.events.collect { ev ->
-                when (ev.optString("type")) {
+                val evType = ev.optString("type")
+                // 打点：非流式事件都记一行（message_update 太多不记）——排查"工具事件有没有到收集器"
+                if (evType != "message_update") Log.i(TAG_CHAT, "pi 事件：$evType")
+                when (evType) {
                     "message_update" -> {
                         ev.optJSONObject("usage")?.let { u -> piUsage(u)?.let { usage = it } }
                         val d = ev.optJSONObject("assistantMessageEvent") ?: return@collect
