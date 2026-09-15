@@ -71,7 +71,14 @@ object PiSkillsMarket {
         return fallback
     }
 
-    /** 安装（或更新）一条市场技能：`npx skills add <pkg> -y --agent pi [-g]` */
+    /**
+     * 安装（或更新）一条市场技能：`npx skills add <pkg> -y --agent pi [-g]`。
+     *
+     * **前置自检 git**（2026-09-16 真机实测）：skills CLI 的市场条目都是 `owner/repo@skill`，
+     * 它靠 `git clone` 拉仓库 —— guest 里没有 git 时它只打印
+     * `Failed to clone …: Error: spawn git ENOENT`，退回页面只有一句「安装失败（退出码 …）」，
+     * 用户看不出该干什么。这里先查一次并给出可执行的下一步（git 在「环境配置 → 基础与开发」里）。
+     */
     fun install(
         context: Context,
         pkg: String,
@@ -82,21 +89,31 @@ object PiSkillsMarket {
             append("npx -y skills add ").append(shellQuote(pkg)).append(" -y --agent pi")
             if (global) append(" -g")
         }
+        val guard = "if ! command -v git >/dev/null 2>&1; then " +
+            "echo '[技能市场] 缺少 git —— 技能仓库是用 git 克隆的。请到「环境配置 → 基础与开发」" +
+            "勾选 Git 安装一次，再回来装技能。'; exit 3; fi; "
         // 项目作用域要在项目目录里跑（skills CLI 按 cwd 找 .agents/skills）；全局则无所谓
-        val cmd = if (global) args else "cd /workspace 2>/dev/null; $args"
+        val cmd = if (global) guard + args else "cd /workspace 2>/dev/null; " + guard + args
         return GuestScripts.runInTerminal(context, SESSION, "安装技能 $pkg", cmd, onDone)
     }
 
     // ─────────────────────────── 搜索实现 ───────────────────────────
 
-    /** 主通道：skills.sh 的 JSON 接口（与 pi-web 完全一致） */
-    private fun searchViaApi(query: String, limit: Int): List<Hit> {
+    /**
+     * 主通道：skills.sh 的 JSON 接口（与 pi-web 完全一致）。
+     *
+     * **必须在 IO 线程**（2026-09-16 实测修的 bug）：这里是阻塞式 `execute()`，
+     * 而调用方是 Compose 的 `LaunchedEffect`（Main dispatcher）——直接调会抛
+     * `NetworkOnMainThreadException`，它的 `message` 是 **null**，日志里只看得到
+     * 「skills.sh 搜索失败（回落 npx）：null」，很容易被当成网络问题。
+     */
+    private suspend fun searchViaApi(query: String, limit: Int): List<Hit> = withContext(Dispatchers.IO) {
         val url = "$SEARCH_API_BASE/api/search?q=${enc(query)}&limit=$limit"
         val req = Request.Builder().url(url).header("accept", "application/json").build()
         client.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) throw IllegalStateException("skills.sh HTTP ${resp.code}")
             val body = resp.body?.string().orEmpty()
-            val skills = JSONObject(body).optJSONArray("skills") ?: return emptyList()
+            val skills = JSONObject(body).optJSONArray("skills") ?: return@withContext emptyList()
             val hits = ArrayList<Hit>()
             for (i in 0 until skills.length()) {
                 val o = skills.optJSONObject(i) ?: continue
@@ -112,7 +129,7 @@ object PiSkillsMarket {
                     url = if (slug.isNotEmpty()) "$SEARCH_API_BASE/$slug" else "",
                 )
             }
-            return hits.sortedByDescending { parseInstalls(it.installs) }
+            return@withContext hits.sortedByDescending { parseInstalls(it.installs) }
         }
     }
 
