@@ -87,6 +87,42 @@ object UsageStore {
         records.minOfOrNull { it.at }?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate() }
 
     /**
+     * 一条用量的费用（**人民币**）—— 与用量页同一套口径：
+     * 服务商直接返回的费用（USD，如 OpenRouter）优先；否则按生效定价折算
+     * （按次计费 = 每次请求价；按 Token 计费 = 输入/缓存读/缓存写/输出的每百万价），
+     * 币种按 pricing.currency 折成人民币。
+     *
+     * **唯一实现**（2026-09-16）：[daily] 与聊天页消息卡的费用都走它 —— 此前消息卡直接显示
+     * `usage.costUsd`，DeepSeek 这类不返回费用的服务商永远显示 `$0.0`（还和用量页的 ¥ 对不上）。
+     */
+    fun cnyCostOf(provider: String, model: String, usage: Usage): Double {
+        val p = AiConfigStore.effectivePricing(provider, model)
+        val native = when {
+            usage.costUsd > 0 -> usage.costUsd
+            p.billingMode == BillingMode.COUNT -> p.pricePerRequest
+            else -> (usage.inTokens * p.inputPerMillion +
+                usage.cacheTokens * p.cachedInputPerMillion +
+                usage.cacheWriteTokens * (p.cacheWritePerMillion.takeIf { it > 0.0 } ?: p.inputPerMillion) +
+                usage.outTokens * p.outputPerMillion) / PER_MILLION
+        }
+        val currency = if (usage.costUsd > 0) PricingCurrency.USD else p.currency
+        return toCny(native, currency, AiConfigStore.usdToCnyRate)
+    }
+
+    /**
+     * 只拿到模型名时解析服务商（消息卡只存了模型名）：台账里最近出现过的 → 配置里模型清单命中的
+     * → 空串（空串时价格表会走「模型名回退」那一层，仍能定价）。
+     */
+    fun providerOf(model: String): String =
+        records.lastOrNull { it.model == model }?.provider
+            ?: AiConfigStore.configs.entries.firstOrNull { it.value.models.contains(model) }?.key
+            ?: ""
+
+    /** 台账记录 → [Usage]（[cnyCostOf] 要吃 Usage；只用于计费，不含缓存写以外的语义） */
+    private fun recordUsage(r: UsageRecord): Usage =
+        Usage(r.inTokens, r.outTokens, r.cacheTokens, r.cost, r.cacheWriteTokens)
+
+    /**
      * 日期 → 模型 → 当日用量（堆叠图数据源）。
      * 费用口径按 Operit：先取生效定价（用户覆盖 > 内置表三级查找），
      * 按 Token 计费 = 输入×输入价 + 缓存读取×缓存输入价 + 缓存写入×输入价 + 输出×输出价（每百万 tokens）；
@@ -112,20 +148,14 @@ object UsageStore {
                 r.cacheWriteTokens * (pricing.cacheWritePerMillion.takeIf { it > 0.0 }
                     ?: pricing.inputPerMillion)) / PER_MILLION
             val outNative = r.outTokens * pricing.outputPerMillion / PER_MILLION
-            val tokenNative = inNative + outNative
-            val nativeTotal = when {
-                r.cost > 0 -> r.cost                                        // 服务商直接返回的费用（USD）
-                pricing.billingMode == BillingMode.COUNT -> pricing.pricePerRequest
-                else -> tokenNative
-            }
-            val costCny = toCny(nativeTotal, currency, rate)
-            // 展示用的输入/输出拆分：按次计费不拆（图例显示「按次」）；服务商只给总额时按 token 占比拆
+            // 总费用走与聊天页消息卡同一条链（cnyCostOf），这里只额外算输入/输出拆分给堆叠柱用
+            val totalCny = cnyCostOf(r.provider, r.model, recordUsage(r))
             val (inCny, outCny) = when {
-                pricing.billingMode == BillingMode.COUNT -> 0.0 to costCny
+                pricing.billingMode == BillingMode.COUNT -> 0.0 to totalCny
                 r.cost > 0 -> {
                     val total = (inputTok + outputTok).toDouble()
                     val share = if (total > 0) inputTok / total else 0.0
-                    costCny * share to costCny * (1 - share)
+                    totalCny * share to totalCny * (1 - share)
                 }
                 else -> toCny(inNative, currency, rate) to toCny(outNative, currency, rate)
             }
@@ -137,7 +167,7 @@ object UsageStore {
                     requests = 1,
                     inputTokens = inputTok,
                     outputTokens = outputTok,
-                    cost = costCny,
+                    cost = totalCny,
                     inputCost = inCny,
                     outputCost = outCny,
                     billingMode = pricing.billingMode,
@@ -149,7 +179,7 @@ object UsageStore {
                     requests = cur.requests + 1,
                     inputTokens = cur.inputTokens + inputTok,
                     outputTokens = cur.outputTokens + outputTok,
-                    cost = cur.cost + costCny,
+                    cost = cur.cost + totalCny,
                     inputCost = cur.inputCost + inCny,
                     outputCost = cur.outputCost + outCny,
                 )

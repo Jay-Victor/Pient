@@ -2,6 +2,7 @@ package com.pient.app.ui.chat
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
+import com.pient.app.data.UsageStore
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -1211,9 +1212,14 @@ private fun AssistantCard(
         }
         MarkdownText(msg.markdown, modifier = Modifier.padding(top = 2.dp))
         if (msg.usage != null) {
+            // 费用口径与用量页一致（2026-09-16 修）：走 UsageStore.cnyCostOf（服务商回传的费用优先，
+            // 否则按内置价格表折算成 ¥）。原来直接显示 usage.costUsd —— DeepSeek 这类不返回费用
+            // 的服务商每条都显示 `$0.0`，而且和用量页的 ¥ 币种也对不上。
+            val modelName = msg.model.orEmpty()
+            val costCny = UsageStore.cnyCostOf(UsageStore.providerOf(modelName), modelName, msg.usage)
             Text(
                 "in ${tok(msg.usage.inTokens)} · out ${tok(msg.usage.outTokens)} · " +
-                    "cache ${tok(msg.usage.cacheTokens)} · \$${msg.usage.costUsd}",
+                    "cache ${tok(msg.usage.cacheTokens)} · ¥${money(costCny)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.95f),
                 modifier = Modifier.padding(top = 4.dp),
@@ -1392,6 +1398,17 @@ private fun ThinkingCard(msg: Msg.Thinking, expandedDefault: Boolean = false, bo
 private fun tok(n: Int): String {
     val k = n / 1000
     return if (k > 0) "${k}.${(n % 1000) / 100}k" else "$n"
+}
+
+/**
+ * 金额显示（消息卡用量行；2026-09-16）：≥1 元两位小数、≥0.01 三位、更小四位 ——
+ * 一条消息通常只有几厘钱，固定两位会全显示成 ¥0.00，看不出差别。
+ */
+private fun money(v: Double): String = when {
+    v <= 0.0 -> "0"
+    v >= 1.0 -> String.format(java.util.Locale.US, "%.2f", v)
+    v >= 0.01 -> String.format(java.util.Locale.US, "%.3f", v)
+    else -> String.format(java.util.Locale.US, "%.4f", v)
 }
 
 /**
