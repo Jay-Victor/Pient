@@ -152,14 +152,6 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
         mutableStateOf(TextFieldValue(""))
     }
 
-    // 画布「无回答节点」的改写重问（2026-09-15）：把该节点消息文本回填输入栏并聚焦
-    LaunchedEffect(chatState.prefillInput) {
-        val t = chatState.prefillInput ?: return@LaunchedEffect
-        inputText = TextFieldValue(t, TextRange(t.length))
-        chatState.prefillInput = null
-        inputFocusTick++
-    }
-
     // pi 就绪态（2026-09-15 拍板 B）：进页面即测一次（通道没起时顺带起一次）
     LaunchedEffect(Unit) { chatState.refreshPiReadiness() }
 
@@ -499,7 +491,11 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                         onOpenModelSelector = { modelSheetOpen = true },
                         onOpenAttach = { attachSheetOpen = !attachSheetOpen },
                         onToggleContextCard = { contextCardOpen = !contextCardOpen },
-                        onToggleSystemPrompt = { systemPromptOpen = !systemPromptOpen },
+                        onToggleSystemPrompt = {
+                            systemPromptOpen = !systemPromptOpen
+                            // 打开面板时向 pi 取**真实下发的那一份**（App 侧已不再持有提示词）
+                            if (systemPromptOpen) scope.launch { chatState.refreshSystemPrompt() }
+                        },
                         onSend = { text ->
                             // pi 未就绪 → 阻断发送，并把草稿**原样还回**输入栏（2026-09-15 拍板 B；
                             // 输入栏在点击时已自行清空文本，这里补回来，避免"消息没发出去还丢了草稿"）
@@ -661,11 +657,11 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                     // 手动压缩（移动端对桌面端 `/compact` 的等价入口）；结果以压缩卡形式落到聊天页
                     onCompact = {
                         scope.launch {
-                            // null = 成功；非空 = 如实回报的原因（内核口径，不再提「宿主」）
+                            // null = 成功；非空 = 如实回报的原因（pi 原生 compact）
                             val reason = chatState.compactNow()
                             Toast.makeText(
                                 context,
-                                reason ?: "已压缩上下文 · 摘要见聊天页的压缩卡",
+                                reason ?: "已压缩上下文（pi 原生）：聊天页已按压缩后的上下文重建",
                                 Toast.LENGTH_SHORT,
                             ).show()
                         }

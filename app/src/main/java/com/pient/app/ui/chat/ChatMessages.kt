@@ -1245,9 +1245,11 @@ private fun AssistantCard(
  * @param live 流式中：标题「思考中」+ 微光 + 右侧计时秒表、正文贴底
  * @param elapsedSeconds 流式已用秒数（计时只在上屏层跑，落库用 durationMs）
  * @param expandedDefault 展开初值（刚流式完 = true；历史载入 = false）
+ *
+ * 可见性 = `internal`：节点详情卡（画布 FAB1）也用它，规格同源（《分支功能设计》§3.6）。
  */
 @Composable
-private fun ThinkingDisclosure(
+internal fun ThinkingDisclosure(
     text: String,
     live: Boolean = false,
     elapsedSeconds: Int = 0,

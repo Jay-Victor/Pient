@@ -275,6 +275,28 @@ object PiRpc {
     suspend fun getState(): JSONObject? = send(JSONObject().put("type", "get_state"))
 
     /**
+     * **手动压缩上下文**（pi 官方 RPC `compact`，= 桌面端的 `/compact`）。
+     *
+     * 压缩整体归 pi：App 不判触发、不切片、不生成摘要（《会话与上下文管理设计》§7 配套）。
+     * `customInstructions` = 自定义摘要指令（配置页的「压缩指令」）。
+     * pi 侧 `compact` 会调一次模型生成 checkpoint 摘要，并把 `agent.state.messages` 重建为
+     * 压缩后的形态 —— 所以调用方随后要 `refreshPiTree()` + `syncMessagesFromPi()` 才能看到结果。
+     * 返回 null = 通道没起来（未发送）。
+     */
+    suspend fun compact(customInstructions: String? = null): JSONObject? {
+        val cmd = JSONObject().put("type", "compact")
+        if (!customInstructions.isNullOrBlank()) cmd.put("customInstructions", customInstructions)
+        return send(cmd, awaitMs = 180_000)
+    }
+
+    /**
+     * 即时切换**自动压缩**（pi 官方 RPC `set_auto_compaction`）。与 settings.json 的
+     * `compaction.enabled` 是同一件事，这里用于改配置后不让用户去重启宿主。
+     */
+    suspend fun setAutoCompaction(enabled: Boolean): JSONObject? =
+        send(JSONObject().put("type", "set_auto_compaction").put("enabled", enabled))
+
+    /**
      * 起得来 ≠ 活着（2026-09-15 实测）：rootfs 不可执行 / proot 报错时进程会**秒退**，
      * 而 `start()` 只看 ProcessBuilder 是否成功 → 会误报可用。这里给进程一个露馅窗口。
      */
@@ -290,6 +312,17 @@ object PiRpc {
 
     /** 当前进程是否还在跑（诊断/界面上报错用） */
     fun processAlive(): Boolean = process?.isAlive == true
+
+    /**
+     * pi 侧此刻是否在跑一轮（`get_state.isStreaming`）。超时/通道不可用 = null（未知）。
+     *
+     * 用途：中止一轮之后要等 pi 收尾（它得把已生成的部分落成 aborted 条目、把叶定下来）
+     * 再对位，不能在中间态上对账（见 `ChatState.abort`）。等待窗口给短一点，别把
+     * 界面线程或后台协程挂住 —— 这是轮询判据，不是请求-响应。
+     */
+    suspend fun isStreamingNow(timeoutMs: Long = 1500): Boolean? =
+        dataOf(send(JSONObject().put("type", "get_state"), awaitMs = timeoutMs))
+            ?.optBoolean("isStreaming")
 
     // ─────────────────────── 读线程 ───────────────────────
 

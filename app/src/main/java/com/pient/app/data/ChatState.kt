@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
 import com.pient.app.runtime.PiRpc
 import com.pient.app.runtime.PiRuntime
+import java.io.File
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +30,12 @@ import org.json.JSONObject
 import kotlinx.coroutines.withContext
 
 private const val TAG_CHAT = "PientChat"
+
+/**
+ * 系统提示词回流文件（pi 侧写在 `~/.pi/agent/` 下，见 [ChatState.refreshSystemPrompt]）。
+ * 面板显示的就是 pi 真实下发的那一份 —— App 侧不再自己持有提示词。
+ */
+private const val SYS_PROMPT_FILE = ".pient-sysprompt.txt"
 
 /** 顶栏右下方区域内容（消息区 / 文件内容预览区 / 终端页 / 分支画布 四态切换） */
 enum class Panel { MESSAGES, FILES, TERMINAL, TREE }
@@ -51,9 +58,6 @@ private const val WINDOW_MIN_MESSAGES = 6
 
 /** 剩余更早内容估算不足这么多屏时直接全显（按钮不出现，避免「点一下没变化」） */
 private const val WINDOW_TAIL_SCREENS = 0.5f
-
-/** 旧会话里的单个工具结果进入对话历史时的字符上限（按「够模型接着推理」收窄） */
-private const val TOOL_HISTORY_CHARS = 2000
 
 /**
  * 单条消息的**渲染高度估算**（dp）——只在选择窗口大小时用，不影响渲染。
@@ -463,12 +467,6 @@ class ChatState {
     var liveThinkingIndex by mutableStateOf(-1)
     var streamJob: Job? = null
 
-    /**
-     * **pi 通道开关**（2026-09-14）：开 = 对话由 guest(Ubuntu) 里的 pi 跑（它自己维护会话上下文、
-     * 自己拿工具），关 = 退回 Pient 内核直连（[AiBackend]）。通道起不来（Ubuntu/pi 未就绪）时
-     * 自动落回直连，聊天不断。
-     */
-    var piChannelEnabled: Boolean = true
 
     /**
      * pi 运行时就绪态（2026-09-15 用户拍板 B：**pi 是唯一产品路径**）。
@@ -556,14 +554,14 @@ class ChatState {
     private var lastPiError: String? = null
 
     /**
-     * 发送消息并请求 AI 回复：历史重建 = 当前会话的 User/Assistant（跳过错误消息与
-     * 思考/工具条目），system prompt 走 ChatState.systemPrompt；思考级别/流式开关/
-     * 模型参数均来自输入栏与配置页状态。请求失败以 error 助手消息呈现（不进 API 上下文）。
+     * 发送消息并请求 AI 回复（**pi 唯一路径**）：只把本条用户回合的文本交给 pi 的 `prompt`，
+     * 上下文由 pi 自己维护；思考级别 / 流式开关 / 模型参数来自输入栏与配置页状态。
+     * 请求失败以 error 助手消息呈现（不进上下文）。
      */
     suspend fun streamReply(userText: String, quote: Quote? = null) {
         // ── pi 唯一产品路径的门控（2026-09-15 拍板 B）─────────────────────────────
         // 已知未就绪 → 明确阻断：不发送、不落任何条目、草稿留在输入栏（ChatScreen 给提示）
-        if (piChannelEnabled && piReadiness == PiReadiness.Unready) {
+        if (piReadiness == PiReadiness.Unready) {
             blockedNote = "pi 运行时未就绪：消息未发送（点上方提示条的「环境配置」修复）"
             Log.w(TAG_CHAT, "发送被阻断：pi 未就绪（$piUnreadyReason）")
             return
@@ -572,19 +570,8 @@ class ChatState {
         streamDraft = ""
         streamThinking = ""
         streamThinkingStartedAt = 0L
-        // ★ 历史快照必须先于消息上屏：buildApiHistory 读 currentMessages，
-        //   上屏后再取会把本条用户消息算进历史、又被末尾显式追加一次 = 重复（2026-09-09 修复）
-        // 内核自实现的自动压缩（2026-09-14 取代随宿主冻结的 pi 原生 compaction）：逼近上限时先把老消息压成摘要卡，
-        // 这样紧接着构建的 history 就是压缩后的形态。失败只记日志，绝不阻断发送。
-        // 本地压缩（App 侧实现）只在**直连诊断路径**跑：走 pi 时压缩由 pi 原生负责 ——
-        // 旧写法两头都压（白跑判定、必要时多调一次模型、还落一张 pi 不知道的压缩卡），2026-09-15 修。
-        if (!(piChannelEnabled && PiRpc.usable())) {
-            selectedModel?.provider?.let { AiConfigStore.configs[it] }?.let { c ->
-                runCatching { maybeAutoCompact(c) }
-                    .onFailure { Log.w(TAG, "自动压缩失败：${it.message}") }
-            }
-        }
-        val historyBefore = buildApiHistory()
+        // 2026-09-15 收口：App 侧不再拼历史、不再自己压缩（`buildApiHistory` / `maybeAutoCompact`
+        // 与 `data/Compaction.kt` 一并删除）；这里只组装**本条用户回合**的文本，交给 pi 的 prompt。
         // 当前这条用户消息（附件随文本进请求用；attachments 列表马上会被清空，先取快照）
         val currentMsg = Msg.User(userText, attachments.toList(), quote)
         appendEntry(currentMsg)
@@ -611,8 +598,8 @@ class ChatState {
             ?: cfg.models.firstOrNull().orEmpty()
 
         // 引用消息：正文以 markdown 块引用注入（Quote.toPrompt；UI 仍只显示用户正文）
-        // 本轮用户消息的请求文本：附件以「名称 · 路径」附在正文后（本条是最新回合，媒体恒保留）；
-        // 该条文本随后与历史一起拼成整段请求。
+        // 本轮用户回合的请求文本：附件以「名称 · 路径」附在正文后（本条是最新回合，媒体恒保留）；
+        // 这段文本就是交给 pi 的那条用户消息 —— 上下文由 pi 维护，App 不再拼历史。
         // 附件直发（2026-09-14 照 Operit 的三个媒体开关）：开启的类别把文件本体转成内容部件随请求发出，
         // 已直发的附件不再重复列路径（Operit 的「移除链接」）；关闭的类别**不拦消息**，
         // 只追加一行 Operit 原文占位（「图片内容已省略，当前模型不支持图片处理」）。
@@ -629,14 +616,13 @@ class ChatState {
                 attachments = currentMsg.attachments.filterIndexed { i, _ -> i !in inline.inlinedIndexes },
             )
         }
-        val userTurnText = ContextPolicy.promptTextFor(textMsg, true to true) +
+        val userTurnText = ContextPolicy.promptTextFor(textMsg) +
             (if (inline.notes.isNotEmpty()) "\n\n" + inline.notes.joinToString("\n") else "")
-        val history = historyBefore + ("user" to (quote?.toPrompt(userTurnText) ?: userTurnText))
-        val trimmedHistory = trimToContextBudget(history, cfg.ctxLenK)
+        val promptText = quote?.toPrompt(userTurnText) ?: userTurnText
         try {
             val outcome = runChat(
                 cfg = cfg.copy(modelList = effectiveModel),
-                history = trimmedHistory,
+                userTurnText = promptText,
                 onDelta = { draft -> streamDraft = draft },
                 onThinking = { noteThinkingDelta(it) },
                 media = inline.parts,
@@ -683,9 +669,11 @@ class ChatState {
         if (isStreaming) return "当前已有消息在处理中，请稍后再试"
         val model = selectedModel ?: return "尚未配置可用模型"
         val cfg = AiConfigStore.configs[model.provider] ?: return "尚未配置可用模型"
-        // 历史 = 该消息之前的部分（其前一条用户消息已包含在内），不含本条与之后内容
-        val history = trimToContextBudget(apiHistoryOf(list.subList(0, index)), cfg.ctxLenK)
-        if (history.isEmpty()) return "缺少可用的上下文"
+        // 重新生成 = 拿「该消息之前最近的一条用户消息」再问一次（上下文由 pi 维护，App 不拼历史）
+        val prevUser = list.subList(0, index).lastOrNull { it is Msg.User } as? Msg.User
+            ?: return "缺少可用的上下文"
+        val prevText = ContextPolicy.promptTextFor(prevUser)
+            .let { t -> prevUser.quote?.toPrompt(t) ?: t }
         val effectiveModel = model.name.takeIf { cfg.models.contains(it) }
             ?: cfg.models.firstOrNull().orEmpty()
 
@@ -699,7 +687,7 @@ class ChatState {
         return try {
             val outcome = runChat(
                 cfg = cfg.copy(modelList = effectiveModel),
-                history = history,
+                userTurnText = prevText,
                 onDelta = { draft ->
                     val at = runInsertAt ?: index
                     replaceMessageAt(at, Msg.Assistant(draft, null, effectiveModel))
@@ -729,92 +717,35 @@ class ChatState {
     }
 
     /**
-     * 单次对话请求（流式 / 非流式共用一条路径，2026-09-11 抽出供发送与重新生成复用）：
-     * 流式逐片回调 onDelta/onThinking，返回完整文本、usage 与思考文本。
-     *
-     * 2026-09-14 用户拍板：工具能力整体移除 —— 不再下发 `tools`、不再解析/执行工具调用、
-     * 不再有文本标记（DSML）兜底，这里就是一次普通的文本请求。
+     * 单次对话请求（**pi 通道 = 唯一路径**，2026-09-15 收口）：
+     * 只把用户回合的文本 + 本次要直发的媒体部件交给 pi 的 `prompt`，pi 在同一进程里累积上下文；
+     * 流式增量与 usage 由 [runChatViaPi] 接回 UI。pi 起不来一律**阻断**——
+     * 不再有直连内核回退（见《会话与上下文管理设计》§7.1，§8.3 作废）。
      */
     private suspend fun runChat(
         cfg: ProviderConfig,
-        history: List<Pair<String, String>>,
+        userTurnText: String,
         onDelta: (String) -> Unit,
         onThinking: (String) -> Unit = {},
         /** 本回合要直发的附件部件（媒体能力开关；只作用于最新一条用户消息） */
         media: List<WirePart> = emptyList(),
     ): ChatOutcome {
-        // ── pi 通道（2026-09-14）：这一轮交给 Ubuntu 里的 pi ──
-        // 会话上下文由 pi 自己维护（同一进程内连续 prompt），这里只把新消息送进去、
-        // 把流式增量与 usage 接回 UI；起不来就落回下面的直连内核。
-        if (piChannelEnabled) {
-            val target = piChannelTarget()      // 统一口径（见 [piChannelTarget] 注释）
-            if (target != null && PiRpc.usable() && PiRpc.start(target.first, target.second)) {
-                bindPiSession()          // 会话映射：懒建 / 切到本会话对应的 pi 会话文件（失败不阻断本轮）
-                if (piReadiness != PiReadiness.Ready) {
-                    piReadiness = PiReadiness.Ready
-                    piUnreadyReason = ""
-                }
-                return runChatViaPi(cfg, history, media, onDelta, onThinking)
+        val target = piChannelTarget()
+        if (target != null && PiRpc.usable() && PiRpc.start(target.first, target.second)) {
+            bindPiSession()          // 会话映射：懒建 / 切到本会话对应的 pi 会话文件（失败不阻断本轮）
+            if (piReadiness != PiReadiness.Ready) {
+                piReadiness = PiReadiness.Ready
+                piUnreadyReason = ""
             }
-            // ── pi 起不来：**不静默换路**（2026-09-15 用户拍板 B）────────────────────
-            // 产品路径 = 明确失败（错误卡直说去「环境配置」）；只有 debug 包才落直连诊断通道，
-            // 且日志显式标注 —— 直连没有任何工具能力，不能让用户以为自己在用 agent。
-            Log.w(TAG_CHAT, "pi 通道不可用，本轮没走 pi：${PiRpc.stderrText().takeLast(300)}")
-            piReadiness = PiReadiness.Unready
-            if (piUnreadyReason.isBlank()) piUnreadyReason = "pi 通道启动失败：可到「环境配置」里检测/更新"
-            if (!directFallbackAllowed()) {
-                throw AiException("pi 运行时未就绪：本轮没有发送。请到「终端 → 环境配置」检查 Ubuntu / pi。")
-            }
-            Log.w(TAG_CHAT, "⚠️ 开发诊断通道：debug 包回退到直连内核（纯文本，无工具）")
+            return runChatViaPi(cfg, userTurnText, media, onDelta, onThinking)
         }
-        // 思考模式的总开关：null = 不给服务商发思考参数、且**服务商自带的推理内容一律不展示不落库**
-        // （DeepSeek-R1 / GLM / Kimi 思考系列不靠 reasoning_effort 也会回 reasoning_content，
-        //   开关关着却把推理显示出来＝越权；2026-09-12 用户报「关了思考模式、流式期间仍显示思考内容、
-        //   回答完又消失」即此处漏门控——流式分支当时漏了判 `thinking != null`，只落了「不落库」）。
-        val thinking = if (thinkingEnabled) thinkingLevel else null
-        val prompt = Prompts.systemPrompt()
-        systemPrompt = prompt   // 面板显示真实下发内容
-        val turns = ArrayList<ChatTurn>(history.size)
-        history.forEachIndexed { i, (role, content) ->
-            if (i == history.lastIndex && role == "user" && media.isNotEmpty()) {
-                turns.add(ChatTurn.Rich(role, content, media))
-            } else {
-                turns.add(ChatTurn.Text(role, content))
-            }
-        }
-
-        val roundText = StringBuilder()
-        val roundThinking = StringBuilder()
-        var usage: Usage? = null
-        if (!streamingOutputEnabled) {
-            val res = AiBackend.chat(cfg, prompt, turns, thinking)
-            roundText.append(res.text)
-            usage = res.usage
-            if (thinking != null) {
-                res.thinking?.takeIf { it.isNotBlank() }?.let { onThinking(it) }
-            }
-        } else {
-            AiBackend.chatStream(cfg, prompt, turns, thinking).collect { ev ->
-                when (ev) {
-                    is ChatEvent.TextDelta -> {
-                        roundText.append(ev.text)
-                        onDelta(roundText.toString())
-                    }
-                    is ChatEvent.ThinkingDelta -> if (thinking != null) {
-                        roundThinking.append(ev.text)
-                        onThinking(roundThinking.toString())
-                    }
-                    is ChatEvent.UsageEvent -> usage = ev.usage
-                    is ChatEvent.Failed -> throw AiException(ev.message)
-                    ChatEvent.Done -> Unit
-                }
-            }
-        }
-        usage?.let { updateContextPercent(it, cfg) }
-
-        val text = roundText.toString().trim()
-        if (text.isNotEmpty()) onDelta(text)
-        return ChatOutcome(text, usage?.takeIf { it.inTokens + it.outTokens > 0 }, streamThinking)
+        // ── pi 起不来：**不换路**（2026-09-15 拍板 B + 收口）────────────────────────
+        // 直连没有任何工具能力，落回去会让用户以为自己在用 agent；§8.3 作废后本地也不存在
+        // 「只在本地的新消息」这种状态 —— 所以只有一条路：如实报错，让用户去修环境。
+        Log.w(TAG_CHAT, "pi 通道不可用，本轮没走 pi：${PiRpc.stderrText().takeLast(300)}")
+        piReadiness = PiReadiness.Unready
+        if (piUnreadyReason.isBlank()) piUnreadyReason = "pi 通道启动失败：可到「环境配置」里检测/更新"
+        throw AiException("pi 运行时未就绪：本轮没有发送。请到「终端 → 环境配置」检查 Ubuntu / pi。")
     }
 
 
@@ -861,9 +792,6 @@ class ChatState {
     /** 画布/详情用的 pi 条目索引（解析 get_tree 时留存；普通字段，避免无谓重组） */
     private var piEntryById: Map<String, JSONObject> = emptyMap()
     private var piParentOf: Map<String, String?> = emptyMap()
-
-    /** 输入栏回填请求（无回答节点「改写重问」用；ChatScreen 消费后清空） */
-    var prefillInput by mutableStateOf<String?>(null)
 
     /**
      * 绑（或切到）当前 Pient 会话对应的 pi 会话文件。
@@ -1092,22 +1020,7 @@ class ChatState {
         // 压缩进节点（不各自建卡）。pi 条目里 role 有 user/assistant/toolResult，且**工具结果也是
         // role=user 的条目**（内容块是 toolResult）—— 所以三重判定：message 条目 + role=user +
         // 有文本块且无 toolResult 块，避免助手/工具结果被当成节点（实测踩过：画布 28 个节点）。
-        fun isUserTurn(id: String): Boolean {
-            val e = entryById[id] ?: return false
-            if (e.optString("type") != "message") return false
-            val msg = e.optJSONObject("message") ?: return false
-            if (msg.optString("role") != "user") return false
-            val arr = msg.optJSONArray("content") ?: return msg.optString("content").isNotBlank()
-            var hasText = false
-            for (i in 0 until arr.length()) {
-                val b = arr.optJSONObject(i) ?: continue
-                when (b.optString("type")) {
-                    "toolResult" -> return false            // 工具结果载体，不算用户消息
-                    "text" -> if (b.optString("text").isNotBlank()) hasText = true
-                }
-            }
-            return hasText
-        }
+        fun isUserTurn(id: String): Boolean = isPiUserNode(entryById[id])
         val userIds = order.filter { isUserTurn(it) }
         fun textOf(id: String) = piText(entryById[id]?.optJSONObject("message"))
         val idxOf = HashMap<String, Int>().apply { userIds.forEachIndexed { i, u -> put(u, i) } }
@@ -1184,6 +1097,28 @@ class ChatState {
         return PiParsed(tree, anchorOf, entryById, parentOf)
     }
 
+    /**
+     * pi 条目是不是「画布节点」= 一条**用户消息**（《Pient 分支功能设计》§2.1 / §7）。
+     * 三重判定：`type=message` + `role=user` + 有文本块且**无 toolResult 块** ——
+     * pi 的工具结果条目内容块是 `toolResult`（老版本 role 也可能是 user），不这样判会把
+     * 助手/工具条目也当成节点（实测踩过：画布 28 个节点）。详情卡的回合边界用同一条判据。
+     */
+    private fun isPiUserNode(e: JSONObject?): Boolean {
+        if (e == null || e.optString("type") != "message") return false
+        val msg = e.optJSONObject("message") ?: return false
+        if (msg.optString("role") != "user") return false
+        val arr = msg.optJSONArray("content") ?: return msg.optString("content").isNotBlank()
+        var hasText = false
+        for (i in 0 until arr.length()) {
+            val b = arr.optJSONObject(i) ?: continue
+            when (b.optString("type")) {
+                "toolResult" -> return false            // 工具结果载体，不算用户消息
+                "text" -> if (b.optString("text").isNotBlank()) hasText = true
+            }
+        }
+        return hasText
+    }
+
     private fun piRole(entry: JSONObject?): String =
         entry?.optJSONObject("message")?.optString("role").orEmpty()
 
@@ -1242,12 +1177,12 @@ class ChatState {
      */
     private suspend fun runChatViaPi(
         cfg: ProviderConfig,
-        history: List<Pair<String, String>>,
+        userTurnText: String,
         media: List<WirePart>,
         onDelta: (String) -> Unit,
         onThinking: (String) -> Unit,
     ): ChatOutcome = coroutineScope {
-        val userText = history.lastOrNull { it.first == "user" }?.second.orEmpty()
+        val userText = userTurnText
         // 附件直发：pi 的 `prompt` 支持 images（ImageContent = {type,data,mimeType}，见 pi docs/rpc.md）。
         // media 里已经是 base64 部件（[MediaInline] 按媒体开关与上限筛过），这里只挑图片 ——
         // pi 的 ImageContent 只有图片这一种；音频/视频在 pi 通道给一行占位说明，不让用户误以为发出去了。
@@ -1424,86 +1359,75 @@ class ChatState {
         contextPercent = (used * 100f / (limitK * 1000f)).coerceIn(0f, 100f)
     }
 
-    // ─────────── 上下文压缩（**内核自实现，pi 口径**：阈值触发 / keepRecentTokens 切点） ───────────
+    // ─────────── 上下文压缩（**pi 原生**；2026-09-15 收口：App 侧实现已删） ───────────
 
     /**
-     * 手动压缩上下文（参照 pi 桌面端的 `/compact`，移动端等价入口）。
+     * 手动压缩上下文（= 桌面端的 `/compact`；移动端等价入口 = 上下文用量卡里那个动作）。
      *
-     * 为什么 Pient 需要它：**Android 上没有命令行入口**，而 pi 的手动压缩是 `/compact` 命令 ——
-     * 移动端的等价入口 = 上下文用量卡里的「压缩上下文」动作（用户看得见"什么时候能压、压了什么"）。
+     * 为什么需要它：**Android 上没有命令行入口**，而 pi 的手动压缩是 `/compact` 命令 ——
+     * 移动端的等价入口就是这个动作。
      *
-     * 结果只有一条回执（内核自实现）：摘要 + 前后 token 估值直接落一张压缩卡。
-     * 返回 null = 成功；非空 = 如实回报的原因（没有可用模型 / 没什么可压 / 摘要为空 / 上一次还在跑）。
+     * 2026-09-15 收口：压缩**整体归 pi**（官方 RPC `compact`）—— App 不判触发、不切片、不生成
+     * 摘要（旧的内核自实现 `data/Compaction.kt` 已删；自动压缩由 pi 按 settings.json 的
+     * `compaction` 自己判，配置页那三个旋钮即写进那里）。pi 完成后会重建 `agent.state.messages`，
+     * 所以这里随后刷新画布与上屏流。
+     * 返回 null = 成功；非空 = 如实回报的原因。
      */
     suspend fun compactNow(): String? {
-        val cfg = selectedModel?.provider?.let { AiConfigStore.configs[it] }
-            ?: return "没有可用的服务商 / 模型"
-        return runCompaction(cfg, "manual")
-    }
-
-    /** 自动压缩：超阈值才动手（[Compaction.shouldCompact]）；摘要失败静默，不阻断本轮发送 */
-    private suspend fun maybeAutoCompact(cfg: ProviderConfig) {
-        if (compacting) return
-        val history = buildApiHistory()
-        val limit = Compaction.compactLimitTokens(cfg.ctxLenK, cfg.reserveTokensValue)
-        if (!Compaction.shouldCompact(history, cfg.ctxLenK, cfg.reserveTokensValue, cfg.compactionEnabled)) return
-        Log.i(TAG, "自动压缩触发：估 ${Compaction.estimateTokens(history)} tokens > 阈值 $limit")
-        runCompaction(cfg, "threshold")?.let { Log.w(TAG, "自动压缩未执行：$it") }
-    }
-
-    /**
-     * 真做一次压缩：切片 → 调模型生成 checkpoint 摘要 → 落一张压缩卡。
-     * 摘要在卡里、也在请求里（[apiHistoryOf] 把 `Msg.Compaction` 当一条 user 文本发出），
-     * 之后的请求由 [ContextPolicy.sliceFromLastCompaction] 从该卡起算。
-     */
-    private suspend fun runCompaction(cfg: ProviderConfig, reason: String): String? {
-        if (compacting) return "上一次压缩还在进行中"
-        val history = buildApiHistory()
-        val prefix = Compaction.prefixToSummarize(history, cfg.keepRecentTokensValue) ?: run {
-            Log.i(TAG, "压缩跳过：可压缩的前缀太短（历史太短或 keepRecentTokens 太大）")
-            return "没什么可压缩的：当前历史太短（或「保留最近 tokens」设得过大）"
+        val target = piChannelTarget() ?: return "没有可用的服务商 / 模型"
+        if (!PiRpc.usable() || !PiRpc.start(target.first, target.second)) {
+            return "pi 通道未就绪：先到「环境配置」检查 Ubuntu / pi"
         }
+        if (compacting) return "上一次压缩还在进行中"
         compacting = true
         return try {
-            val before = Compaction.estimateTokens(history)
-            val summary = Compaction.summarize(cfg, prefix, cfg.compactInstructions.ifBlank { null })
-            if (summary.isNullOrBlank()) {
-                Log.w(TAG, "压缩失败：摘要为空（保持原文，不落假卡）")
-                return "压缩失败：模型没有返回摘要（原文保持不变）"
+            val cfg = selectedModel?.provider?.let { AiConfigStore.configs[it] }
+            val res = PiRpc.compact(cfg?.compactInstructions?.ifBlank { null })
+                ?: return "压缩没有完成：pi 通道无响应"
+            if (!res.optBoolean("success", true)) {
+                return "压缩失败：" + res.optString("error").ifBlank { "pi 拒绝了这次压缩" }
             }
-            // 压缩后的上下文 = 摘要 + **保留的尾部**（tail 是要继续带着走的，不能漏算 —— 漏了会把
-            // 「节省」夸大成 before − 摘要，实测在 keepRecentTokens≈历史长度时最离谱）
-            val tailTokens = Compaction.estimateTokens(history.subList(prefix.size, history.size))
-            val after = Compaction.estimateTokens(listOf("user" to summary)) + tailTokens
-            appendCompactionEntry(summary, before, after, reason)
-            Log.i(TAG, "压缩完成（$reason）：估 $before → $after tokens（摘要 ${summary.length} 字 + 保留尾部 $tailTokens tokens）")
+            // 压缩后上下文换了形态（pi 重建了活跃消息）→ 画布与上屏流都要跟上
+            runCatching { refreshPiTree(follow = true) }
+            runCatching { syncMessagesFromPi() }
+            Log.i(TAG_CHAT, "上下文已压缩（pi 原生 compact）：${res.toString().take(200)}")
             null
+        } catch (e: Exception) {
+            "压缩失败：" + (e.message ?: "未知错误")
         } finally {
             compacting = false
         }
     }
 
     /**
-     * 压缩条目落库。按「摘要文本 + tokensBefore」去重 —— 同一结果重复落库时不叠卡。
+     * **系统提示词**（只读面板的数据源，2026-09-15）：提示词的持有者是 **pi**
+     * （base prompt + 项目 context 文件 + 扩展改写，App 看不到）。走扩展命令 `/pient-sysprompt`
+     * 让 pi 把 `ctx.getSystemPrompt()` 写到 `~/.pi/agent/.pient-sysprompt.txt`，再读回来 ——
+     * 面板显示的就是**真实下发的那一份**（旧实现显示的是 App 侧自己拼的提示词，直连内核收口后
+     * 那份已经不存在了）。
+     * 返回 null = 成功（[systemPrompt] 已更新）；非空 = 原因。
      */
-    private fun appendCompactionEntry(
-        summary: String,
-        tokensBefore: Int,
-        estimatedAfter: Int,
-        reason: String? = null,
-    ) {
-        if (summary.isBlank()) return
-        val last = currentMessages.lastOrNull()
-        if (last is Msg.Compaction && last.tokensBefore == tokensBefore && last.summary == summary) return
-        appendEntry(
-            Msg.Compaction(
-                tokensBefore = tokensBefore,
-                saved = (tokensBefore - estimatedAfter).coerceAtLeast(0),
-                summary = summary,
-                reason = reason,
-            )
-        )
-        Log.i(TAG, "上下文已压缩（${reason ?: "来源未知"}）：前 $tokensBefore → 估 $estimatedAfter（摘要 ${summary.length} 字）")
+    suspend fun refreshSystemPrompt(): String? {
+        val ctx = AppCtx.get() ?: return "应用上下文未就绪"
+        val target = piChannelTarget() ?: return "没有可用的服务商 / 模型"
+        if (!PiRpc.usable() || !PiRpc.start(target.first, target.second)) {
+            return "pi 通道未就绪（先到「环境配置」检查 Ubuntu / pi）"
+        }
+        val file = File(PiAgentFiles.agentDir(ctx), SYS_PROMPT_FILE)
+        val before = file.lastModified()
+        runCatching { PiRpc.prompt("/pient-sysprompt") }
+            .onFailure { return "取系统提示词失败：${it.message}" }
+        // 命令处理里同步写文件，但响应与落盘之间可能有几十毫秒 → 轮询等它变
+        var waited = 0
+        while (waited < 4000 && file.lastModified() <= before) {
+            kotlinx.coroutines.delay(120)
+            waited += 120
+        }
+        val text = runCatching { file.takeIf { it.isFile }?.readText() }.getOrNull()?.trim().orEmpty()
+        if (text.isEmpty()) return "没拿到系统提示词（pi 可能还没起，或扩展命令未加载）"
+        systemPrompt = text
+        Log.i(TAG_CHAT, "系统提示词已按 pi 回流：${text.length} 字")
+        return null
     }
 
     /** 首个思考增量到达时记起点（思考行右侧计时与落库 durationMs 都用它） */
@@ -1588,101 +1512,6 @@ class ChatState {
         if (i >= 0) entries[i] = entries[i].copy(msg = msg)
     }
 
-    /**
-     * API 上下文重建（2026-09-13：**参考 Operit 的上下文管线**重做）。
-     *
-     * ① **切片**：从最后一条压缩摘要（含）起 —— Operit `getMemoryFromMessages` 同款；
-     * ② **附件进请求**：附件以「名称 · 路径」文本随该条用户消息发出，
-     *    历史回合里的图片/音视频按「保留最近 N 个用户回合」裁剪、更早的写占位文案
-     *    —— Operit `limitImageLinksInChatHistory` / `limitMediaLinksInChatHistory` 同款；
-     * ③ 压缩摘要本身以一条 user 消息进请求（Operit 把 summary 作为 USER 角色发送）；
-     * ④ 思考条目不进上下文；**旧会话里已有的工具结果**以文本形态进历史（见 ToolResult 分支），
-     *    工具卡本身（参数 / diff）不进。
-     */
-    private fun buildApiHistory(): List<Pair<String, String>> = apiHistoryOf(currentMessages)
-
-    private fun apiHistoryOf(msgs: List<Msg>): List<Pair<String, String>> {
-        val cfg = selectedModel?.provider?.let { AiConfigStore.configs[it] }
-        val slice = ContextPolicy.sliceFromLastCompaction(msgs)
-        val windows = ContextPolicy.attachmentWindows(
-            slice,
-            cfg?.maxImageHistoryTurnsValue ?: ContextPolicy.DEFAULT_MAX_IMAGE_HISTORY_TURNS,
-            cfg?.maxMediaHistoryTurnsValue ?: ContextPolicy.DEFAULT_MAX_MEDIA_HISTORY_TURNS,
-        )
-        val out = mutableListOf<Pair<String, String>>()
-        // 工具结果入历史的累积缓冲（见下方 when 分支的注释）
-        val pendingTools = mutableListOf<Pair<String, String>>()
-        fun flushTools() {
-            if (pendingTools.isEmpty()) return
-            out += "user" to toolResultsBlock(pendingTools)
-            pendingTools.clear()
-        }
-        slice.forEachIndexed { i, m ->
-            when (m) {
-                is Msg.User -> {
-                    flushTools()
-                    val text = ContextPolicy.promptTextFor(m, windows[i])
-                    out += "user" to (m.quote?.toPrompt(text) ?: text)
-                }
-                is Msg.Assistant -> {
-                    flushTools()
-                    if (!m.error) out += "assistant" to m.markdown
-                }
-                is Msg.Compaction -> {
-                    flushTools()
-                    out += "user" to m.summary
-                }
-                // **旧会话里已有的工具结果以文本形态进历史**：这些条目是工具能力移除前的记录，
-                // 继续拼进上下文能让老会话保持连贯（模型把它当环境回执读）；新会话不会再产生它们。
-                is Msg.ToolResult -> pendingTools += m.toolName to toolHistoryBody(m)
-                // 调用意图已由结果的 [name] 前缀表达；参数/diff 体积大又不影响后续推理，不入历史
-                is Msg.ToolCall -> Unit
-                else -> Unit // 思考块不参与对话上下文
-            }
-        }
-        flushTools()
-        return out
-    }
-
-    /**
-     * 旧工具结果的上下文形态：`工具执行结果：\n\n[read] …`（仅历史重建路径使用）。
-     */
-    private fun toolResultsBlock(entries: List<Pair<String, String>>): String =
-        "工具执行结果：\n\n" + entries.joinToString("\n\n") { (name, body) -> "[$name] $body" }
-
-    /**
-     * 单个工具结果入历史时的截断：**每个结果最多 2000 字符**（`preview` 是界面用的短摘要，
-     * 优先用 `full` 的截断）。整段历史另有 [trimToContextBudget] 的字符预算兜底。
-     */
-    private fun toolHistoryBody(m: Msg.ToolResult): String =
-        (m.full ?: m.preview).take(TOOL_HISTORY_CHARS)
-
-    /**
-     * 上下文长度预算裁剪（配置页「上下文长度」K Tokens 生效）：
-     * 粗略估算 token ≈ 字符数/2（中英混排折中），超预算丢最旧条目；
-     * 但永远保留最新一条用户消息（本轮提问不可丢）。
-     *
-     * 定位 = **兜底**：常规路径是「先压缩、再发送」（[maybeAutoCompact] → [runCompaction]），
-     * 只有摘要失败或 keepRecentTokens 配得过大时才轮到这条硬裁剪。
-     */
-    private fun trimToContextBudget(
-        history: List<Pair<String, String>>,
-        ctxLenK: String,
-    ): List<Pair<String, String>> {
-        val k = ctxLenK.toIntOrNull() ?: return history
-        if (k <= 0) return history
-        val charBudget = (k * 1000L) * 2 // 1 token ≈ 2 字符（中英折中）
-        var used = history.sumOf { (_, c) -> c.length.toLong() }
-        if (used <= charBudget) return history
-        var start = 0
-        while (start < history.size - 1 && used > charBudget) {
-            used -= history[start].second.length
-            start++
-        }
-        // 若仍超预算（单条超长），至少保留最后一条
-        return if (start <= history.lastIndex) history.subList(start, history.size) else history.takeLast(1)
-    }
-
     private fun markRunning(running: Boolean) {
         val proj = currentProject ?: return
         val list = sessions[proj] ?: return
@@ -1691,15 +1520,39 @@ class ChatState {
         if (i >= 0) list[i] = list[i].copy(running = running)
     }
 
+    /**
+     * 手动终止本轮（输入栏「停止」）。
+     *
+     * **位置必须跟随后端**（2026-09-15 修 bug）：本回合的 [piDesiredLeaf] 此刻是**过期的** ——
+     * 上次写入是上一回合结束时的 `refreshPiTree(follow = true)`，本回合被中止就永远没来得及更新。
+     * 留着它，下一次位置对账（开画布、或下一次发送的 T1）会把 pi 的叶**拉回上一回合**，于是
+     * 「刚发的那条消息」下面再发一条会挂成它的**兄弟节点** —— 画布上就是「节点有了，但下一条
+     * 不顺下去、凭空冒出一条分支」（用户实测）。
+     * 所以：① 立刻丢掉过期的期望位置（宁可不对账，也不要拉回旧位置）；② 等 pi 收尾（它要把
+     * 已生成的部分落成 aborted 条目）后把位置跟随后端，并按 pi 重建上屏流。
+     */
     fun abort() {
         streamJob?.cancel()
-        if (piChannelEnabled) bgScope.launch { PiRpc.abort() }   // pi 侧也要停（否则它继续跑）
+        // 已收到的部分先在本地留住（pi 侧那份由 pi 自己落库，重建消息流时会覆盖成同一内容）
         if (streamDraft.isNotEmpty()) {
             appendEntry(Msg.Assistant(streamDraft, null))
             streamDraft = ""
         }
+        currentSessionId?.let { piDesiredLeaf.remove(it) }
         isStreaming = false
         markRunning(false)
+        bgScope.launch {
+            runCatching { PiRpc.abort() }        // pi 侧也要停（否则它继续跑）
+            // pi 收尾是异步的：等它不再 streaming（最多 8s）再对位，别在中间态上对账
+            var waited = 0
+            while (waited < 8000 && PiRpc.isStreamingNow() == true) {
+                kotlinx.coroutines.delay(250)
+                waited += 250
+            }
+            runCatching { refreshPiTree(follow = true) }   // 位置跟随后端（叶若落到本回合条目上就记住它）
+            runCatching { syncMessagesFromPi() }           // 上屏流按 pi 重建（含中止时的部分回答）
+            Log.i(TAG_CHAT, "已终止本轮：位置跟随后端（叶=$piLeafId，等待 ${waited}ms）")
+        }
     }
 
     // ── 分支（2026-09-02 分支功能设计：/tree 画布页 + fork；2026-09-11 真实化）──
@@ -1773,6 +1626,88 @@ class ChatState {
     }
 
     /**
+     * **节点回合全文**（画布 FAB1 节点详情卡的数据源，《Pient 分支功能设计》§3.6）：
+     * 该节点（一条用户消息）+ 其后到下一个用户节点之前的全部条目，**按会话顺序**映射成 [Msg] ——
+     * 用户消息 → 思考（`thinking` 块）→ 工具调用（`toolCall` 块）+ 结果（`toolResult` 条目）→
+     * AI 回答（`text` 块）。详情卡直接复用聊天页那套渲染组件（ThinkingDisclosure / ToolRow）。
+     *
+     * 数据源 = 解析 pi `get_tree` 时留存的原始条目（[piEntryById] / [piParentOf]，真相源）；
+     * pi 树不可用时回落到本地条目树的回合链（与 [buildBranchTree] 同口径）。
+     */
+    fun turnTranscript(nodeId: String): List<Msg> {
+        val sid = currentSessionId ?: return emptyList()
+        if (piTreeSessionId == sid && piEntryById.containsKey(nodeId)) {
+            val out = ArrayList<Msg>()
+            pushPiMessage(piEntryById[nodeId]?.optJSONObject("message"), out)   // 节点自身（用户消息）
+            // 子表按条目顺序建（get_tree 的解析顺序 = 会话顺序）
+            val kids = HashMap<String, MutableList<String>>()
+            piEntryById.keys.forEach { id -> piParentOf[id]?.let { p -> kids.getOrPut(p) { mutableListOf() } += id } }
+            fun walk(id: String) {
+                kids[id].orEmpty().forEach { c ->
+                    val e = piEntryById[c] ?: return@forEach
+                    if (isPiUserNode(e)) return@forEach          // 下一个用户节点 = 本回合边界
+                    if (e.optString("type") == "message") pushPiMessage(e.optJSONObject("message"), out)
+                    walk(c)
+                }
+            }
+            walk(nodeId)
+            return out
+        }
+        // 回落：本地条目树（pi 树不可用）—— 用户条目 + 其后的单链回合条目
+        val entries = entriesBySession[sid]?.toList().orEmpty()
+        val self = entries.firstOrNull { it.id == nodeId && it.msg is Msg.User } ?: return emptyList()
+        val out = mutableListOf<Msg>(self.msg)
+        var cur = self
+        while (true) {
+            val next = entries.filter { it.parentId == cur.id && it.msg !is Msg.User }
+            if (next.size != 1) break
+            out += next[0].msg
+            cur = next[0]
+        }
+        return out
+    }
+
+    /**
+     * pi 的 `message` 对象 → [Msg]（按内容块顺序：thinking / text / toolCall）；
+     * 工具结果在 pi 里是**独立条目**（消息体 role=toolResult），单独走一条。
+     */
+    private fun pushPiMessage(msg: JSONObject?, out: MutableList<Msg>) {
+        if (msg == null) return
+        when (msg.optString("role")) {
+            "user" -> piText(msg).trim().takeIf { it.isNotEmpty() }?.let { out += Msg.User(it) }
+            "assistant" -> {
+                val arr = msg.optJSONArray("content") ?: return
+                for (i in 0 until arr.length()) {
+                    val b = arr.optJSONObject(i) ?: continue
+                    when (b.optString("type")) {
+                        // 思考块：pi 条目里没有时长（durationMs = null → 折叠行按「已思考」呈现）
+                        "thinking" -> b.optString("thinking").trim().takeIf { it.isNotEmpty() }?.let {
+                            val level = if (thinkingEnabled) thinkingLevel.piValue else "off"
+                            out += Msg.Thinking(level, it, null)
+                        }
+                        "text" -> b.optString("text").trim().takeIf { it.isNotEmpty() }
+                            ?.let { out += Msg.Assistant(it, null) }
+                        // 工具调用：params 存原样 JSON 串（ToolRows 按 JSON 解析出 command/path/…）
+                        "toolCall" -> out += Msg.ToolCall(
+                            name = b.optString("name"),
+                            params = b.opt("arguments")?.toString().orEmpty(),
+                            status = ToolStatus.DONE,
+                        )
+                    }
+                }
+            }
+            "toolResult" -> {
+                val text = piText(msg).trim()
+                out += Msg.ToolResult(
+                    toolName = msg.optString("toolName"),
+                    preview = piPreview(text),
+                    full = text.takeIf { it.isNotBlank() },
+                )
+            }
+        }
+    }
+
+    /**
      * /tree 画布页切到目标节点（会话内分支，pi `branch(entryId)` / pi-web 封装命令
      * `navigate_tree`（底层 SDK `navigateTree()`）同语义）：leaf 移到该节点**回合末尾**
      * （用户消息 + 其 AI 回答），上屏消息流由 root→leaf 重建——满足验收口径「返回消息区
@@ -1786,28 +1721,24 @@ class ChatState {
         // 走扩展命令 /pient-nav：pi 侧会切换上下文（必要时还能生成被放弃分支的摘要），
         // 之后我们只拉一次 pi 的树刷新画布；本地 leaf 同步一份让 UI 立刻响应。
         val rec = sessionRecord(sid)
-        if (piChannelEnabled && piTreeSessionId == sid && piTree != null &&
+        // pi 唯一路径（2026-09-15 收口：不再有 piChannelEnabled 开关）
+        if (piTreeSessionId == sid && piTree != null &&
             !rec?.piSessionFile.isNullOrBlank() && PiRpc.usable()
         ) {
             // **导航目标 = 锚点**（该节点回合末尾的非用户条目），不是节点自身：把用户消息条目交给 pi
-            // 会触发它"叶退到父 + 文本回填编辑器"的原生语义，位置退到该节点**之前**（§4.2）。
-            // 无锚点（该节点尚无回答）时才交给 pi 原生语义，并把消息文本回填输入栏（改写重问）。
+            // 的 navigateTree 会触发它「叶退到父 + 文本回填编辑器」的重编辑语义，位置退到该节点**之前**。
+            // **尚无回答的节点没有锚点** —— 交给 pi 的扩展命令，由它给这条用户消息补一条**锚点标记**
+            // 再定位（assets/pient-pi-extension.ts 的 resolveTarget）：语义统一为「停在该消息本身」，
+            // 有没有回答行为一致（2026-09-15 用户定）。
             val anchor = piAnchorOf[nodeId]
             val target = anchor ?: nodeId
             piDesiredLeaf[sid] = target
             bgScope.launch {
                 // 摘要是可选的：pi 会为此**调用一次模型**（用户偏好见 SettingsStore.branchSummarize）
-                runCatching { PiRpc.navigate(target, summarize = SettingsStore.branchSummarize && anchor != null) }
+                runCatching { PiRpc.navigate(target, summarize = SettingsStore.branchSummarize) }
                     .onFailure { Log.w(TAG_CHAT, "pi 会话内分支跳转失败：${it.message}") }
                 refreshPiTree()
                 syncMessagesFromPi()
-                if (anchor == null) {
-                    val t = piText(piEntryById[nodeId]?.optJSONObject("message")).trim()
-                    if (t.isNotEmpty()) {
-                        prefillInput = t
-                        Log.i(TAG_CHAT, "无回答节点：按 pi 原生语义退到该消息之前，文本回填输入栏（${t.length} 字）")
-                    }
-                }
                 Log.i(TAG_CHAT, "会话内分支跳转：节点 $nodeId → 目标 $target（pi 叶=$piLeafId）")
             }
             return true
@@ -1917,8 +1848,9 @@ class ChatState {
     var maxWindowTokens by mutableStateOf(180000)
     var connectionLabel by mutableStateOf("已连接")
     // 系统提示词只读展示（2026-09-01，对齐 pi-web system 面板）：
-    // **真实值 = 内核每次发请求时构造的那一份**（`Prompts.systemPrompt`），由发送路径写入 ——
-    // 面板显示的必须是模型真正收到的内容。
+    // **真实值 = pi 当前生效的那一份**（base prompt + 项目 context 文件 + 扩展改写），
+    // 打开面板时由 [refreshSystemPrompt] 经扩展命令 `/pient-sysprompt` 回流写入 ——
+    // 面板显示的必须是模型真正收到的内容（App 侧不再持有自己的提示词）。
     var systemPrompt by mutableStateOf("")
     // 上下文用量分类明细（Hermes 上下文卡片口径；UI 原型 mock，合计 = windowTokens）
     // 分类经 pi 源码核实：「记忆」「子代理」不参与；2026-09-14 工具 / 技能整体移除后

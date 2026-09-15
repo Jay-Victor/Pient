@@ -66,6 +66,7 @@ import com.pient.app.data.Msg
 import com.pient.app.data.Panel
 import com.pient.app.data.SessionTreeNode
 import com.pient.app.data.SettingsStore
+import com.pient.app.data.ToolStatus
 import com.pient.app.ui.components.MarkdownText
 import com.pient.app.ui.theme.PientPanel
 import kotlin.math.min
@@ -316,6 +317,12 @@ fun TreeCanvasPanel(chatState: ChatState) {
         }
 
         // ── 右下三枚悬浮操作按键（自下而上 = 切换分支/从此处分支/查看详情）──
+        //
+        // **运行中（AI 正在回答）：FAB2 / FAB3 禁用**（2026-09-15 用户定）——
+        // pi 在流式中禁止导航（`agent-session.ts:3117-3119` 会抛「Wait for the current response
+        // to finish before navigating the session tree.」），而且这一轮的位置还没定下来
+        // （导航会与落位打架）。FAB1「查看详情」是纯读，照常可用。
+        val running = chatState.isStreaming || chatState.currentSession?.running == true
         Column(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
@@ -329,7 +336,7 @@ fun TreeCanvasPanel(chatState: ChatState) {
             TreeFab(
                 icon = Icons.Outlined.CallSplit,
                 desc = "创建分支",
-                enabled = selectedNode != null,
+                enabled = selectedNode != null && !running,
                 // **会话内分支**（2026-09-15 定稿，《Pient 会话与上下文管理设计》§6）：
                 // 切点 = 该节点回合末尾的**锚点条目** → 回聊天页，此后发消息即在该节点下长出新分支。
                 // 会话外分支（fork 新会话）不在画布上 —— 它归长按消息菜单与节点详情卡。
@@ -342,7 +349,7 @@ fun TreeCanvasPanel(chatState: ChatState) {
             TreeFab(
                 icon = Icons.Outlined.AltRoute,
                 desc = "切换分支",
-                enabled = selectedNode?.children?.isEmpty() == true,
+                enabled = selectedNode?.children?.isEmpty() == true && !running,
                 onClick = { switchTo(chatState, selectedId) },
             )
         }
@@ -360,10 +367,13 @@ fun TreeCanvasPanel(chatState: ChatState) {
                     .background(MaterialTheme.colorScheme.scrim)
                     .clickable(onClick = { detailOpen = false }),
             )
-            val userMsg = selectedNode.exchange.firstOrNull() as? Msg.User
-            val answer = selectedNode.exchange
-                .filterIsInstance<Msg.Assistant>()
-                .joinToString("\n\n") { it.markdown }
+            // 卡片内容 = 该节点回合的**全部条目**（《分支功能设计》§3.6，2026-09-15 定稿）：
+            // 用户消息全文 → 思考（折叠栏，默认收起，与聊天页 ThinkingDisclosure 同款）→
+            // 工具调用与结果（ToolRow / ToolRunGroup 同款）→ AI 回答（markdown 全文）。
+            val transcript = chatState.turnTranscript(selectedNode.id)
+            val userMsg = transcript.filterIsInstance<Msg.User>().firstOrNull()
+            val turnItems = transcript.filter { it !is Msg.User }
+            val hasAnswer = turnItems.any { it is Msg.Assistant && it.markdown.isNotBlank() }
             PientPanel(
                 modifier = Modifier
                     .width(configuration.screenWidthDp.dp - 48.dp)
@@ -416,14 +426,63 @@ fun TreeCanvasPanel(chatState: ChatState) {
                             .height(1.dp)
                             .background(MaterialTheme.colorScheme.outlineVariant),
                     )
-                    Text(
-                        "AI 回答",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (answer.isNotEmpty()) {
-                        MarkdownText(answer, modifier = Modifier.padding(top = 6.dp))
-                    } else {
+                    // 回合条目按会话顺序渲染（思考 → 工具行 → 回答；与聊天页同一批组件）
+                    var i = 0
+                    while (i < turnItems.size) {
+                        when (val m = turnItems[i]) {
+                            is Msg.Thinking -> {
+                                // 历史思考一律**默认收起**（可点开），与聊天页历史思考块同口径
+                                ThinkingDisclosure(text = m.text, durationMs = m.durationMs)
+                                i++
+                            }
+                            is Msg.ToolCall -> {
+                                val next = turnItems.getOrNull(i + 1) as? Msg.ToolResult
+                                if (isActivityTool(m.name)) {
+                                    // 连续的活动型调用 = 一次「工具运行」（≥2 条折成一行摘要，同聊天页）
+                                    val calls = ArrayList<Msg.ToolCall>()
+                                    val results = ArrayList<Msg.ToolResult?>()
+                                    var j = i
+                                    while (j < turnItems.size) {
+                                        val c = turnItems[j] as? Msg.ToolCall ?: break
+                                        if (!isActivityTool(c.name)) break
+                                        val r = turnItems.getOrNull(j + 1) as? Msg.ToolResult
+                                        calls += c
+                                        results += r
+                                        j += if (r != null) 2 else 1
+                                    }
+                                    if (calls.size >= 2) {
+                                        ToolRunGroup(calls = calls, results = results, live = false)
+                                    } else {
+                                        ToolRow(call = calls[0], result = results[0])
+                                    }
+                                    i = j
+                                } else {
+                                    // 文件写入/编辑 = 交付物，各自成行
+                                    ToolRow(call = m, result = next)
+                                    i += if (next != null) 2 else 1
+                                }
+                            }
+                            // 结果行随上面的调用一起渲染；没有调用可配的孤儿结果单独成行（老记录）
+                            is Msg.ToolResult -> {
+                                ToolRow(
+                                    call = Msg.ToolCall(
+                                        name = m.toolName,
+                                        params = "",
+                                        status = ToolStatus.DONE,
+                                        detail = m.full ?: m.preview,
+                                    ),
+                                    result = null,
+                                )
+                                i++
+                            }
+                            is Msg.Assistant -> {
+                                MarkdownText(m.markdown, modifier = Modifier.padding(top = 2.dp))
+                                i++
+                            }
+                            else -> i++
+                        }
+                    }
+                    if (!hasAnswer) {
                         Text(
                             "（暂无回答）",
                             style = MaterialTheme.typography.bodySmall,
