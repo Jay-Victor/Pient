@@ -12,6 +12,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -61,12 +63,15 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.pient.app.data.Attachment
 import com.pient.app.data.ChatState
 import com.pient.app.data.Msg
 import com.pient.app.data.Panel
 import com.pient.app.data.SessionTreeNode
 import com.pient.app.data.ToolStatus
+import com.pient.app.data.extOf
 import com.pient.app.ui.components.MarkdownText
+import com.pient.app.ui.files.fileIcon
 import com.pient.app.ui.theme.PientPanel
 import kotlin.math.min
 
@@ -408,6 +413,14 @@ fun TreeCanvasPanel(chatState: ChatState) {
                         userMsg.quote?.let { q ->
                             QuoteCard(q, modifier = Modifier.padding(top = 12.dp))
                         }
+                        // 附件 chip 行（同上：与气泡同一组件、同一位置关系 —— 引用卡 → 附件 → 正文）
+                        if (userMsg.attachments.isNotEmpty()) {
+                            AttachmentsRow(
+                                userMsg.attachments,
+                                MaterialTheme.colorScheme.surfaceContainerHigh,
+                                Modifier.padding(top = 12.dp),
+                            )
+                        }
                         Text(
                             userMsg.text,
                             style = MaterialTheme.typography.bodyMedium,
@@ -601,11 +614,37 @@ private fun NodeCard(
                 .clickable(onClick = onClick)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
-            Text(
-                "#$order",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "#$order",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                // 附件类型图标（2026-09-17）：卡片高度固定 72dp，图标并进首行不额外占高；
+                // 多于 3 个只显示前 3 个 + 「+N」（完整清单在节点详情卡里）
+                if (node.attachments.isNotEmpty()) {
+                    Spacer(Modifier.weight(1f))
+                    node.attachments.take(3).forEach { att ->
+                        Icon(
+                            attachmentGlyph(att),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 3.dp).size(12.dp),
+                        )
+                    }
+                    if (node.attachments.size > 3) {
+                        Text(
+                            "+${node.attachments.size - 3}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 2.dp),
+                        )
+                    }
+                }
+            }
             val preview = node.userText.take(40) + if (node.userText.length > 40) "…" else ""
             Text(
                 preview,
@@ -637,3 +676,4 @@ private fun NodeCard(
         }
     }
 }
+

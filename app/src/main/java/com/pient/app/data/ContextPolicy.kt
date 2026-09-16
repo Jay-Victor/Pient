@@ -52,6 +52,56 @@ object ContextPolicy {
         return msg.text + "\n\n" + msg.attachments.joinToString("\n") { attachmentLine(it) }
     }
 
+    // ─────────── 附件清单的「写—读」两端（同源；见 [splitAttachments]）───────────
+
+    /** 附件清单行的前缀 */
+    const val ATTACH_PREFIX = "[附件] "
+
+    /** 未直发说明行的前缀（超上限 / 读取失败） */
+    const val ATTACH_OMIT_PREFIX = "[附件未直发] "
+
+    /** 媒体未直发的占位文案（Operit strings.xml 原文：`openai_image_omitted` / `openai_audio_video_omitted`） */
+    const val OMIT_IMAGE = "图片内容已省略，当前模型不支持图片处理"
+    const val OMIT_MEDIA = "音视频内容已省略，当前模型不支持音视频处理"
+
     private fun attachmentLine(a: Attachment): String =
-        "[附件] ${a.name}" + (a.path?.let { " · $it" } ?: "")
+        ATTACH_PREFIX + a.name + (a.path?.let { " · $it" } ?: "")
+
+    /**
+     * [promptTextFor] 的逆运算（2026-09-17）：把 pi 侧那条用户消息的文本拆回 (正文, 附件清单)。
+     *
+     * pi 的会话文件里用户消息**只有文本** —— 附件是以「尾部两段元数据」拼进去的：
+     * `正文 \n\n [附件] 名称 · 路径（一行一个） \n\n [附件未直发]/省略说明（可能没有）`。
+     * 从尾部往前剥这两段；**形成不了「整段都是元数据行」就原样返回**，所以用户自己打的
+     * "[附件] …" 不会被误认成附件。
+     *
+     * 谁用：按 pi 重建上屏流（`ChatState.syncMessagesFromPi`）与画布节点预览 ——
+     * 不还原的话聊天页气泡、画布卡片都会把这份清单当正文显示。
+     */
+    fun splitAttachments(text: String): Pair<String, List<Attachment>> {
+        val blocks = text.split("\n\n").toMutableList()
+        fun isOmitBlock(b: String): Boolean = b.lines().all { l ->
+            val t = l.trim()
+            t == OMIT_IMAGE || t == OMIT_MEDIA || t.startsWith(ATTACH_OMIT_PREFIX)
+        }
+        fun isAttachBlock(b: String): Boolean =
+            b.lines().all { it.trim().startsWith(ATTACH_PREFIX) }
+
+        if (blocks.size > 1 && isOmitBlock(blocks.last())) blocks.removeAt(blocks.lastIndex)
+        if (blocks.size > 1 && isAttachBlock(blocks.last())) {
+            val atts = blocks.removeAt(blocks.lastIndex).lines().mapNotNull { parseAttachmentLine(it) }
+            if (atts.isNotEmpty()) return blocks.joinToString("\n\n").trim() to atts
+        }
+        return text to emptyList()
+    }
+
+    /** `[附件] 名称 · 路径` → [Attachment]（类型按扩展名判，与文件树/预览共用同一份家族表） */
+    private fun parseAttachmentLine(line: String): Attachment? {
+        val body = line.trim().removePrefix(ATTACH_PREFIX)
+        val name = body.substringBefore(" · ").trim()
+        if (name.isBlank()) return null
+        val path = body.substringAfter(" · ", "").trim().takeIf { it.isNotBlank() }
+        val kind = if (extOf(name) in MEDIA_IMAGE_EXTS) AttachmentKind.IMAGE else AttachmentKind.FILE
+        return Attachment(name, kind, path)
+    }
 }

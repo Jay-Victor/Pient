@@ -20,9 +20,9 @@ object MediaInline {
     private const val INLINE_AUDIO_MAX = 12L * 1024 * 1024
     private const val INLINE_VIDEO_MAX = 24L * 1024 * 1024
 
-    /** 未直发时的占位文案（Operit strings.xml 原文：`openai_image_omitted` / `openai_audio_video_omitted`） */
-    private const val OMIT_IMAGE = "图片内容已省略，当前模型不支持图片处理"
-    private const val OMIT_MEDIA = "音视频内容已省略，当前模型不支持音视频处理"
+    /** 未直发时的占位文案（Operit strings.xml 原文；常量与「读回」侧共用 [ContextPolicy] 那一份） */
+    private val OMIT_IMAGE = ContextPolicy.OMIT_IMAGE
+    private val OMIT_MEDIA = ContextPolicy.OMIT_MEDIA
 
     /**
      * 直发结果：

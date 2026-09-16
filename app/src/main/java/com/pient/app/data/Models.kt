@@ -843,6 +843,8 @@ data class SessionTreeNode(
     val children: List<SessionTreeNode> = emptyList(),
     val branchLabel: String? = null,
     val active: Boolean = false,
+    /** 该节点的用户消息带的附件（画布卡片上的类型图标；直发的图片名字不可考，按类型兜底） */
+    val attachments: List<Attachment> = emptyList(),
 ) {
     /** 是否存在分支（顶栏分支键指示逻辑，pi-web hasBranch 同款：顶层 >1 或任一节点 children >1） */
     fun hasBranches(): Boolean = children.size > 1 || children.any { it.hasBranches() }

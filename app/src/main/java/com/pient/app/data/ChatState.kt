@@ -1263,19 +1263,20 @@ class ChatState {
             // 每轮回读后聊天页的顺序就和节点详情卡对不上。
             pushPiMessage(m, rebuilt)
         }
-        // 引用卡挂回（2026-09-17）：pi 侧带 `pient_quote` 标记的用户条目 → 正文剥掉 "> " 块、
-        // 引用回填 quote 字段。不修的话「开画布 / 切分支 / fork / 中止 / 压缩」之后气泡里
-        // 会直接冒出 "> …" 字面行、卡片再也回不来（用户实报的缺口）。
-        val quoted = piQuotedUserMsgs()
-        if (quoted.isNotEmpty()) {
+        // 引用卡 / 附件还原（2026-09-17）：pi 侧那条用户消息的文本里含着引用块与附件清单，
+        // 这里按文本对位还原成结构（正文干净、引用回 quote、附件回 attachments）。
+        // 不还原的话「开画布 / 切分支 / fork / 中止 / 压缩」之后气泡里会直接冒出 "> …" 与
+        // "[附件] 名称 · 路径" 字面行，引用卡与附件 chip 也再也回不来。
+        val restoredMsgs = piUserMsgs()
+        if (restoredMsgs.isNotEmpty()) {
             var restored = 0
             for (i in rebuilt.indices) {
                 val u = rebuilt[i] as? Msg.User ?: continue
-                val q = quoted[u.text.trim()] ?: continue
-                rebuilt[i] = q
+                val r = restoredMsgs[u.text.trim()] ?: continue
+                rebuilt[i] = r
                 restored++
             }
-            if (restored > 0) Log.i(TAG_CHAT, "按 pi 重建后挂回引用卡：$restored 条")
+            if (restored > 0) Log.i(TAG_CHAT, "按 pi 重建后还原用户消息（引用/附件）：$restored 条")
         }
         if (rebuilt.isEmpty()) return
         val list = messagesBySession.getOrPut(id) { mutableStateListOf() }
@@ -1340,11 +1341,16 @@ class ChatState {
         // 有文本块且无 toolResult 块，避免助手/工具结果被当成节点（实测踩过：画布 28 个节点）。
         fun isUserTurn(id: String): Boolean = isPiUserNode(entryById[id])
         val userIds = order.filter { isUserTurn(it) }
+        /** 用户条目的还原形态（正文剥离引用块 / 附件清单，引用与附件进各自字段）；无可还原项返回 null */
+        fun userMsgOf(id: String): Msg.User? =
+            if (!isUserTurn(id)) null
+            else piUserMsg(id, entryById[id]?.optJSONObject("message"), entryById, parentOf)
+
         fun textOf(id: String): String {
             val raw = piText(entryById[id]?.optJSONObject("message"))
             if (!isUserTurn(id)) return raw
-            // 带引用的用户消息：节点预览显示**用户原话**（引用块由节点详情卡单独呈现，2026-09-17）
-            return piQuotedUserMsg(id, raw, entryById, parentOf)?.text ?: raw
+            // 画布节点预览显示**用户原话**（引用与附件分别由详情卡 / 卡片图标呈现，2026-09-17）
+            return userMsgOf(id)?.text ?: raw
         }
         val idxOf = HashMap<String, Int>().apply { userIds.forEachIndexed { i, u -> put(u, i) } }
         // 每个用户消息的 exchange = **它自己这一回合**里的助手文本：从它往下走，遇到下一个用户消息就停。
@@ -1400,6 +1406,7 @@ class ChatState {
                 exchange = exchangeOf[id].orEmpty(),
                 children = kids.map { build(it) },
                 active = activePath.contains(id),
+                attachments = userMsgOf(id)?.attachments.orEmpty(),
             )
         }
         val topNodes = userIds.filter { nearestUserAncestor(it) == null }
@@ -1618,31 +1625,61 @@ class ChatState {
     }
 
     /**
-     * pi 用户条目 + 引用标记 → 上屏用的 [Msg.User]（正文剥掉引用块、引用回填 quote 字段）。
-     * **文本形态必须与标记对得上**：标记有可能成了孤儿（写了标记但本轮没发出去 → 后一条消息
-     * 会挂在它下面），对不上宁可不认 —— 最坏只是回到「正文里有 `> …` 行」的旧样子，
+     * pi 用户条目 → 上屏用的 [Msg.User]（正文剥离元数据、附件与引用挂回各自字段）。
+     * 返回 null = 这条条目没有可还原的东西（纯文本、无标记、无附件），调用方按 piText 原样用。
+     *
+     * 为什么需要：pi 的会话文件里用户消息**只有文本** —— 引用是正文开头的 `> …` 块，
+     * 附件是尾部的 `[附件] 名称 · 路径` 清单（直发的图片只有 content 里的 image 块、名字不留痕）。
+     * 这些元数据本地镜像里有结构，但任何一次按 pi 重建都会丢，所以读回时必须重解析。
+     *
+     * 引用那部分**文本形态必须与标记对得上**：标记有可能成了孤儿（写了标记但本轮没发出去 →
+     * 后一条消息会挂在它下面），对不上宁可不认 —— 最坏是回到「正文里有 `> …` 行」的旧样子，
      * 不会把别的消息错标成引用。
      */
-    private fun piQuotedUserMsg(
+    private fun piUserMsg(
         entryId: String,
-        rawText: String,
+        msg: JSONObject?,
         entries: Map<String, JSONObject> = piEntryById,
         parents: Map<String, String?> = piParentOf,
     ): Msg.User? {
-        val marker = quoteMarkerOf(entryId, entries, parents) ?: return null
-        val (quoted, body) = Quote.splitInjected(rawText.trim()) ?: return null
-        if (quoted != marker.text.trim()) return null
-        return Msg.User(body, emptyList(), marker)
+        val raw = piText(msg).trim()
+        if (raw.isEmpty()) return null
+        var body = raw
+        var quote: Quote? = null
+        val marker = quoteMarkerOf(entryId, entries, parents)
+        if (marker != null) {
+            val split = Quote.splitInjected(body)
+            if (split != null && split.first == marker.text.trim()) {
+                quote = marker
+                body = split.second
+            }
+        }
+        val (text, listed) = ContextPolicy.splitAttachments(body)
+        val attachments = listed + imageAttachments(msg)
+        if (quote == null && attachments.isEmpty()) return null
+        return Msg.User(text.ifBlank { body }, attachments, quote)
     }
 
-    /** 重建上屏流时按「pi 条目文本」对位挂回引用卡（`get_messages` 不带条目 id，只能按文本认） */
-    private fun piQuotedUserMsgs(): Map<String, Msg.User> {
+    /** pi 消息 content 里的 image 块 → 附件（直发的图片不写清单行、名字不留痕，只能按类型兜底） */
+    private fun imageAttachments(msg: JSONObject?): List<Attachment> {
+        val arr = msg?.optJSONArray("content") ?: return emptyList()
+        val out = ArrayList<Attachment>()
+        for (i in 0 until arr.length()) {
+            val b = arr.optJSONObject(i) ?: continue
+            if (b.optString("type") == "image") out += Attachment("", AttachmentKind.IMAGE, null)
+        }
+        return out
+    }
+
+    /** 重建上屏流时按「pi 条目文本」对位还原用户消息（`get_messages` 不带条目 id，只能按文本认） */
+    private fun piUserMsgs(): Map<String, Msg.User> {
         val out = HashMap<String, Msg.User>()
         for ((id, e) in piEntryById) {
             if (!isPiUserNode(e)) continue
-            val raw = piText(e.optJSONObject("message")).trim()
+            val msg = e.optJSONObject("message")
+            val raw = piText(msg).trim()
             if (raw.isEmpty()) continue
-            piQuotedUserMsg(id, raw)?.let { out[raw] = it }
+            piUserMsg(id, msg)?.let { out[raw] = it }
         }
         return out
     }
@@ -2165,6 +2202,7 @@ class ChatState {
             children = userChildrenOf[u.id].orEmpty().map { node(it) },
             branchLabel = null,
             active = u.id in activeIds,
+            attachments = u.msg.attachments,
         )
 
         return userChildrenOf[null].orEmpty().firstOrNull()?.let { node(it) }
@@ -2184,9 +2222,9 @@ class ChatState {
         if (piTreeSessionId == sid && piEntryById.containsKey(nodeId)) {
             val out = ArrayList<Msg>()
             val nodeMsg = piEntryById[nodeId]?.optJSONObject("message")
-            // 节点自身（用户消息）：带引用标记时剥掉 "> " 块、挂回 quote —— 与聊天页气泡同口径
-            val quotedSelf = if (nodeMsg != null) piQuotedUserMsg(nodeId, piText(nodeMsg)) else null
-            if (quotedSelf != null) out += quotedSelf else pushPiMessage(nodeMsg, out)
+            // 节点自身（用户消息）：引用块 / 附件清单剥回结构 —— 与聊天页气泡同口径
+            val selfMsg = if (nodeMsg != null) piUserMsg(nodeId, nodeMsg) else null
+            if (selfMsg != null) out += selfMsg else pushPiMessage(nodeMsg, out)
             // 子表按条目顺序建（get_tree 的解析顺序 = 会话顺序）
             val kids = HashMap<String, MutableList<String>>()
             piEntryById.keys.forEach { id -> piParentOf[id]?.let { p -> kids.getOrPut(p) { mutableListOf() } += id } }

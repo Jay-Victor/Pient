@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -117,15 +119,18 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import android.widget.Toast
 import com.pient.app.data.Attachment
+import com.pient.app.data.AttachmentKind
 import com.pient.app.data.ContextPolicy
 import com.pient.app.data.Msg
 import com.pient.app.data.Quote
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ToolStatus
+import com.pient.app.data.extOf
 import com.pient.app.data.markdownToPlainText
 import com.pient.app.ui.components.MarkdownText
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.components.PientSegmented
+import com.pient.app.ui.files.fileIcon
 import com.pient.app.ui.theme.LocalPientIsDark
 import com.pient.app.ui.theme.LocalPientUserBubble
 import com.pient.app.ui.theme.MonoFont
@@ -1130,9 +1135,42 @@ private fun MenuRow(
 
 // ───────────────────────────── 用户消息 ─────────────────────────────
 
+/**
+ * 附件图标（**唯一出处**：聊天页气泡 chip、画布节点卡片、节点详情卡共用）。
+ *
+ * 口径 = 与文件树/@ 引用同一份 [fileIcon]（有文件名就按扩展名分流：图片/视频/音频/文档…），
+ * 直发的图片在 pi 侧不留名字 → 回落到 [attachmentIcon] 的按类型图标；URL 附件保留链接图标
+ * （它的 name 是网址，按扩展名判会掉进「文档」）。
+ */
+internal fun attachmentGlyph(att: Attachment): ImageVector = when {
+    att.kind == AttachmentKind.URL -> attachmentIcon(att.kind)
+    att.name.isNotBlank() -> fileIcon(extOf(att.name))
+    else -> attachmentIcon(att.kind)
+}
+
+/**
+ * 附件 chip 行（**唯一出处**：聊天页气泡、画布节点详情卡共用）。
+ * 用 FlowRow：附件多时自动换行（普通 Row 会把超出的 chip 挤扁 —— 名字被压成 0 宽）。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun AttachmentsRow(
+    attachments: List<Attachment>,
+    chipBg: Color,
+    modifier: Modifier = Modifier,
+) {
+    FlowRow(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        attachments.forEach { att -> AttachmentChip(att, chipBg) }
+    }
+}
+
 /** 附件 chip（Operit AttachmentTag 规格：24dp 高、12dp 圆角、不透明实底 = 气泡色、图标 12dp + 名称 120dp 截断） */
 @Composable
-private fun AttachmentChip(att: Attachment, bubbleBg: Color) {
+internal fun AttachmentChip(att: Attachment, bubbleBg: Color) {
     Row(
         modifier = Modifier
             .height(24.dp)
@@ -1141,7 +1179,7 @@ private fun AttachmentChip(att: Attachment, bubbleBg: Color) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            attachmentIcon(att.kind), null,
+            attachmentGlyph(att), null,
             tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f),
             modifier = Modifier.size(12.dp),
         )
@@ -1185,13 +1223,8 @@ private fun UserBubble(msg: Msg.User) {
             }
         }
         if (msg.attachments.isNotEmpty()) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(bottom = 4.dp),
-            ) {
-                msg.attachments.forEach { att -> AttachmentChip(att, userBubbleBg) }
-            }
+            // 附件 chip 行（FlowRow：附件多时换行，不挤扁 —— 2026-09-17 与画布详情卡同款）
+            AttachmentsRow(msg.attachments, userBubbleBg, Modifier.padding(bottom = 4.dp))
         }
         BoxWithConstraints {
             val maxBubbleWidth = maxWidth * 0.85f
