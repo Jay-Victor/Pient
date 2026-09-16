@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Environment
 import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
+import org.json.JSONObject
 import java.io.File
 import java.io.BufferedOutputStream
 import java.io.FileOutputStream
@@ -419,19 +420,40 @@ object ProjectFiles {
     fun resetProjectRoot(context: Context, project: Project): Boolean {
         return try {
             if (project.uri != null) {
+                // SAF 项目：只删根下的子节点（删掉 tree 根会连持久化授权一起丢）。这里不补写项目标记 ——
+                // SAF 项目 2026-09-14 起已不再创建，本分支只服务历史记录。
                 val tree = DocumentFile.fromTreeUri(context, Uri.parse(project.uri)) ?: return false
                 tree.listFiles().forEach { runCatching { it.delete() } }
                 true
             } else {
-                val f = File(project.path)
-                when {
-                    !f.exists() -> f.mkdirs()
-                    else -> f.deleteRecursively() && f.mkdirs()
+                val root = File(project.path)
+                // 清空前先记下项目标记（类型 / 创建时间）：重置完按参考实现的 `createProjectConfigIfNeeded`
+                // 语义把它写回 —— 清空的是**内容**，不是「这是个 Pient 项目」这件事（2026-09-16）。
+                val old = readProjectConfig(root)
+                val ok = when {
+                    !root.exists() -> root.mkdirs()
+                    else -> root.deleteRecursively() && root.mkdirs()
                 }
+                if (ok) {
+                    ProjectTemplates.writeConfigIfNeeded(
+                        root, project.name, old.first ?: ProjectType.BLANK, old.second,
+                    )
+                }
+                ok
             }
         } catch (e: Exception) {
             false
         }
+    }
+
+    /** 读项目标记里的（类型, 创建时间）；文件缺失或损坏 → (null, null) */
+    private fun readProjectConfig(root: File): Pair<ProjectType?, Long?> {
+        val text = runCatching {
+            File(root, ProjectTemplates.CONFIG_FILE).takeIf { it.isFile }?.readText()
+        }.getOrNull() ?: return null to null
+        val json = runCatching { JSONObject(text) }.getOrNull() ?: return null to null
+        val created = json.optLong("createdAt").takeIf { it > 0L }
+        return ProjectType.fromId(json.optString("type")) to created
     }
 
     fun deleteProjectRoot(context: Context, project: Project): Boolean {

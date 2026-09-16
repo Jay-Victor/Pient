@@ -45,16 +45,29 @@ object ProjectTemplates {
             f.parentFile?.mkdirs()
             runCatching { f.writeText(content) }.onSuccess { written++ }
         }
-        val cfg = File(dir, CONFIG_FILE)
-        if (!cfg.exists()) {
-            val json = JSONObject()
-                .put("name", name)
-                .put("type", type.id)
-                .put("template", "pient/${type.id}")
-                .put("createdAt", System.currentTimeMillis())
-            runCatching { cfg.writeText(json.toString(2) + "\n") }.onSuccess { written++ }
-        }
+        if (writeConfigIfNeeded(dir, name, type)) written++
         return written
+    }
+
+    /**
+     * 写回项目标记文件（`.pient-project.json`；**已存在则不覆盖**）。返回是否写入。
+     *
+     * 单独抽出来（2026-09-16）：**重置工作区会把项目根目录清空、连标记一起删掉**，而参考实现里
+     * 那个函数的语义是 `createProjectConfigIfNeeded` —— 重置 = 清内容，不代表这个目录不再是
+     * Pient 项目（标记一丢，文件树/项目管理里就少了模板信息）。「新建项目」与「重置后补写」
+     * 共用这一处实现。
+     *
+     * @param createdAt 沿用旧标记里的创建时间；null = 取当前时间
+     */
+    fun writeConfigIfNeeded(dir: File, name: String, type: ProjectType, createdAt: Long? = null): Boolean {
+        val cfg = File(dir, CONFIG_FILE)
+        if (cfg.exists()) return false
+        val json = JSONObject()
+            .put("name", name)
+            .put("type", type.id)
+            .put("template", "pient/${type.id}")
+            .put("createdAt", createdAt ?: System.currentTimeMillis())
+        return runCatching { cfg.writeText(json.toString(2) + "\n") }.isSuccess
     }
 
     /** 模板内容：相对路径 → 文本。`$` 在 Kotlin 原始串里会插值，故模板里一律避开 shell 变量写法。 */

@@ -911,7 +911,7 @@ fun SessionDrawer(
             ) {
                 Text(
                     "确定要清空项目「$rn」的全部文件吗？目录本身保留（项目仍绑定在原位置），" +
-                        "其中所有文件与子目录将被删除，此操作不可撤销。",
+                        "其中所有文件与子目录将被删除；项目标记（.pient-project.json）会重新写回。此操作不可撤销。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
