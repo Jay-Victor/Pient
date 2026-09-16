@@ -46,9 +46,11 @@ interface ChatStrings {
     val removeQuote: String
     val plainText: String
     val markdownSource: String
+    val xml: String
     val messageCopied: String
     val copyPlainText: String
     val copyMarkdownSource: String
+    val copyXml: String
     val thinkingLive: String
     val thought: String
     val thoughtBriefly: String
@@ -231,9 +233,11 @@ object ZhChat : ChatStrings {
     override val removeQuote: String = "取消引用"
     override val plainText: String = "纯文本"
     override val markdownSource: String = "Markdown 源码"
+    override val xml: String = "XML"
     override val messageCopied: String = "消息已复制到剪贴板"
     override val copyPlainText: String = "复制纯文本"
     override val copyMarkdownSource: String = "复制 Markdown 源码"
+    override val copyXml: String = "复制 XML"
     override val thinkingLive: String = "思考中"
     override val thought: String = "已思考"
     override val thoughtBriefly: String = "思考了片刻"
@@ -402,9 +406,11 @@ object EnChat : ChatStrings {
     override val removeQuote: String = "Remove quote"
     override val plainText: String = "Plain text"
     override val markdownSource: String = "Markdown source"
+    override val xml: String = "XML"
     override val messageCopied: String = "Message copied to clipboard"
     override val copyPlainText: String = "Copy plain text"
     override val copyMarkdownSource: String = "Copy Markdown source"
+    override val copyXml: String = "Copy XML"
     override val thinkingLive: String = "Thinking"
     override val thought: String = "Thought"
     override val thoughtBriefly: String = "Thought briefly"

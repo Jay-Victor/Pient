@@ -58,6 +58,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import com.pient.app.data.extOf
+import com.pient.app.data.formatDuration
 import com.pient.app.ui.files.fileIcon
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -356,18 +357,6 @@ internal fun toolRowTitleParts(call: Msg.ToolCall): Pair<String, String> {
     )
     val verb = verbs.firstOrNull { full.startsWith(it) } ?: return full to ""
     return verb to full.removePrefix(verb)
-}
-
-/** 停顿时长（Hermes `formatDurationSeconds`：<1s 用 ms、<10s 一位小数、<60s 秒、否则 分+秒）。 */
-internal fun formatDuration(ms: Long?): String? {
-    if (ms == null || ms < 0) return null
-    val s = ms / 1000.0
-    return when {
-        s < 1 -> "${maxOf(1L, ms)}ms"
-        s < 10 -> String.format("%.1fs", s)
-        s < 60 -> "${s.toInt()}s"
-        else -> "${(s / 60).toInt()}m${(s % 60).toInt()}s"
-    }
 }
 
 /** 结果计数标签（Hermes `formatCountLabel` = `N <名词>`）。 */

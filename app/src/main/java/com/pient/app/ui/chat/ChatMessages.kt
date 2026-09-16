@@ -981,26 +981,34 @@ fun QuoteCard(
 
 /**
  * 复制消息卡片（2026-09-11；参照 Operit `MessageCopyPreviewBottomSheet`）：
- * 标题「复制消息」+ 分段控制器（纯文本 / Markdown 源码）+ 内容区（可选中文本、可滚动）
- * + 右下「复制纯文本」/「复制 Markdown 源码」按键（文案随分段变化，Operit 同款）。
+ * 标题「复制消息」+ 分段控制器（纯文本 / Markdown 源码 / XML）+ 内容区（可选中文本、可滚动）
+ * + 右下按键（文案随分段变化：复制纯文本 / 复制 Markdown 源码 / 复制 XML，Operit 同款）。
+ * 分段 0/1 = 这一条消息本身（正文）；分段 2 = 该回合 AI 侧全量（思考过程 + 工具调用过程 + 正文，
+ * 取数见 `data/MessageXml.kt` 的 [com.pient.app.data.turnXml]，2026-09-17 用户加的）。
  * Pient 浮层家族：PientPanel + scrim 点外关闭、无右上 ×（与点外关闭重复的元素不加）。
  */
 @Composable
 fun MessageCopyCard(
     text: String,
+    /** 分段 2 的内容：目标消息所属回合的 AI 侧全量（长按用户消息时是它自己的 `<user>`） */
+    xml: String,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val configuration = LocalConfiguration.current
-    var mode by remember(text) { mutableIntStateOf(0) }
+    var mode by remember(text, xml) { mutableIntStateOf(0) }
     // 纯文本态：按 Operit 一样用同一份 AST 转换（不放主线程——长回答逐字符转换可感）
     var plain by remember(text) { mutableStateOf<String?>(null) }
     LaunchedEffect(text) {
         plain = withContext(Dispatchers.Default) { markdownToPlainText(text) }
     }
-    val display = if (mode == 0) plain.orEmpty() else text
+    val display = when (mode) {
+        0 -> plain.orEmpty()
+        1 -> text
+        else -> xml
+    }
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Box(
@@ -1028,9 +1036,11 @@ fun MessageCopyCard(
                     color = MaterialTheme.colorScheme.onBackground,
                 )
                 PientSegmented(
-                    labels = listOf(L.chat.plainText, L.chat.markdownSource),
+                    labels = listOf(L.chat.plainText, L.chat.markdownSource, L.chat.xml),
                     selected = mode,
                     onSelect = { mode = it },
+                    // 目标下标取不到内容时（理论上的失效态）XML 分段不可点，避免复制到空串
+                    enabled = listOf(true, true, xml.isNotBlank()),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 12.dp),
@@ -1066,13 +1076,19 @@ fun MessageCopyCard(
                     horizontalArrangement = Arrangement.End,
                 ) {
                     TextButton(
-                        enabled = mode == 1 || plain != null,
+                        enabled = mode != 0 || plain != null,
                         onClick = {
                             clipboard.setText(AnnotatedString(display))
                             Toast.makeText(context, L.chat.messageCopied, Toast.LENGTH_SHORT).show()
                         },
                     ) {
-                        Text(if (mode == 0) L.chat.copyPlainText else L.chat.copyMarkdownSource)
+                        Text(
+                            when (mode) {
+                                0 -> L.chat.copyPlainText
+                                1 -> L.chat.copyMarkdownSource
+                                else -> L.chat.copyXml
+                            },
+                        )
                     }
                 }
             }

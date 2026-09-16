@@ -85,6 +85,7 @@ import com.pient.app.data.Panel
 import com.pient.app.data.Quote
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.SidebarStyle
+import com.pient.app.data.turnXml
 import com.pient.app.ui.components.isTabletLayout
 import com.pient.app.ui.components.StatusBadge
 import com.pient.app.ui.files.FilesPanel
@@ -142,6 +143,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
     var forkMenuTarget by remember { mutableStateOf<MessageMenuTarget?>(null) }
     // 复制消息卡（2026-09-11）：内容在打开时快照，避免下标失效；null = 未打开
     var copyCardText by remember { mutableStateOf<String?>(null) }
+    // 复制消息卡的 XML 分段（2026-09-17）：与 copyCardText 同一次打开时快照 —— 该回合 AI 侧全量
+    var copyCardXml by remember { mutableStateOf("") }
     // 待发送引用块（引用某条消息追问；2026-09-11）
     var pendingQuote by remember { mutableStateOf<Quote?>(null) }
     var inputFocusTick by remember { mutableIntStateOf(0) }
@@ -810,6 +813,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                             is Msg.Assistant -> m.markdown
                             else -> null
                         }
+                        // XML 分段：该回合 AI 侧全量（思考过程 + 工具调用过程 + 正文）
+                        copyCardXml = turnXml(chatState.currentMessages, forkIdx)
                         forkMenuTarget = null
                     },
                     onQuote = {
@@ -830,6 +835,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
             Box(Modifier.fillMaxSize().zIndex(3f)) {
                 MessageCopyCard(
                     text = copyCardText!!,
+                    xml = copyCardXml,
                     onDismiss = { copyCardText = null },
                 )
             }
