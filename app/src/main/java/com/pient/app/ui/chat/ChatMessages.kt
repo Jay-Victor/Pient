@@ -61,7 +61,6 @@ import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.ForkRight
 import androidx.compose.material.icons.outlined.FormatQuote
 import androidx.compose.material.icons.outlined.Psychology
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Summarize
 import androidx.compose.material.icons.outlined.Sync
@@ -784,7 +783,7 @@ private fun MessageCard(
 
 // ───────────────────────────── 思考并入回答块的判定 ─────────────────────────────
 
-// ───────────────────────────── 长按消息菜单（分支 + 复制 + 重新生成） ─────────────────────────────
+// ───────────────────────────── 长按消息菜单（分支 + 复制 + 引用） ─────────────────────────────
 
 /**
  * 长按菜单的目标（2026-09-17）：上屏下标 + 气泡根坐标 rect + **触点**的根坐标。
@@ -845,7 +844,7 @@ private fun menuOffset(
 }
 
 /**
- * 长按消息的上下文菜单（fork / 复制 / 引用 / 重新生成）。
+ * 长按消息的上下文菜单（fork / 复制 / 引用；2026-09-17 起移除「重新生成」——重做走会话内分支）。
  *
  * 定位：见 [menuOffset] —— 锚定长按**触点**，容器 = 本菜单挂载的那层（聊天页根 Box，键盘弹起时它自己会缩）；
  * 点外关闭（无 scrim，外层处理）。
@@ -856,17 +855,13 @@ fun ForkContextMenu(
     press: Offset,
     forkEnabled: Boolean,
     isAssistant: Boolean,
-    /** 重新生成仅最下方一条消息支持（2026-09-11 用户定）：非末条不显示该项 */
-    showRegenerate: Boolean,
-    regenerateEnabled: Boolean,
     onFork: () -> Unit,
     onCopy: () -> Unit,
     onQuote: () -> Unit,
-    onRegenerate: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
-    val rows = 2 + 1 + (if (showRegenerate) 1 else 0) // fork + 复制消息 + 引用 (+ 重新生成)
+    val rows = 3 // fork + 复制消息 + 引用
     val menuW = MenuWidth
     val menuH = MenuRowHeight * rows + MenuVertPadding
     // 容器 = 挂载层的真实约束（同一帧就能拿到，不需要等布局回调）：不用 screenHeightDp 是因为
@@ -917,14 +912,6 @@ fun ForkContextMenu(
                     enabled = true,
                     onClick = onQuote,
                 )
-                if (showRegenerate) {
-                    MenuRow(
-                        icon = Icons.Outlined.Refresh,
-                        label = L.chat.regenerate,
-                        enabled = regenerateEnabled,
-                        onClick = onRegenerate,
-                    )
-                }
             }
         }
     }

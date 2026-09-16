@@ -45,7 +45,7 @@ object ReplyNotify {
     private val VIBRATION_PATTERN = longArrayOf(0L, 250L, 150L, 250L)
 
     /**
-     * AI 回复完成时调用（[com.pient.app.data.ChatState] 的两处成功出口：发送 / 重新生成）。
+     * AI 回复完成时调用（[com.pient.app.data.ChatState] 的成功出口：发送一轮之后（2026-09-17 起「重新生成」链路已删））。
      *
      * @param sessionTitle 通知标题 = 当前会话名（空则回落品牌名 Pient）
      * @param replyText 回复正文（通知里取预览，展开看全文）

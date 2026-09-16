@@ -797,9 +797,6 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                     press = target.press,
                     forkEnabled = !chatState.isStreaming && chatState.currentSession?.running != true,
                     isAssistant = chatState.currentMessages.getOrNull(forkIdx) is Msg.Assistant,
-                    // 重新生成仅最下方一条消息支持（2026-09-11 用户定）：非末条不显示该项
-                    showRegenerate = forkIdx == chatState.currentMessages.lastIndex,
-                    regenerateEnabled = !chatState.isStreaming,
                     onFork = {
                         forkMenuTarget = null
                         // 会话外分支 = pi 原生 navigate（回合末尾锚点）+ clone（含 fork 点）：
@@ -824,11 +821,6 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                         }
                         forkMenuTarget = null
                         inputFocusTick++
-                    },
-                    onRegenerate = {
-                        forkMenuTarget = null
-                        // 同 startTurn 的口径：挂到进程 scope 上跑，失败由 blockedNote 提示（不再用 UI scope）
-                        chatState.startRegenerate(forkIdx)
                     },
                 )
             }

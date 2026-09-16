@@ -170,12 +170,6 @@ class ChatState {
      */
     fun appendEntry(msg: Msg): Int {
         val sid = currentSessionId ?: return -1
-        val at = runInsertAt
-        if (at != null) {
-            insertEntryAt(at, msg)
-            runInsertAt = at + 1
-            return at
-        }
         val list = entriesOf(sid)
         val id = newEntryId(list)
         list += SessionEntry(id, leafBySession[sid], msg)
@@ -183,28 +177,6 @@ class ChatState {
         val screen = messagesBySession.getOrPut(sid) { mutableStateListOf() }
         screen += msg
         return screen.lastIndex
-    }
-
-    /**
-     * 在主屏消息流的 [index] 处插入一条条目（条目树同步：新条目父 = 原 index-1 位置的条目，
-     * 原 index 位置的条目改挂到新条目下，叶子与分支关系不变）。
-     * 重新生成时本轮的思考/工具卡/结果都走这里——插在目标回答**之前**，不追加到末尾。
-     */
-    private fun insertEntryAt(index: Int, msg: Msg) {
-        val sid = currentSessionId ?: return
-        val screen = messagesBySession.getOrPut(sid) { mutableStateListOf() }
-        if (index !in 0..screen.size) return
-        val entries = entriesBySession[sid] ?: return
-        val path = leafPath(sid)
-        val parent = path.getOrNull(index - 1)
-        val child = path.getOrNull(index)
-        val id = newEntryId(entries)
-        entries += SessionEntry(id, parent?.id, msg)
-        if (child != null) {
-            val ci = entries.indexOfFirst { it.id == child.id }
-            if (ci >= 0) entries[ci] = entries[ci].copy(parentId = id)
-        }
-        screen.add(index, msg)
     }
 
     /** 由 root→leaf 重建上屏消息流（切分支后调用；条目树本身不动） */
@@ -783,12 +755,6 @@ class ChatState {
     fun startTurn(text: String, quote: Quote? = null) =
         launchTurn { streamReply(text, quote) }
 
-    /** 重新生成一轮（同 [startTurn] 的口径：UI scope 会随页面销毁静默取消，pi 却还在跑） */
-    fun startRegenerate(index: Int) = launchTurn {
-        val err = regenerateMessage(index)
-        if (err != null) blockedNote = L.runtime.regenerateFailed(err)
-    }
-
     /**
      * 把一轮任务挂到进程 scope 上跑，并保证**异常不逃逸**：
      * 取消照常上抛（abort 路径要用），其它异常由默认 handler 兜 → 会崩掉应用，所以这里收口成提示。
@@ -1066,73 +1032,6 @@ class ChatState {
                 )
             )
         } finally {
-            streamDraft = ""
-            streamThinking = ""
-            streamThinkingStartedAt = 0L
-            isStreaming = false
-            markRunning(false)
-        }
-    }
-
-    /**
-     * 重新生成指定助手消息（消息流下标；长按菜单「重新生成」入口，参照 Operit
-     * `regenerateSingleAiMessage` 语义）：
-     * 用「该消息之前的历史」（含其前一条用户消息）重新请求，结果**原位替换**该条消息
-     * （条目树位置不变，分支结构不受影响）；流式开启时逐片刷新，用户可见打字过程。
-     * 失败**回退原内容**并返回错误文案（调用方 Toast）——不把用户已看到的内容清空。
-     *
-     * @return null = 成功；非空 = 失败原因（含运行中被拒的口径）
-     */
-    suspend fun regenerateMessage(index: Int): String? {
-        val list = currentMessages
-        val original = list.getOrNull(index) as? Msg.Assistant
-            ?: return L.runtime.cannotRegenerate
-        // 只有最下方一条消息支持重新生成（2026-09-11 用户定）：中间消息重生成会与其后的
-        // 对话上下文脱节（后续消息引用的正是旧回答），仅在会话末尾语义成立。
-        if (index != list.lastIndex) return L.runtime.onlyLastRegenerable
-        if (isStreaming) return L.runtime.busyTryLater
-        val model = selectedModel ?: return L.runtime.noModelConfigured
-        val cfg = AiConfigStore.configs[model.provider] ?: return L.runtime.noModelConfigured
-        // 重新生成 = 拿「该消息之前最近的一条用户消息」再问一次（上下文由 pi 维护，App 不拼历史）
-        val prevUser = list.subList(0, index).lastOrNull { it is Msg.User } as? Msg.User
-            ?: return L.runtime.noContextAvailable
-        val prevText = ContextPolicy.promptTextFor(prevUser)
-            .let { t -> prevUser.quote?.toPrompt(t) ?: t }
-        val effectiveModel = model.name.takeIf { cfg.models.contains(it) }
-            ?: cfg.models.firstOrNull().orEmpty()
-
-        isStreaming = true
-        streamDraft = ""
-        streamThinking = ""
-        streamThinkingStartedAt = 0L
-        // 本轮条目一律插到目标回答**之前**：目标回答就在末位，按追加语义写会渲染到回答之后
-        runInsertAt = index
-        markRunning(true)
-        return try {
-            val outcome = runChat(
-                cfg = cfg.copy(modelList = effectiveModel),
-                userTurnText = prevText,
-                // 流式正文只进「流式卡」，**不再往旧回答的槽位里写**（2026-09-16）：一个回合的正文现在
-                // 会分成多段（见 flushText），继续写在槽里会让每段正文在工具阶段留一份重复副本；旧回答
-                // 原样显示到回合结束，由下面那次原地替换一次换成新回答（流式表现与普通发送同一套）。
-                onDelta = { streamDraft = it },
-                onThinking = { noteThinkingDelta(it) },
-            )
-            // 思考/正文/工具行已按阶段插到目标回答之前（游标每插一条前进一位），这里原位替换回答
-            replaceMessageAt(runInsertAt ?: index, Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
-            // 重新生成同样计入用量台账（一次真实请求 = 一笔用量）
-            UsageStore.record(cfg.providerId, effectiveModel, outcome.usage)
-            // 消息通知：重新生成同样算「AI 回复完成」（应用不在前台时才发）
-            ReplyNotify.notifyReply(AppCtx.get(), currentSession?.title, outcome.text)
-            null
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            replaceMessageAt(runInsertAt ?: index, original)   // 中止：恢复原内容
-            throw e
-        } catch (e: Exception) {
-            replaceMessageAt(runInsertAt ?: index, original)
-            e.message ?: L.runtime.unknownError
-        } finally {
-            runInsertAt = null
             streamDraft = ""
             streamThinking = ""
             streamThinkingStartedAt = 0L
@@ -1719,7 +1618,7 @@ class ChatState {
          * 都没有）摆到回合末尾，观感就是"工具前的旁白被搬到了工具下面"；画布「节点详情」按 pi 的内容块
          * 顺序渲染，两处自然对不上（用户实报：正文要跟它那次工具调用在一起，与节点详情同序）。
          *
-         * 落库位置沿用 [appendEntry]：普通发送 = 追加到末尾；重新生成 = 插到目标回答**之前**（游标处）。
+         * 落库位置沿用 [appendEntry]：一轮的正文一律按顺序追加到末尾。
          * 无正文不落条目（pi 里也只有真产出正文的消息才有 text 块）；不带模型标签与 usage —— 那两样
          * 只挂在回合末尾那条最终回答上（保持"一轮一个标签 + 一行用量"的观感）。
          */
@@ -2039,7 +1938,7 @@ class ChatState {
         // 前台保活（2026-09-16，M5）：一轮在跑时把进程挂进前台服务 —— 用户切走 / 熄屏后
         // pi 子进程与它的管道不会被系统清掉（清掉 = 本轮直接消失）。
         // 挂在 markRunning 上是因为它是「本轮是否在跑」的唯一收口点：
-        // 开始 / 正常结束 / 中止 / 出错 / 「重新生成」都经过它。
+        // 开始 / 正常结束 / 中止 / 出错 都经过它。
         if (running) {
             // 新一轮：工具计数归零（通知卡片上的「工具调用：N」）
             toolCallsThisTurn = 0
@@ -2341,12 +2240,6 @@ class ChatState {
     var compacting by mutableStateOf(false)
         private set
 
-    /**
-     * 本轮运行条目的插入游标（null = 追加到 leaf，发送路径语义）。
-     * 重新生成时 = 目标回答的上屏下标：本轮思考条目插到它之前，每插一条自增，
-     * 始终指向目标回答的当前位置（见 [appendEntry] / [insertEntryAt]）。
-     */
-    private var runInsertAt: Int? = null
     // 上下文用量（**pi 真值**，2026-09-16 取代原型常量 61200 / 180000）：
     // 由 [refreshContextUsage] 从 `get_session_stats.contextUsage` 填；窗口未知时卡上显示 `—`。
     var windowTokens by mutableStateOf(0)

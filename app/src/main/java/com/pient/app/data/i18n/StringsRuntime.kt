@@ -25,7 +25,6 @@ interface RuntimeStrings {
     val projectPathInvalid: String
     fun dirNameExists(a0: Any?): String
     val dirRenameFailed: String
-    fun regenerateFailed(a0: Any?): String
     val noProviderOrModelHint: String
     val piNotUnpacked: String
     val piChannelStartFailed: String
@@ -33,8 +32,6 @@ interface RuntimeStrings {
     val piChannelUnresponsive: String
     val piNotReadyNotSent: String
     val noModelConfiguredDetail: String
-    val cannotRegenerate: String
-    val onlyLastRegenerable: String
     val busyTryLater: String
     val noContextAvailable: String
     val piChannelStartFailedHint: String
@@ -172,7 +169,6 @@ object ZhRuntime : RuntimeStrings {
     override val projectPathInvalid: String = "项目路径异常，无法改名"
     override fun dirNameExists(a0: Any?): String = "目录已存在同名文件夹：${a0}"
     override val dirRenameFailed: String = "目录改名失败（可能被占用）"
-    override fun regenerateFailed(a0: Any?): String = "重新生成失败：${a0}"
     override val noProviderOrModelHint: String = "没有可用的服务商 / 模型：先到「服务商与模型配置」里配好"
     override val piNotUnpacked: String = "pi 未就绪：随包运行时还没解出来（可在「环境配置」里重新检测）"
     override val piChannelStartFailed: String = "pi 通道启动失败"
@@ -180,8 +176,6 @@ object ZhRuntime : RuntimeStrings {
     override val piChannelUnresponsive: String = "pi 通道无响应"
     override val piNotReadyNotSent: String = "pi 运行时未就绪：消息未发送（点上方提示条的「环境配置」修复）"
     override val noModelConfiguredDetail: String = "⚠️ 尚未配置可用模型：请在「服务商与模型配置」中添加服务商，填入 API 密钥后填写模型列表或点「刷新」拉取。"
-    override val cannotRegenerate: String = "该条消息无法重新生成"
-    override val onlyLastRegenerable: String = "仅最后一条消息支持重新生成"
     override val busyTryLater: String = "当前已有消息在处理中，请稍后再试"
     override val noContextAvailable: String = "缺少可用的上下文"
     override val piChannelStartFailedHint: String = "pi 通道启动失败：可到「环境配置」里检测/更新"
@@ -319,7 +313,6 @@ object EnRuntime : RuntimeStrings {
     override val projectPathInvalid: String = "The project path is invalid, cannot rename"
     override fun dirNameExists(a0: Any?): String = "A folder with the same name already exists: ${a0}"
     override val dirRenameFailed: String = "Failed to rename the directory (it may be in use)"
-    override fun regenerateFailed(a0: Any?): String = "Regeneration failed: ${a0}"
     override val noProviderOrModelHint: String = "No Provider / Model available: configure one in \"Providers & Models\" first"
     override val piNotUnpacked: String = "pi is not ready: the bundled runtime has not been unpacked yet (re-check it in \"Environment\")"
     override val piChannelStartFailed: String = "Failed to start the pi channel"
@@ -327,8 +320,6 @@ object EnRuntime : RuntimeStrings {
     override val piChannelUnresponsive: String = "The pi channel is not responding"
     override val piNotReadyNotSent: String = "pi runtime is not ready: the message was not sent (tap \"Environment\" in the banner above to fix it)"
     override val noModelConfiguredDetail: String = "⚠️ No model configured: add a Provider in \"Providers & Models\", enter the API Key, then fill in the model list or tap \"Refresh\" to fetch it."
-    override val cannotRegenerate: String = "This message cannot be regenerated"
-    override val onlyLastRegenerable: String = "Only the last message can be regenerated"
     override val busyTryLater: String = "A message is already being processed; try again later"
     override val noContextAvailable: String = "No usable Context available"
     override val piChannelStartFailedHint: String = "Failed to start the pi channel: check/update it in \"Environment\""

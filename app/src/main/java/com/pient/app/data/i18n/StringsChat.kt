@@ -41,7 +41,6 @@ interface ChatStrings {
     val roleUser: String
     val forkFromHere: String
     val quote: String
-    val regenerate: String
     val quoteAssistant: String
     val quoteUser: String
     val removeQuote: String
@@ -227,7 +226,6 @@ object ZhChat : ChatStrings {
     override val roleUser: String = "用户"
     override val forkFromHere: String = "从此处创建新会话"
     override val quote: String = "引用"
-    override val regenerate: String = "重新生成"
     override val quoteAssistant: String = "引用 AI 回答"
     override val quoteUser: String = "引用用户消息"
     override val removeQuote: String = "取消引用"
@@ -399,7 +397,6 @@ object EnChat : ChatStrings {
     override val roleUser: String = "User"
     override val forkFromHere: String = "New session from here"
     override val quote: String = "Quote"
-    override val regenerate: String = "Regenerate"
     override val quoteAssistant: String = "Quote AI answer"
     override val quoteUser: String = "Quote user message"
     override val removeQuote: String = "Remove quote"
