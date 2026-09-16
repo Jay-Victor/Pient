@@ -1,5 +1,6 @@
 package com.pient.app.runtime
 
+import com.pient.app.data.i18n.L
 import android.content.Context
 import android.os.ParcelFileDescriptor
 import android.util.Log
@@ -144,10 +145,17 @@ private class FileOutputStreamCompat(private val pfd: ParcelFileDescriptor?) : O
 object AndroidShell {
     private const val TAG = "PientAndroidShell"
 
-    enum class Backend(val id: String, val label: String) {
-        NONE("none", "不可用"),
-        SHIZUKU("shizuku", "Shizuku（ADB 级）"),
-        ROOT("root", "Root（su）"),
+    enum class Backend(val id: String) {
+        NONE("none"),
+        SHIZUKU("shizuku"),
+        ROOT("root");
+
+        /** 显示名（计算属性：枚举构造参数只求值一次，写 `L.…` 会冻结成首帧语言） */
+        val label: String get() = when (this) {
+            NONE -> L.runtime.shellBackendNone
+            SHIZUKU -> L.runtime.shellBackendShizuku
+            ROOT -> "Root（su）"
+        }
     }
 
     data class Result(
@@ -190,18 +198,18 @@ object AndroidShell {
     /** 一句人话：为什么不可用 / 现在走哪条通道（UI 与工具的错误文案唯一出处） */
     fun statusText(context: Context): String = when (SettingsStore.permissionTier) {
         PermissionTier.STANDARD ->
-            "Android shell 需要特权通道：当前档位是「标准权限」。" +
-                "到「系统权限设置」切到「调试权限（Shizuku）」或「Root 权限」后可用。"
+            L.runtime.shellNeedsPrivilege +
+                L.runtime.shellSwitchTierHint
         PermissionTier.DEBUGGER -> when {
-            !ShizukuGateway.installed(context) -> "Android shell 不可用：未安装 Shizuku 应用（调试权限档）"
-            !ShizukuGateway.running() -> "Android shell 不可用：Shizuku 服务没在运行（设备重启后需重新激活）"
-            !ShizukuGateway.authorized() -> "Android shell 不可用：Pient 还没拿到 Shizuku 授权"
-            else -> "Android shell 就绪：Shizuku（ADB 级，shell 身份）"
+            !ShizukuGateway.installed(context) -> L.runtime.shellNoShizukuApp
+            !ShizukuGateway.running() -> L.runtime.shellShizukuNotRunning
+            !ShizukuGateway.authorized() -> L.runtime.shellShizukuUnauthorized
+            else -> L.runtime.shellReadyShizuku
         }
         PermissionTier.ROOT -> if (rootAvailable(context)) {
-            "Android shell 就绪：Root（su，uid 0）"
+            L.runtime.shellReadyRoot
         } else {
-            "Android shell 不可用：设备没有可用的 su（Root 权限档）"
+            L.runtime.shellNoSu
         }
     }
 
@@ -222,7 +230,7 @@ object AndroidShell {
                     ProcessBuilder("su", "-c", command)
                         .redirectErrorStream(false)
                         .start()
-                }.getOrElse { return Result(b, -1, "", "", note = "su 启动失败：${it.message}") }
+                }.getOrElse { return Result(b, -1, "", "", note = L.runtime.suStartFailed(it.message)) }
                 drain(LocalShellProcess(p, "Root"), timeoutMs, b)
             }
             Backend.SHIZUKU -> {
@@ -230,7 +238,7 @@ object AndroidShell {
                     ?: return Result(b, -1, "", "", note = statusText(context))
                 val proc = runCatching { svc.newProcess(arrayOf("sh", "-c", command), null, null) }
                     .getOrNull()
-                    ?: return Result(b, -1, "", "", note = "Shizuku 创建进程失败（服务可能已被系统回收）")
+                    ?: return Result(b, -1, "", "", note = L.runtime.shizukuSpawnFailed)
                 drain(RemoteShellProcess(proc, "Shizuku"), timeoutMs, b)
             }
             Backend.NONE -> Result(b, -1, "", "", note = statusText(context))

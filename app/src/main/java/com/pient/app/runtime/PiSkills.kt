@@ -1,5 +1,6 @@
 package com.pient.app.runtime
 
+import com.pient.app.data.i18n.L
 import android.content.Context
 import android.net.Uri
 import android.util.Log
@@ -81,7 +82,7 @@ object PiSkills {
         }
         sb.append(base.name).append("/\n")
         walk(base, "", 1)
-        if (count >= maxEntries) sb.append("…（截断）\n")
+        if (count >= maxEntries) sb.append(L.runtime.treeTruncated)
         return sb.toString()
     }
 
@@ -139,19 +140,19 @@ object PiSkills {
      */
     fun import(context: Context, displayName: String, content: String, global: Boolean): String? {
         val fm = parseFrontmatter(content)
-        if (fm == null) return "缺少 frontmatter（文件要以 --- 开头，里面有 name 和 description）"
-        if (fm.second.isBlank()) return "frontmatter 里的 description 不能为空（pi 靠它决定要不要加载）"
+        if (fm == null) return L.runtime.frontmatterMissing
+        if (fm.second.isBlank()) return L.runtime.frontmatterDescRequired
         val slug = slugOf(fm.first.ifBlank { displayName })
-        if (slug.isBlank()) return "技能名不合法"
+        if (slug.isBlank()) return L.runtime.invalidSkillName
         val root = if (global) globalRoot(context) else projectRoot(context)
         val dir = File(root, slug)
-        if (dir.exists()) return "已存在同名技能：$slug"
+        if (dir.exists()) return L.runtime.skillExistsSlug(slug)
         return runCatching {
             dir.mkdirs()
             File(dir, "SKILL.md").writeText(content)
             Log.i(TAG, "技能导入：$slug → ${dir.absolutePath}")
             null
-        }.getOrElse { it.message ?: "写入失败" }
+        }.getOrElse { it.message ?: L.runtime.writeFailed }
     }
 
     /**
@@ -180,23 +181,23 @@ object PiSkills {
                     zip.closeEntry()
                 }
             }
-        } ?: return "打不开所选文件" to ""
-        if (entries.isEmpty()) return "压缩包里没有文件" to ""
+        } ?: return L.runtime.cannotOpenFile to ""
+        if (entries.isEmpty()) return L.runtime.zipNoFiles to ""
 
         val skillPath = entries.keys.firstOrNull {
             it.equals("SKILL.md", ignoreCase = true) || it.endsWith("/SKILL.md", ignoreCase = true)
-        } ?: return "压缩包里没有 SKILL.md（技能目录必须含 SKILL.md）" to ""
+        } ?: return L.runtime.zipNoSkillMd to ""
         val prefix = skillPath.substring(0, skillPath.length - "SKILL.md".length)
-        val md = entries[skillPath]?.toString(Charsets.UTF_8) ?: return "SKILL.md 读取失败" to ""
+        val md = entries[skillPath]?.toString(Charsets.UTF_8) ?: return L.runtime.skillMdReadFailed to ""
         val fm = parseFrontmatter(md)
-            ?: return "SKILL.md 缺少 frontmatter（文件要以 --- 开头，里面有 name 和 description）" to ""
-        if (fm.second.isBlank()) return "frontmatter 里的 description 不能为空（pi 靠它决定要不要加载）" to ""
+            ?: return L.runtime.skillMdFrontmatterMissing to ""
+        if (fm.second.isBlank()) return L.runtime.frontmatterDescRequired to ""
         val slug = slugOf(fm.first.ifBlank { prefix.trimEnd('/').substringAfterLast('/') })
-        if (slug.isBlank()) return "技能名不合法" to ""
+        if (slug.isBlank()) return L.runtime.invalidSkillName to ""
 
         val root = if (global) globalRoot(context) else projectRoot(context)
         val dir = File(root, slug)
-        if (dir.exists()) return "已存在同名技能：$slug" to slug
+        if (dir.exists()) return L.runtime.skillExistsSlug(slug) to slug
         dir.mkdirs()
         var written = 0
         entries.forEach { (path, bytes) ->
@@ -210,14 +211,14 @@ object PiSkills {
         }
         Log.i(TAG, "技能 ZIP 导入：$slug → ${dir.absolutePath}（$written 个文件）")
         null to slug
-    }.getOrElse { (it.message ?: "解压失败") to "" }
+    }.getOrElse { (it.message ?: L.runtime.unzipFailed) to "" }
 
     /** 从市场/其他仓库导入一个技能目录（把 [files] 里的相对路径 → 内容写下去） */
     fun importFiles(context: Context, slug: String, files: Map<String, String>, global: Boolean): String? {
         val name = slugOf(slug)
-        if (name.isBlank()) return "技能名不合法"
+        if (name.isBlank()) return L.runtime.invalidSkillName
         val dir = File(if (global) globalRoot(context) else projectRoot(context), name)
-        if (dir.exists()) return "已存在同名技能：$name"
+        if (dir.exists()) return L.runtime.skillExistsName(name)
         return runCatching {
             files.forEach { (rel, text) ->
                 val f = File(dir, rel)
@@ -226,7 +227,7 @@ object PiSkills {
             }
             Log.i(TAG, "技能目录导入：$name（${files.size} 个文件）")
             null
-        }.getOrElse { it.message ?: "写入失败" }
+        }.getOrElse { it.message ?: L.runtime.writeFailed }
     }
 
     // ─────────────────────────── 扫描与解析 ───────────────────────────
@@ -276,8 +277,8 @@ object PiSkills {
             global = global,
             enabled = enabled,
             problem = when {
-                fm == null -> "缺少 frontmatter"
-                fm.second.isBlank() -> "description 为空"
+                fm == null -> L.runtime.frontmatterMissingShort
+                fm.second.isBlank() -> L.runtime.descriptionEmpty
                 else -> null
             },
         )

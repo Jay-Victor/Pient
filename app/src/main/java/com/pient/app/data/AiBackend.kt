@@ -1,5 +1,6 @@
 package com.pient.app.data
 
+import com.pient.app.data.i18n.L
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -232,7 +233,7 @@ object AiBackend {
             cont.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
-                    if (cont.isActive) cont.resumeWithException(AiException(e.message ?: "网络请求失败"))
+                    if (cont.isActive) cont.resumeWithException(AiException(e.message ?: L.runtime.networkRequestFailed))
                 }
 
                 override fun onResponse(call: Call, response: Response) {

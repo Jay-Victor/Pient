@@ -1,5 +1,8 @@
 package com.pient.app.data
 
+import com.pient.app.data.i18n.OptionLabels
+import com.pient.app.data.i18n.L
+import com.pient.app.data.i18n.Languages
 /**
  * **环境配置相关的静态数据**（2026-09-14 用户拍板：终端执行链路整体移除后，
  * 环境配置页已改为空白占位页 —— 原「执行环境二选一 / 镜像源 / 组件勾选」页面不再渲染本文件的清单）。
@@ -23,22 +26,29 @@ package com.pient.app.data
  */
 enum class ExecEnv(
     val id: String,          // prefs 存储值 + exec_env 文件内容
-    val title: String,
-    val desc: String,
-    val badge: String,       // 卡片右侧徽标（推荐 / 需 Root）
 ) {
-    UBUNTU(
-        id = "ubuntu",
-        title = "Ubuntu 24.04（PRoot）",
-        desc = "GNU 用户空间：bash + coreutils + apt，可 apt 装任意软件；无需 Root，命令经 PRoot 运行",
-        badge = "推荐",
-    ),
-    UBUNTU_CHROOT(
-        id = "ubuntu-chroot",
-        title = "Ubuntu 24.04（chroot）",
-        desc = "同一个 rootfs，但以 su + chroot 运行：真 uid 0、零模拟开销，可改系统、绑特权端口；需设备已 Root",
-        badge = "需 Root",
-    );
+    UBUNTU(id = "ubuntu"),
+    UBUNTU_CHROOT(id = "ubuntu-chroot");
+
+    /**
+     * 卡片标题 / 说明 / 徽标。**必须是计算属性**：枚举构造参数只在类加载时求值一次，
+     * 直接写 `L.…` 会把文案冻结成首帧语言（切语言不刷新）。
+     */
+    val title: String get() = when (this) {
+        UBUNTU -> "Ubuntu 24.04（PRoot）"
+        UBUNTU_CHROOT -> "Ubuntu 24.04（chroot）"
+    }
+
+    val desc: String get() = when (this) {
+        UBUNTU -> L.env.prootDesc
+        UBUNTU_CHROOT -> L.env.chrootDesc
+    }
+
+    /** 卡片右侧徽标（推荐 / 需 Root） */
+    val badge: String get() = when (this) {
+        UBUNTU -> L.env.recommended
+        UBUNTU_CHROOT -> L.env.rootRequired
+    }
 
     companion object {
         fun fromId(id: String?): ExecEnv =
@@ -71,6 +81,10 @@ data class AptMirror(val name: String, val uri: String, val portsUri: String) {
  * 默认 apt 镜像源（2026-09-14 实测结论）：**国内网络下官方源拉包会
  * `E: Failed to fetch` → apt 退出码 100**，而清华 TUNA 同一步骤通过。
  * 所以新增/首启的默认值取 TUNA（用户可在页面里改；已选过的不受影响）。
+ *
+ * ⚠️ 这里是**存储值**（`SettingsStore.aptMirror` 存的就是它，[aptMirrorByName] 按它等值匹配）
+ * → 必须保持稳定的中文标识，**不能**换成 `L.xxx`（否则切一次语言就把用户的已选镜像改写了）；
+ * 界面显示走 `OptionLabels.aptMirror(name)`。
  */
 const val DEFAULT_APT_MIRROR = "清华 TUNA"
 
@@ -100,6 +114,8 @@ object ComponentGroups {
     /** pi 是 Node 程序：不装 Node 就用不了 pi（pi 本体已随 Pient 预置） */
     const val NODE = "Node.js"
 
+    // 下面三个是**分类标识**（同时用作 DESCS 的键与 `it.group ==` 的等值判定）
+    // → 保持稳定中文标识，界面标题走 OptionLabels.envGroup(id)、说明走 descOf(id)
     /** pi 的 grep / find 两个工具的执行引擎（Rust 写的 rg / fd） */
     const val PI_SEARCH = "pi 搜索依赖"
 
@@ -113,16 +129,21 @@ object ComponentGroups {
     /** 展示顺序（= 安装顺序：node 必须排在含 npm 安装命令的项之前） */
     val ORDER = listOf(NODE, PI_SEARCH, PYTHON, BASE, GO, JAVA, RUST, SSH)
 
-    val DESCS = mapOf(
-        NODE to "Node 运行时与包管理（pi 本体已随 Pient 预置，这里只需要 Node）",
-        PI_SEARCH to "pi 的 grep / find 工具靠它们执行；不装则 pi 首次调用时自己联网下载",
-        PYTHON to "只在你让 AI 写 .py / 跑脚本时才需要（Pient 自身与 pi 都不依赖 Python）",
-        BASE to "下载、解压、版本控制、编译，以及终端里的日常工具",
-        GO to "Go 工具链（按项目需要）",
-        JAVA to "Java 运行时 / 编译（JDK，按项目需要）",
-        RUST to "Rust 工具链（官方 rustup 安装，体积大）",
-        SSH to "SSH 客户端、免密脚本与文件同步",
-    )
+    /**
+     * 分类说明。**必须是函数而不是 map 常量**：`object` 里的 val 只在首次访问时求值一次，
+     * 换成 `L.env.*` 后会冻结成当时的语言（切语言不刷新）。
+     */
+    fun descOf(group: String): String = when (group) {
+        NODE -> L.env.groupNodeDesc
+        PI_SEARCH -> L.env.groupPiSearchDesc
+        PYTHON -> L.env.groupPythonDesc
+        BASE -> L.env.groupBaseDesc
+        GO -> L.env.groupGoDesc
+        JAVA -> L.env.groupJavaDesc
+        RUST -> L.env.groupRustDesc
+        SSH -> L.env.groupSshDesc
+        else -> ""
+    }
 
     /** 分类级「（Pient 必须）」：照 Operit 在分类标题下写橙色小字 */
     val REQUIRED_GROUPS = setOf(NODE, PI_SEARCH)
@@ -157,24 +178,38 @@ data class UbuntuComponent(
     val heavy: Boolean = false,
 )
 
-val UBUNTU_COMPONENTS = listOf(
+/**
+ * 环境内软件清单。
+ *
+ * **必须是带 getter 的 val（并按语言缓存）**：这份清单的元素携带文案（`L.env.…`），
+ * 写成 `val UBUNTU_COMPONENTS = listOf(…)` 会在类加载时求值一次 → 文案冻结成首帧语言
+ * （切语言不刷新）；写成无缓存的 getter 又会在每帧重组里重建 30 个对象，所以按
+ * 「当前生效语言」缓存一份。
+ */
+private var componentsCache: Pair<String, List<UbuntuComponent>>? = null
+
+val UBUNTU_COMPONENTS: List<UbuntuComponent>
+    get() {
+        val lang = Languages.resolveId(SettingsStore.language)
+        componentsCache?.let { (key, list) -> if (key == lang) return list }
+        val built = listOf(
     // ── 命令行基础 ──
-    UbuntuComponent("ca", "CA 证书", "ca-certificates", "update-ca-certificates", "https 源 / 下载校验的基础（minbase 未带）", ComponentGroups.BASE),
-    UbuntuComponent("curl", "curl", "curl", "curl", "HTTP 请求与下载", ComponentGroups.BASE),
-    UbuntuComponent("wget", "wget", "wget", "wget", "下载工具（脚本常用）", ComponentGroups.BASE),
-    UbuntuComponent("git", "Git", "git", "git", "版本控制，AI 拉取/提交代码用", ComponentGroups.BASE),
-    UbuntuComponent("unzip", "unzip", "unzip", "unzip", "解压 zip 归档", ComponentGroups.BASE),
-    UbuntuComponent("jq", "jq", "jq", "jq", "命令行 JSON 处理（脚本里读接口结果）", ComponentGroups.BASE),
-    UbuntuComponent("tree", "tree", "tree", "tree", "目录树（一眼看项目结构）", ComponentGroups.BASE),
+    UbuntuComponent("ca", L.env.caName, "ca-certificates", "update-ca-certificates", L.env.caDesc, ComponentGroups.BASE),
+    UbuntuComponent("curl", "curl", "curl", "curl", L.env.curlDesc, ComponentGroups.BASE),
+    UbuntuComponent("wget", "wget", "wget", "wget", L.env.wgetDesc, ComponentGroups.BASE),
+    UbuntuComponent("git", "Git", "git", "git", L.env.gitDesc, ComponentGroups.BASE),
+    UbuntuComponent("unzip", "unzip", "unzip", "unzip", L.env.unzipDesc, ComponentGroups.BASE),
+    UbuntuComponent("jq", "jq", "jq", "jq", L.env.jqDesc, ComponentGroups.BASE),
+    UbuntuComponent("tree", "tree", "tree", "tree", L.env.treeDesc, ComponentGroups.BASE),
 
     // ── 语言运行时 ──
-    UbuntuComponent("python3", "Python 3", "python3", "python3", "脚本运行时（AI 跑 .py 用）", ComponentGroups.PYTHON),
-    UbuntuComponent("pip3", "pip", "python3-pip", "pip3", "Python 包管理", ComponentGroups.PYTHON),
-    UbuntuComponent("python-is-python3", "python 别名", "python-is-python3", "python", "让 `python` 指向 python3（脚本兼容）", ComponentGroups.PYTHON),
-    UbuntuComponent("python3-venv", "venv 虚拟环境", "python3-venv", "python3", "`python3 -m venv` 可用", ComponentGroups.PYTHON, detectCmd = "dpkg -s python3-venv"),
+    UbuntuComponent("python3", "Python 3", "python3", "python3", L.env.python3Desc, ComponentGroups.PYTHON),
+    UbuntuComponent("pip3", "pip", "python3-pip", "pip3", L.env.pip3Desc, ComponentGroups.PYTHON),
+    UbuntuComponent("python-is-python3", L.env.pythonAliasName, "python-is-python3", "python", L.env.pythonAliasDesc, ComponentGroups.PYTHON),
+    UbuntuComponent("python3-venv", L.env.venvName, "python3-venv", "python3", L.env.venvDesc, ComponentGroups.PYTHON, detectCmd = "dpkg -s python3-venv"),
     UbuntuComponent(
-        "uv", "uv（Python 包管理器）", "python3-pip", "uv",
-        "pip 的快速替代：`uv pip install` / `uv venv`",
+        "uv", L.env.uvName, "python3-pip", "uv",
+        L.env.uvDesc,
         ComponentGroups.PYTHON,
         installCmd = "apt-get install -y --no-install-recommends python3-pip && python3 -m pip install --break-system-packages -q uv",
     ),
@@ -182,7 +217,7 @@ val UBUNTU_COMPONENTS = listOf(
     // ── 语言运行时：Node.js（走 NodeSource 装 Node 24，发行版 apt 里只有 18） ──
     UbuntuComponent(
         "nodejs", "Node.js 24（NodeSource）", "nodejs", "node",
-        "JS 运行时；NodeSource 官方源装 Node 24（apt 里的 nodejs 只有 18）",
+        L.env.nodejsDesc,
         ComponentGroups.NODE,
         required = true,
         // 判定要**node + npm 都在**：实测踩过「node 在、npm 缺位」的残状态（更新 pi 时只报 command not found）——
@@ -197,48 +232,51 @@ val UBUNTU_COMPONENTS = listOf(
             "else apt-get install -y nodejs; fi",
     ),
     UbuntuComponent(
-        "pnpm", "pnpm", "pnpm", "pnpm", "Node 包管理器（快、省盘）", ComponentGroups.NODE,
+        "pnpm", "pnpm", "pnpm", "pnpm", L.env.pnpmDesc, ComponentGroups.NODE,
         detectCmd = "command -v pnpm",
         installCmd = "npm install -g pnpm",
     ),
     UbuntuComponent(
-        "typescript", "TypeScript", "typescript", "tsc", "tsc 编译器（AI 写 TS 时用）", ComponentGroups.NODE,
+        "typescript", "TypeScript", "typescript", "tsc", L.env.tscDesc, ComponentGroups.NODE,
         detectCmd = "command -v tsc",
         installCmd = "npm install -g typescript",
     ),
     // pi 本体：**已随 Pient 预置**（解在 npm 全局位置，装完 node 就能用）；这一项是「更新到官方最新」
 
     // ── 开发与构建 ──
-    UbuntuComponent("build", "编译工具链", "build-essential", "gcc", "gcc / make 等（编译原生代码）", ComponentGroups.BASE, heavy = true),
-    UbuntuComponent("cmake", "CMake", "cmake", "cmake", "构建系统（C/C++ 项目）", ComponentGroups.BASE),
-    UbuntuComponent("ripgrep", "ripgrep", "ripgrep", "rg", "快速全文搜索（bash 里替代 grep -r）", ComponentGroups.PI_SEARCH, required = true),
-    UbuntuComponent("fd", "fd", "fd-find", "fdfind", "快速找文件（Ubuntu 里命令名是 fdfind）", ComponentGroups.PI_SEARCH, required = true),
-    UbuntuComponent("vim", "vim", "vim", "vim", "终端编辑器", ComponentGroups.BASE),
-    UbuntuComponent("tmux", "tmux", "tmux", "tmux", "终端复用（长任务挂后台）", ComponentGroups.BASE),
-    UbuntuComponent("htop", "htop", "htop", "htop", "进程与资源查看", ComponentGroups.BASE),
+    UbuntuComponent("build", L.env.buildName, "build-essential", "gcc", L.env.buildDesc, ComponentGroups.BASE, heavy = true),
+    UbuntuComponent("cmake", "CMake", "cmake", "cmake", L.env.cmakeDesc, ComponentGroups.BASE),
+    UbuntuComponent("ripgrep", "ripgrep", "ripgrep", "rg", L.env.ripgrepDesc, ComponentGroups.PI_SEARCH, required = true),
+    UbuntuComponent("fd", "fd", "fd-find", "fdfind", L.env.fdDesc, ComponentGroups.PI_SEARCH, required = true),
+    UbuntuComponent("vim", "vim", "vim", "vim", L.env.vimDesc, ComponentGroups.BASE),
+    UbuntuComponent("tmux", "tmux", "tmux", "tmux", L.env.tmuxDesc, ComponentGroups.BASE),
+    UbuntuComponent("htop", "htop", "htop", "htop", L.env.htopDesc, ComponentGroups.BASE),
 
     // ── 语言运行时：JVM ──
-    UbuntuComponent("java", "OpenJDK 17", "openjdk-17-jdk", "java", "Java 运行时 / 编译（jdk）", ComponentGroups.JAVA, heavy = true),
+    UbuntuComponent("java", "OpenJDK 17", "openjdk-17-jdk", "java", L.env.javaDesc, ComponentGroups.JAVA, heavy = true),
     // 注：apt 的 gradle 是 4.4（2017 年）对现代工程基本不可用 → 不进清单；要 Gradle 用工程自带 wrapper。
 
     // ── 语言运行时：Go / Rust ──
-    UbuntuComponent("go", "Go", "golang-go", "go", "Go 工具链", ComponentGroups.GO, heavy = true),
+    UbuntuComponent("go", "Go", "golang-go", "go", L.env.goDesc, ComponentGroups.GO, heavy = true),
     UbuntuComponent(
-        "rust", "Rust（rustup）", "rustc", "rustc", "rustc / cargo（官方 rustup 安装，体积较大）", ComponentGroups.RUST,
+        "rust", "Rust（rustup）", "rustc", "rustc", L.env.rustDesc, ComponentGroups.RUST,
         detectCmd = "command -v rustc",
         installCmd = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal",
         heavy = true,
     ),
 
     // ── 网络与远程 ──
-    UbuntuComponent("ssh", "openssh-client", "openssh-client", "ssh", "SSH 客户端（git over ssh）", ComponentGroups.SSH),
-    UbuntuComponent("sshpass", "sshpass", "sshpass", "sshpass", "非交互 SSH（密码登录脚本）", ComponentGroups.SSH),
-    UbuntuComponent("rsync", "rsync", "rsync", "rsync", "增量同步（本地 / 远端）", ComponentGroups.SSH),
+    UbuntuComponent("ssh", "openssh-client", "openssh-client", "ssh", L.env.sshDesc, ComponentGroups.SSH),
+    UbuntuComponent("sshpass", "sshpass", "sshpass", "sshpass", L.env.sshpassDesc, ComponentGroups.SSH),
+    UbuntuComponent("rsync", "rsync", "rsync", "rsync", L.env.rsyncDesc, ComponentGroups.SSH),
     UbuntuComponent(
-        "openssh-server", "OpenSSH 服务器", "openssh-server", "sshd", "反向上隧道挂载本地文件系统用", ComponentGroups.SSH,
+        "openssh-server", L.env.opensshServerName, "openssh-server", "sshd", L.env.opensshServerDesc, ComponentGroups.SSH,
         detectCmd = "dpkg -s openssh-server",
     ),
-)
+        )
+        componentsCache = lang to built
+        return built
+    }
 
 /**
  * **pi agent 本体**：不是一个"待安装的组件"，而是 **Pient 的运行时**——
@@ -247,9 +285,10 @@ val UBUNTU_COMPONENTS = listOf(
  * **「更新到最新版」**用（执行 `npm install -g` 覆盖同一条路径，与预置布局同构）。
  * 因此它不在 [UBUNTU_COMPONENTS] 里，也不参与「已装 n/30」的计数。
  */
-val PI_AGENT_UPDATE = UbuntuComponent(
+val PI_AGENT_UPDATE: UbuntuComponent
+    get() = UbuntuComponent(
     "pi", "pi agent", "pi", "pi",
-    "随 Pient 预置；这一项只把 pi 更新到 npm 官方最新",
+    L.env.piAgentDesc,
     ComponentGroups.NODE,
     // 先自检 npm：pi 本体不需要 npm（工具都在包里），但「更新」这一步是 npm 在干活 ——
     // 实测踩过：guest 里 npm 缺位时只报 `npm: command not found`（退出码 127），看不出该干什么。

@@ -1,5 +1,6 @@
 package com.pient.app.runtime
 
+import com.pient.app.data.i18n.L
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -34,8 +35,8 @@ object TerminalSessions {
     private const val MAX_LINES = 2000
     private const val INIT_CMD = """cd ~; . /etc/os-release; echo "${'$'}PRETTY_NAME · ${'$'}(uname -sr)""""
 
-    /** 「环境配置」页的专用会话名（安装脚本固定跑在这个会话里，不污染用户自己的会话） */
-    const val CONFIG_SESSION = "环境配置"
+    /** 「环境配置」页的专用会话名（计算属性：object 里的 val 只求值一次，写 `L.…` 会冻结成首帧语言） */
+    val CONFIG_SESSION: String get() = L.common.environmentConfig
 
     /** 脚本结束哨兵：只有 `echo` 出来的这一行会被拦下（不显示），用来判定安装结束与退出码 */
     private const val SENTINEL = "__PIENT_DONE__"
@@ -77,7 +78,7 @@ object TerminalSessions {
     fun sessionNamed(name: String): Session? = sessions.firstOrNull { it.name == name }
 
     /** AI 执行镜像会话名（终端页里那一栏） */
-    const val AI_MIRROR_NAME = "AI 执行"
+    val AI_MIRROR_NAME: String get() = L.runtime.aiMirrorSession
 
     /**
      * 把 pi 的**工具执行**镜像进终端页（2026-09-16；用户对照 Operit 提的需求）。
@@ -101,7 +102,7 @@ object TerminalSessions {
         ).also {
             counter += 1
             it.lines += TerminalLine(
-                "pi 工具执行镜像（只读）：AI 在 Ubuntu 里跑的每一步都记在这里；自己的命令请用别的会话。",
+                L.runtime.aiMirrorBanner,
                 TerminalLineKind.COMMAND,
             )
             sessions += it
@@ -114,7 +115,7 @@ object TerminalSessions {
     fun newSession(context: Context, name: String? = null, execEnvOverride: String? = null): Session {
         appContext = context.applicationContext
         counter += 1
-        val s = Session(counter, name ?: "会话$counter", execEnvOverride)
+        val s = Session(counter, name ?: L.runtime.sessionName(counter), execEnvOverride)
         s.lines.addAll(MockTerminal.banner)
         sessions += s
         start(context, s)
@@ -174,14 +175,14 @@ object TerminalSessions {
     fun write(session: Session, command: String) {
         if (!session.alive || session.process == null) {
             val ctx = appContext ?: return
-            append(session, TerminalLine("会话进程已退出，正在重建…", TerminalLineKind.OUTPUT))
+            append(session, TerminalLine(L.runtime.sessionProcessRestarting, TerminalLineKind.OUTPUT))
             synchronized(this) { start(ctx, session) }
         }
         val p = session.process ?: return
         runCatching {
             p.stdin.write((command + "\n").toByteArray(Charsets.UTF_8))
             p.stdin.flush()
-        }.onFailure { append(session, TerminalLine("写入失败：${it.message}", TerminalLineKind.OUTPUT)) }
+        }.onFailure { append(session, TerminalLine(L.runtime.writeFailedDetail(it.message), TerminalLineKind.OUTPUT)) }
     }
 
     /**
@@ -205,7 +206,7 @@ object TerminalSessions {
             reader.start()
             if (!p.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
                 runCatching { p.destroy() }
-                return@runCatching "(探针超时)"
+                return@runCatching L.runtime.probeTimeout
             }
             reader.join(1000)
             text.toString().trim()
@@ -226,20 +227,20 @@ object TerminalSessions {
             // 对齐 Operit 的口径：**不需要用户手动点解包** —— Operit 把 install_ubuntu 写进生成的
             // 启动脚本（common.sh），首次起会话自动解包并把进度回显到终端。这里照做。
             if (PiRuntime.isUnpacking()) {
-                append(session, TerminalLine("rootfs 正在解包（已有任务在跑）—— 完成后重开本页即可", TerminalLineKind.OUTPUT))
+                append(session, TerminalLine(L.runtime.rootfsUnpackingTask, TerminalLineKind.OUTPUT))
                 return
             }
             if (!PiRuntime.rootfsArchiveAvailable(context)) {
                 append(
                     session,
                     TerminalLine(
-                        "此 APK 未内置 rootfs 归档（构建时没跑 fetch_rootfs.py --abi 本机 ABI）—— 无法自动解包；请换用含归档的包",
+                        L.runtime.apkNoRootfsArchive,
                         TerminalLineKind.OUTPUT,
                     ),
                 )
                 return
             }
-            append(session, TerminalLine("rootfs 未初始化：自动解包中（约 30MB / 1–2 分钟，进度见下）…", TerminalLineKind.OUTPUT))
+            append(session, TerminalLine(L.runtime.rootfsAutoUnpacking, TerminalLineKind.OUTPUT))
             Thread {
                 val ok = runCatching {
                     PiRuntime.extractRootfs(context) { pct, text ->
@@ -247,11 +248,11 @@ object TerminalSessions {
                     }
                 }.getOrDefault(false)
                 if (ok) {
-                    append(session, TerminalLine("解包完成，启动会话…", TerminalLineKind.OUTPUT))
+                    append(session, TerminalLine(L.runtime.unpackDoneStartSession, TerminalLineKind.OUTPUT))
                     start(context, session)   // 这次 rootfsReady=true，正常往下走
                     write(session, INIT_CMD)
                 } else {
-                    append(session, TerminalLine("自动解包失败：原因见上；也可到「环境配置」页重试", TerminalLineKind.OUTPUT))
+                    append(session, TerminalLine(L.runtime.autoUnpackFailed, TerminalLineKind.OUTPUT))
                 }
             }.apply {
                 isDaemon = true
@@ -261,7 +262,7 @@ object TerminalSessions {
         }
         val shell = PiRuntime.shellPath(context)
         if (!shell.isFile) {
-            append(session, TerminalLine("终端运行时缺失：${shell.absolutePath}", TerminalLineKind.OUTPUT))
+            append(session, TerminalLine(L.runtime.terminalRuntimeMissing(shell.absolutePath), TerminalLineKind.OUTPUT))
             return
         }
         val proc = runCatching {
@@ -274,7 +275,7 @@ object TerminalSessions {
                 }
                 .start()
         }.getOrElse {
-            append(session, TerminalLine("会话启动失败：${it.message}", TerminalLineKind.OUTPUT))
+            append(session, TerminalLine(L.runtime.sessionStartFailed(it.message), TerminalLineKind.OUTPUT))
             return
         }
         // 本地进程统一包成 ShellProcess（与 Shizuku 远端进程同一接口；pump/write 只认它）
@@ -292,7 +293,7 @@ object TerminalSessions {
         // 前台保活（2026-09-16）：**手打命令也算在跑** —— 无 PTY 时应用不知道用户敲的那条命令
         // 何时结束，只能按「会话活着」挂着（系统清进程是不区分命令来源的）；
         // 释放点 = 关会话（close）/ 进程真退出（pump 末尾，且只认当前这个进程）。
-        appContext?.let { PiKeepAlive.acquire(it, keepAliveKey(session), "终端会话运行中…") }
+        appContext?.let { PiKeepAlive.acquire(it, keepAliveKey(session), L.runtime.terminalSessionRunning) }
         Thread({ pump(session, wrapped) }, "pient-term-${session.id}")
             .apply { isDaemon = true }
             .start()
@@ -328,7 +329,7 @@ object TerminalSessions {
         if (session.process === proc) appContext?.let { PiKeepAlive.release(it, keepAliveKey(session)) }
         main.post {
             flushPending(session)
-            appendDirect(session, TerminalLine("[会话进程已退出，退出码 $code]", TerminalLineKind.OUTPUT))
+            appendDirect(session, TerminalLine(L.runtime.sessionExited(code), TerminalLineKind.OUTPUT))
         }
         Log.i(TAG, "会话${session.id} 退出 code=$code")
     }
@@ -388,7 +389,7 @@ object TerminalSessions {
             appendDirect(
                 session,
                 TerminalLine(
-                    if (code == 0) "[环境配置] 安装完成（退出码 0）" else "[环境配置] 安装失败（退出码 $code）",
+                    if (code == 0) L.runtime.installDone else L.runtime.installFailed(code),
                     TerminalLineKind.OUTPUT,
                 ),
             )

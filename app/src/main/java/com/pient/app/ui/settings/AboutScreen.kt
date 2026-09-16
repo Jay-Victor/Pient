@@ -1,5 +1,6 @@
 package com.pient.app.ui.settings
 
+import com.pient.app.data.i18n.L
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -70,7 +71,7 @@ import com.pient.app.ui.components.SectionHeader
 import com.pient.app.ui.components.SettingsRow
 import kotlinx.coroutines.delay
 
-private const val VERSION = "版本 0.1.0"
+private const val APP_VERSION = "0.1.0"
 private const val GITHUB_USER_URL = "https://github.com/Jay-Victor"
 private const val GITHUB_REPO_URL = "https://github.com/Jay-Victor/Pient"
 private const val GITEE_REPO_URL = "https://gitee.com/Jay-Victor/Pient"
@@ -117,14 +118,14 @@ fun AboutScreen(nav: NavController) {
                 .padding(horizontal = 8.dp, vertical = 10.dp),
         ) {
             Icon(
-                Icons.Outlined.ArrowBack, "返回",
+                Icons.Outlined.ArrowBack, L.common.back,
                 tint = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier
                     .size(24.dp)
                     .clickable(onClick = { nav.popBackStack() }),
             )
             Text(
-                "关于",
+                L.settings.about,
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(start = 12.dp),
             )
@@ -167,7 +168,7 @@ fun AboutScreen(nav: NavController) {
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = VERSION,
+                    text = L.settings.versionLabel(APP_VERSION),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp),
@@ -175,24 +176,24 @@ fun AboutScreen(nav: NavController) {
             }
 
             // ── 更新 ──
-            AboutGroup("更新", Icons.Outlined.Update) {
+            AboutGroup(L.common.update, Icons.Outlined.Update) {
                 SettingsRow(
                     icon = Icons.Outlined.SystemUpdate,
-                    title = "检查更新",
-                    subtitle = "检测是否有新版本可用",
+                    title = L.common.checkUpdate,
+                    subtitle = L.settings.updateSubtitle,
                     onClick = { dialog = AboutDialog.UPDATE },
                 )
                 DividerLine()
                 SettingsRow(
                     icon = Icons.Outlined.History,
-                    title = "更新日志",
-                    subtitle = "查看历史版本的更新内容",
+                    title = L.settings.updateLog,
+                    subtitle = L.settings.updateLogSubtitle,
                     onClick = { dialog = AboutDialog.LOG },
                 )
             }
 
             // ── 项目信息 ──
-            AboutGroup("项目信息", Icons.Outlined.Info) {
+            AboutGroup(L.settings.projectInfo, Icons.Outlined.Info) {
                 AboutLinkRow(
                     icon = painterResource(id = R.drawable.brand_github),
                     iconTint = MaterialTheme.colorScheme.onBackground,
@@ -211,18 +212,18 @@ fun AboutScreen(nav: NavController) {
             }
 
             // ── 联系 ──
-            AboutGroup("联系", Icons.Outlined.Person) {
+            AboutGroup(L.settings.contact, Icons.Outlined.Person) {
                 AboutLinkRow(
                     icon = rememberVectorPainter(image = Icons.Outlined.Badge),
                     iconTint = MaterialTheme.colorScheme.primary,
-                    title = "开发者",
+                    title = L.settings.developer,
                     subtitle = "Jay-Victor",
                     onClick = { openUrl(GITHUB_USER_URL) },
                 )
                 DividerLine()
                 AboutCopyRow(
                     icon = Icons.Outlined.Email,
-                    title = "联系方式",
+                    title = L.settings.contactInfo,
                     subtitle = CONTACT_EMAIL,
                     copied = emailCopied,
                     onCopy = { copyEmail() },
@@ -230,17 +231,17 @@ fun AboutScreen(nav: NavController) {
             }
 
             // ── 版权 ──
-            AboutGroup("版权", Icons.Outlined.Copyright) {
+            AboutGroup(L.settings.copyright, Icons.Outlined.Copyright) {
                 AboutInfoRow(
                     icon = Icons.Outlined.Gavel,
-                    title = "开源许可声明",
-                    subtitle = "本项目以开源许可发布",
+                    title = L.settings.openSourceLicenses,
+                    subtitle = L.settings.openSourceNote,
                 )
                 DividerLine()
                 AboutInfoRow(
                     icon = Icons.Outlined.Lock,
-                    title = "版权所有",
-                    subtitle = "© 2026 Pient 保留所有权利",
+                    title = L.settings.copyrightOwner,
+                    subtitle = L.settings.copyrightText,
                 )
             }
         }
@@ -249,20 +250,20 @@ fun AboutScreen(nav: NavController) {
     // ── mock 弹窗（原型期演示；接入更新系统后替换） ──
     when (dialog) {
         AboutDialog.UPDATE -> PientDialog(
-            title = "检查更新",
+            title = L.common.checkUpdate,
             onDismiss = { dialog = null },
             onConfirm = { dialog = null },
             showClose = false,
         ) {
-            Text("当前已是最新版本 0.1.0", style = MaterialTheme.typography.bodyMedium)
+            Text(L.settings.upToDateLabel(APP_VERSION), style = MaterialTheme.typography.bodyMedium)
         }
         AboutDialog.LOG -> PientDialog(
-            title = "更新日志",
+            title = L.settings.updateLog,
             onDismiss = { dialog = null },
             onConfirm = { dialog = null },
             showClose = false,
         ) {
-            Text("暂无更新日志", style = MaterialTheme.typography.bodyMedium)
+            Text(L.settings.noChangelog, style = MaterialTheme.typography.bodyMedium)
         }
         null -> Unit
     }
@@ -420,7 +421,7 @@ private fun AboutCopyRow(
         }
         Icon(
             if (copied) Icons.Outlined.Check else Icons.Outlined.ContentCopy,
-            if (copied) "已复制" else "复制邮箱",
+            if (copied) L.common.copied else L.settings.copyEmail,
             tint = if (copied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
                 .clickable(onClick = onCopy)

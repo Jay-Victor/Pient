@@ -1,5 +1,6 @@
 package com.pient.app.ui.terminal
 
+import com.pient.app.data.i18n.L
 import com.pient.app.runtime.TerminalSessions
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -191,7 +192,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Icon(
-                                        Icons.Outlined.Close, "关闭终端会话",
+                                        Icons.Outlined.Close, L.terminal.closeSession,
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(12.dp),
                                     )
@@ -200,7 +201,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                         }
                     }
                     Icon(
-                        Icons.Outlined.Add, "新建终端会话",
+                        Icons.Outlined.Add, L.terminal.newSession,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier
                             .size(18.dp)
@@ -252,14 +253,14 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                         .fillMaxWidth()
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                 ) {
-                    QuickKey("Ctrl+C", "中断", termColors) {
+                    QuickKey("Ctrl+C", L.terminal.keyInterrupt, termColors) {
                         TerminalSessions.interrupt(context, session)
                     }
-                    QuickKey("Ctrl+L", "清屏", termColors) {
+                    QuickKey("Ctrl+L", L.terminal.keyClear, termColors) {
                         session.lines.clear()
                     }
                     Spacer(Modifier.weight(1f))
-                    QuickKey("环境配置", null, termColors, primary = true) {
+                    QuickKey(L.common.environmentConfig, null, termColors, primary = true) {
                         nav.navigate("terminal_setup")
                     }
                 }
@@ -311,7 +312,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                             .clickable { showExtraKeys = !showExtraKeys },
                     ) {
                         Icon(
-                            Icons.Outlined.Keyboard, "额外按键栏",
+                            Icons.Outlined.Keyboard, L.terminal.extraKeys,
                             tint = if (showExtraKeys) MaterialTheme.colorScheme.primary
                             else termColors["black"]!!,
                             modifier = Modifier.size(18.dp),
@@ -386,9 +387,9 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
         closeConfirmIndex?.let { i ->
             TerminalSessions.sessions.getOrNull(i)?.let { target ->
                 PientDialog(
-                    title = "关闭终端会话",
+                    title = L.terminal.closeSession,
                     onDismiss = { closeConfirmIndex = null },
-                    confirmText = "删除",
+                    confirmText = L.common.delete,
                     onConfirm = {
                         TerminalSessions.close(target)
                         if (chatState.terminalIndex >= TerminalSessions.sessions.size) {
@@ -399,7 +400,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                     showClose = false,
                 ) {
                     Text(
-                        "确定要删除会话「${target.name}」吗？会话中的数据将丢失。",
+                        L.terminal.deleteSessionConfirm(target.name),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp),
@@ -448,7 +449,7 @@ private fun EmptyTerminal(onNew: () -> Unit) {
                     .padding(horizontal = 6.dp),
             ) {
                 Text(
-                    "没有终端会话",
+                    L.terminal.noSessions,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f).padding(start = 6.dp),
@@ -459,13 +460,13 @@ private fun EmptyTerminal(onNew: () -> Unit) {
                         .clickable(onClick = onNew),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Outlined.Add, "新建终端会话", tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Outlined.Add, L.terminal.newSession, tint = MaterialTheme.colorScheme.primary)
                 }
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             Text(
-                "点右上角「+」新建一个终端会话\n会话运行时通知栏会有一条前台通知（保证进程不被系统清掉）",
+                L.terminal.emptyHint,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 32.dp),

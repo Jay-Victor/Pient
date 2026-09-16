@@ -1,5 +1,6 @@
 package com.pient.app.ui.chat
 
+import com.pient.app.data.i18n.L
 import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -254,7 +255,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                 val now = System.currentTimeMillis()
                 if (now - lastBackPress > 2000L) {
                     lastBackPress = now
-                    Toast.makeText(context, "再按一次退出应用", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, L.chat.pressAgainToExit, Toast.LENGTH_SHORT).show()
                 } else {
                     (context as? Activity)?.finish()
                 }
@@ -513,7 +514,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                             // 输入栏在点击时已自行清空文本，这里补回来，避免"消息没发出去还丢了草稿"）
                             if (chatState.piReadiness == ChatState.PiReadiness.Unready) {
                                 inputText = TextFieldValue(text, TextRange(text.length))
-                                Toast.makeText(context, "pi 运行时未就绪：消息未发送（见上方提示条）", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, L.chat.piUnreadyToast, Toast.LENGTH_SHORT).show()
                             } else {
                                 // 首条消息自动建会话（2026-09-08：无 mock 会话后，发送即建当前项目首会话）
                                 if (chatState.currentSessionId == null) chatState.newSession()
@@ -677,7 +678,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                             val reason = chatState.compactNow()
                             Toast.makeText(
                                 context,
-                                reason ?: "已压缩上下文（pi 原生）：聊天页已按压缩后的上下文重建",
+                                reason ?: L.chat.compactDone,
                                 Toast.LENGTH_SHORT,
                             ).show()
                         }
@@ -781,7 +782,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                     onFork = {
                         forkMenuTarget = null
                         chatState.forkSession(forkIdx)
-                        Toast.makeText(context, "已创建新会话", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, L.chat.sessionCreated, Toast.LENGTH_SHORT).show()
                     },
                     onCopy = {
                         // 打开时快照内容：Markdown 源码态 = 助手回答原文；用户消息 = 消息文本
@@ -887,7 +888,7 @@ private fun ChatTopBar(
                     .padding(horizontal = 4.dp),
             ) {
                 IconButton(onClick = onMenu) {
-                    Icon(Icons.Outlined.Menu, "会话侧栏", tint = MaterialTheme.colorScheme.onBackground)
+                    Icon(Icons.Outlined.Menu, L.chat.sessionDrawer, tint = MaterialTheme.colorScheme.onBackground)
                 }
             }
             return@PientPanel
@@ -899,11 +900,11 @@ private fun ChatTopBar(
                 .padding(horizontal = 4.dp),
         ) {
         IconButton(onClick = onMenu) {
-            Icon(Icons.Outlined.Menu, "会话侧栏", tint = MaterialTheme.colorScheme.onBackground)
+            Icon(Icons.Outlined.Menu, L.chat.sessionDrawer, tint = MaterialTheme.colorScheme.onBackground)
         }
         // 中：会话标题 + 运行状态徽标
         Column(Modifier.weight(1f).padding(start = 4.dp)) {
-            val title = chatState.currentSession?.title ?: "新会话"
+            val title = chatState.currentSession?.title ?: L.chat.newSession
             // 过长标题：默认 Ellipsis；长按期间跑马灯滚动显示全文
             var marquee by remember { mutableStateOf(false) }
             Text(
@@ -933,9 +934,9 @@ private fun ChatTopBar(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val running = chatState.isStreaming || chatState.currentSession?.running == true
                 if (running) {
-                    StatusBadge("运行中", MaterialTheme.colorScheme.primary)
+                    StatusBadge(L.common.running, MaterialTheme.colorScheme.primary)
                 } else {
-                    StatusBadge("空闲", MaterialTheme.colorScheme.onSurfaceVariant)
+                    StatusBadge(L.chat.idle, MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 // 未绑定项目时状态行不显示项目名（2026-09-08：引导页接管）
                 chatState.currentProject?.let { proj ->
@@ -953,21 +954,21 @@ private fun ChatTopBar(
         val active = chatState.activePanel
         IconButton(onClick = { onPanel(Panel.TREE) }) {
             Icon(
-                Icons.Outlined.AccountTree, "会话分支",
+                Icons.Outlined.AccountTree, L.chat.sessionBranches,
                 tint = if (active == Panel.TREE) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onBackground,
             )
         }
         IconButton(onClick = { onPanel(Panel.TERMINAL) }) {
             Icon(
-                Icons.Outlined.Terminal, "终端",
+                Icons.Outlined.Terminal, L.chat.terminal,
                 tint = if (active == Panel.TERMINAL) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onBackground,
             )
         }
         IconButton(onClick = { onPanel(Panel.FILES) }) {
             Icon(
-                Icons.Outlined.Description, "文件",
+                Icons.Outlined.Description, L.common.file,
                 tint = if (active == Panel.FILES) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onBackground,
             )
@@ -1073,12 +1074,12 @@ private fun PiUnreadyStrip(
         )
         Column(Modifier.weight(1f).padding(start = 10.dp)) {
             Text(
-                "pi 运行时未就绪",
+                L.chat.piUnready,
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onBackground,
             )
             Text(
-                reason.ifBlank { "Ubuntu / pi 还没准备好（可在「环境配置」里检测）" },
+                reason.ifBlank { L.chat.piUnreadyHint },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
@@ -1086,7 +1087,7 @@ private fun PiUnreadyStrip(
             )
         }
         Text(
-            "重试",
+            L.chat.retry,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier
@@ -1094,7 +1095,7 @@ private fun PiUnreadyStrip(
                 .padding(horizontal = 8.dp, vertical = 6.dp),
         )
         Text(
-            "环境配置",
+            L.common.environmentConfig,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier

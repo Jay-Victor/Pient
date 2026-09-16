@@ -1,5 +1,6 @@
 package com.pient.app.ui.chat
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -102,7 +103,7 @@ fun ModelSelectorSheet(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        "思考模式",
+                        L.chat.thinkingMode,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )
@@ -127,9 +128,9 @@ fun ModelSelectorSheet(
                     )
                     Text(
                         when (wire) {
-                            is AiBackend.LevelWire.Word -> "服务商实际收到：${wire.value}"
-                            is AiBackend.LevelWire.Budget -> "思考预算：${wire.tokens} tokens"
-                            else -> "当前服务商不支持档位调节（只支持开 / 关）"
+                            is AiBackend.LevelWire.Word -> L.chat.providerReceives(wire.value)
+                            is AiBackend.LevelWire.Budget -> L.chat.thinkingBudget(wire.tokens)
+                            else -> L.chat.levelUnsupported
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -154,12 +155,12 @@ fun ModelSelectorSheet(
                 modifier = Modifier.size(16.dp),
             )
             Text(
-                "模型",
+                L.common.model,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(start = 8.dp),
             )
             Text(
-                chatState.selectedModel?.name ?: "未选择模型",
+                chatState.selectedModel?.name ?: L.chat.noModelSelected,
                 style = MaterialTheme.typography.bodyMedium.copy(
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
@@ -175,7 +176,7 @@ fun ModelSelectorSheet(
         // ③ 模型列表（Operit config-row 规格；单选展开；无已配置模型时提示引导）
         if (providers.isEmpty()) {
             Text(
-                "暂无可用模型 · 请在「服务商与模型配置」中添加服务商并填写模型列表",
+                L.chat.noModelsAvailable,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -216,7 +217,7 @@ fun ModelSelectorSheet(
                 .padding(horizontal = 8.dp),
         ) {
             Text(
-                "管理模型配置",
+                L.chat.manageModels,
                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -237,7 +238,7 @@ private fun ThinkingModeRow(
     expanded: Boolean,
     onClick: () -> Unit,
     icon: androidx.compose.ui.graphics.vector.ImageVector = Icons.Outlined.Psychology,
-    title: String = "思考",
+    title: String = L.chat.thinking,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -317,7 +318,7 @@ private fun ProviderHeader(
         )
         if (models.size > 1) {
             Text(
-                "${models.size}个模型",
+                L.chat.modelCount(models.size),
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -329,7 +330,7 @@ private fun ProviderHeader(
             )
         } else {
             Text(
-                models.firstOrNull()?.name ?: "未选择",
+                models.firstOrNull()?.name ?: L.chat.notSelected,
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

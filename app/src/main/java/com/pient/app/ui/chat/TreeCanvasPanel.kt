@@ -1,5 +1,6 @@
 package com.pient.app.ui.chat
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.Canvas
 import android.util.Log
 import androidx.compose.foundation.background
@@ -240,7 +241,7 @@ fun TreeCanvasPanel(chatState: ChatState) {
         ) {
             if (tree == null || layout.isEmpty()) {
                 Text(
-                    "当前会话暂无分支树",
+                    L.canvas.noBranchTree,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.align(Alignment.Center),
@@ -329,13 +330,13 @@ fun TreeCanvasPanel(chatState: ChatState) {
         ) {
             TreeFab(
                 icon = Icons.Outlined.Visibility,
-                desc = "查看节点详情",
+                desc = L.canvas.viewNodeDetails,
                 enabled = selectedNode != null,
                 onClick = { detailOpen = true },
             )
             TreeFab(
                 icon = Icons.Outlined.CallSplit,
-                desc = "创建分支",
+                desc = L.canvas.createBranch,
                 enabled = selectedNode != null && !running,
                 // **会话内分支**（2026-09-15 定稿，《Pient 会话与上下文管理设计》§6）：
                 // 切点 = 该节点回合末尾的**锚点条目** → 回聊天页，此后发消息即在该节点下长出新分支。
@@ -348,7 +349,7 @@ fun TreeCanvasPanel(chatState: ChatState) {
             )
             TreeFab(
                 icon = Icons.Outlined.AltRoute,
-                desc = "切换分支",
+                desc = L.canvas.switchBranch,
                 enabled = selectedNode?.children?.isEmpty() == true && !running,
                 onClick = { switchTo(chatState, selectedId) },
             )
@@ -393,7 +394,7 @@ fun TreeCanvasPanel(chatState: ChatState) {
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "节点详情",
+                            L.canvas.nodeDetails,
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onBackground,
                         )
@@ -484,7 +485,7 @@ fun TreeCanvasPanel(chatState: ChatState) {
                     }
                     if (!hasAnswer) {
                         Text(
-                            "（暂无回答）",
+                            L.canvas.noAnswer,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 6.dp),
@@ -504,7 +505,7 @@ fun TreeCanvasPanel(chatState: ChatState) {
                             onCheckedChange = { SettingsStore.branchSummarize = it },
                         )
                         Text(
-                            "切分支时生成摘要（pi 会调用一次模型）",
+                            L.canvas.branchSummary,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -517,7 +518,7 @@ fun TreeCanvasPanel(chatState: ChatState) {
                         modifier = Modifier.padding(top = 14.dp),
                     ) {
                         Text(
-                            "切换到此分支",
+                            L.canvas.switchToBranch,
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier
@@ -528,7 +529,7 @@ fun TreeCanvasPanel(chatState: ChatState) {
                                 .padding(horizontal = 8.dp, vertical = 8.dp),
                         )
                         Text(
-                            "从此处分叉新会话",
+                            L.canvas.forkSession,
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier

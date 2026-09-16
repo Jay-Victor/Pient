@@ -1,5 +1,6 @@
 package com.pient.app.runtime
 
+import com.pient.app.data.i18n.L
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -26,7 +27,7 @@ object GuestExec {
         maxChars: Int = 200_000,
     ): Pair<Int, String> = withContext(Dispatchers.IO) {
         val shell = PiRuntime.shellPath(context)
-        if (!shell.isFile) return@withContext -1 to "Ubuntu 终端启动器缺失（终端层未就绪）"
+        if (!shell.isFile) return@withContext -1 to L.runtime.launcherMissing
         runCatching {
             val proc = ProcessBuilder(shell.absolutePath, "-c", command)
                 .redirectErrorStream(true)
@@ -41,19 +42,19 @@ object GuestExec {
             val finished = proc.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
             if (!finished) {
                 runCatching { proc.destroy() }
-                return@runCatching -1 to (tail(out, maxChars) + "\n（超时 ${timeoutMs / 1000}s）")
+                return@runCatching -1 to (tail(out, maxChars) + L.runtime.timeoutSuffix(timeoutMs / 1000))
             }
             reader.join(1200)
             proc.exitValue() to tail(out, maxChars)
         }.getOrElse {
             Log.w(TAG, "guest 命令执行失败：${it.message}")
-            -1 to (it.message ?: "命令执行失败")
+            -1 to (it.message ?: L.runtime.commandFailed)
         }
     }
 
     private fun tail(sb: StringBuilder, maxChars: Int): String {
         val text = sb.toString()
-        return if (text.length <= maxChars) text else "…（前段输出已省略）…\n" + text.takeLast(maxChars)
+        return if (text.length <= maxChars) text else L.runtime.outputHeadOmitted + text.takeLast(maxChars)
     }
 
     /** 去掉 ANSI 颜色转义（pi 的 CLI 在有 TTY 时会上色；我们已经是 NO_COLOR，这里再兜一层） */

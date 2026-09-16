@@ -1,5 +1,6 @@
 package com.pient.app.ui.chat
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -230,14 +231,14 @@ fun MentionFileCard(
             .padding(vertical = 8.dp),
     ) {
         Text(
-            "引用文件",
+            L.chat.referenceFile,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
         )
         if (files.isEmpty()) {
             Text(
-                if (query.isBlank()) "项目文件夹内暂无文件" else "无匹配文件",
+                if (query.isBlank()) L.chat.noFilesInProject else L.chat.noMatchingFiles,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),

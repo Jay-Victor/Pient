@@ -1,5 +1,6 @@
 package com.pient.app.ui.chat
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -48,13 +49,13 @@ fun SystemPromptPanel(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
-                    "系统提示词",
+                    L.chat.systemPrompt,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    "只读",
+                    L.chat.readOnly,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -75,7 +76,7 @@ fun SystemPromptPanel(
                 )
             } else {
                 Text(
-                    "暂无系统提示词",
+                    L.chat.noSystemPrompt,
                     style = MaterialTheme.typography.bodySmall,
                     fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

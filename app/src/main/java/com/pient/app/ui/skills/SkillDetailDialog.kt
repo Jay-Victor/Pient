@@ -1,5 +1,6 @@
 package com.pient.app.ui.skills
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -98,7 +99,7 @@ fun SkillDetailDialog(
                     // ② 描述（pi-web SkillDetail 同款：小标签 + 值，1.6 行高；无描述不显示）
                     if (item.desc.isNotBlank()) {
                         Text(
-                            "描述",
+                            L.skills.description,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 12.dp),
@@ -121,14 +122,14 @@ fun SkillDetailDialog(
                             .clickable(enabled = item.skillMd != null) { showMd = !showMd },
                     ) {
                         Text(
-                            "查看Skill.md",
+                            L.skills.viewSkillMd,
                             style = MaterialTheme.typography.labelMedium,
                             color = if (item.skillMd != null) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                         )
                         Icon(
                             if (showMd) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
-                            "展开/收起",
+                            L.skills.expandCollapse,
                             tint = if (item.skillMd != null) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                             modifier = Modifier.size(16.dp),
@@ -163,7 +164,7 @@ fun SkillDetailDialog(
 
                     // ④ 技能路径
                     Text(
-                        "路径",
+                        L.common.path,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
@@ -177,7 +178,7 @@ fun SkillDetailDialog(
 
                     // ⑤ 目录结构（ASCII 树窗口）
                     Text(
-                        "目录结构",
+                        L.skills.dirStructure,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
@@ -208,7 +209,7 @@ fun SkillDetailDialog(
                             )
                         } else {
                             Text(
-                                "（无目录信息）",
+                                L.skills.noDirInfo,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -221,8 +222,8 @@ fun SkillDetailDialog(
                     modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    PientButton("删除", onClick = onDelete, modifier = Modifier.weight(1f))
-                    PientButton("关闭", onClick = onDismiss, primary = false, modifier = Modifier.weight(1f))
+                    PientButton(L.common.delete, onClick = onDelete, modifier = Modifier.weight(1f))
+                    PientButton(L.common.close, onClick = onDismiss, primary = false, modifier = Modifier.weight(1f))
                 }
             }
         }

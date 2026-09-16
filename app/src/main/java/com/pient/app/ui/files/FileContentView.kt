@@ -1,5 +1,6 @@
 package com.pient.app.ui.files
 
+import com.pient.app.data.i18n.L
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -171,8 +172,8 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
         )
         // 真实图片预览（可缩放/拖动）
         isImage && node.source != null -> ZoomableImage(bitmap, node.name)
-        tooLarge -> PaddedHint("文件超过 2MB，暂不支持预览")
-        unreadable -> PaddedHint("二进制文件，暂不支持预览")
+        tooLarge -> PaddedHint(L.files.tooLargeHint)
+        unreadable -> PaddedHint(L.files.binaryHint)
         node.imageHint != null -> ImagePlaceholder(node)
         isMd && !chatState.sourceEditMode -> PaddedScroll(horizontal = 32.dp, vertical = 24.dp) {
             MarkdownText(
@@ -261,7 +262,7 @@ private fun HtmlPreview(node: FileNode, load: suspend (android.content.Context, 
         loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
-        html == null -> PaddedHint("无法打开文件: ${node.name}")
+        html == null -> PaddedHint(L.files.openFailed(node.name))
         else -> HtmlWebView(html, HTML_BASE_URL, Modifier.fillMaxSize())
     }
 }
@@ -374,7 +375,7 @@ private fun PdfPreview(node: FileNode) {
         pageCount < 0 -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
-        pageCount == 0 -> PaddedHint("无法打开文件: ${node.name}")
+        pageCount == 0 -> PaddedHint(L.files.openFailed(node.name))
         else -> LazyColumn(
             modifier = Modifier.fillMaxSize().background(Color(0xFFE5E7EB)),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -425,7 +426,7 @@ private fun MediaPreview(node: FileNode, isVideo: Boolean) {
     val context = LocalContext.current
     val uri = remember(node.source) { ProjectFiles.mediaUri(node) }
     if (uri == null) {
-        PaddedHint("无法播放：文件位置不可用")
+        PaddedHint(L.files.playUnavailable)
         return
     }
     val player = remember(uri) { ExoPlayer.Builder(context).build() }
@@ -483,7 +484,7 @@ private const val IMAGE_MAX_SCALE = 5f
 @Composable
 private fun ZoomableImage(bitmap: Bitmap?, name: String) {
     if (bitmap == null) {
-        PaddedHint("图片加载失败或格式不支持")
+        PaddedHint(L.files.imageLoadFailed)
         return
     }
     var scale by remember(bitmap) { mutableStateOf(IMAGE_MIN_SCALE) }
@@ -933,7 +934,7 @@ private fun ImagePlaceholder(node: FileNode) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            node.imageHint ?: "图片预览占位",
+            node.imageHint ?: L.files.imagePlaceholder,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

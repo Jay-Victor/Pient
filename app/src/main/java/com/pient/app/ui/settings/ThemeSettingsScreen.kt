@@ -1,5 +1,7 @@
 package com.pient.app.ui.settings
 
+import com.pient.app.data.i18n.L
+import com.pient.app.data.i18n.OptionLabels
 import android.content.Intent
 import android.graphics.Typeface
 import android.media.MediaMetadataRetriever
@@ -137,17 +139,26 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** 主题与外观标签（展示顺序即声明顺序） */
-private enum class ThemeTab(val label: String) {
-    THEME("主题设置"),
-    BACKGROUND("背景设置"),
-    FONT("字体设置"),
-    INPUT_BAR("输入框设置"),
-    SIDEBAR("侧边栏设置"),
+/** 主题与外观标签（展示顺序即声明顺序；label 为计算属性：枚举构造参数只求值一次） */
+private enum class ThemeTab {
+    THEME,
+    BACKGROUND,
+    FONT,
+    INPUT_BAR,
+    SIDEBAR;
+
+    val label: String get() = when (this) {
+        THEME -> L.theme.tabTheme
+        BACKGROUND -> L.theme.tabBackground
+        FONT -> L.theme.tabFont
+        INPUT_BAR -> L.theme.tabInputBar
+        SIDEBAR -> L.theme.tabSidebar
+    }
 }
 
 /** 分段控制器展示顺序（用户指定：浅色 → 深色 → 跟随系统）与 ThemeMode 枚举的映射 */
-private val modeLabels = listOf("浅色模式", "深色模式", "跟随系统")
+private val modeLabels: List<String>
+    get() = listOf(L.theme.modeLight, L.theme.modeDark, L.settings.followSystem)
 private val modeValues = listOf(ThemeMode.LIGHT, ThemeMode.DARK, ThemeMode.SYSTEM)
 
 /** 自定义主题色滑轨：色相环彩虹渐变（0° 红 → 360° 红；拖到哪、滑块处颜色即主题色） */
@@ -175,14 +186,14 @@ fun ThemeSettingsScreen(nav: NavController) {
                 .padding(horizontal = 8.dp, vertical = 10.dp),
         ) {
             Icon(
-                Icons.Outlined.ArrowBack, "返回",
+                Icons.Outlined.ArrowBack, L.common.back,
                 tint = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier
                     .size(24.dp)
                     .clickable(onClick = { nav.popBackStack() }),
             )
             Text(
-                "主题与外观",
+                L.settings.theme,
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(start = 12.dp),
             )
@@ -222,7 +233,7 @@ fun ThemeSettingsScreen(nav: NavController) {
 private fun ThemeTabContent() {
     LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
         // ── 主题模式 ──
-        item { SectionHeader("主题模式", icon = Icons.Outlined.Brightness4) }
+        item { SectionHeader(L.theme.modeTitle, icon = Icons.Outlined.Brightness4) }
         item {
             // PientSegmented 自带容器（surfaceContainerLow 底 + 描边 + 10dp 圆角），不再外套 Card
             PientSegmented(
@@ -234,7 +245,7 @@ private fun ThemeTabContent() {
         }
 
         // ── 主题色 ──
-        item { SectionHeader("主题色", icon = Icons.Outlined.ColorLens) }
+        item { SectionHeader(L.theme.accentColor, icon = Icons.Outlined.ColorLens) }
         item {
             Card {
                 Column(Modifier.padding(12.dp)) {
@@ -264,7 +275,7 @@ private fun ThemeTabContent() {
                             modifier = Modifier.size(16.dp),
                         )
                         Text(
-                            "自定义主题色",
+                            L.theme.customAccent,
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.weight(1f).padding(start = 6.dp),
                         )
@@ -291,7 +302,7 @@ private fun ThemeTabContent() {
         item {
             val dark = LocalPientIsDark.current
             SectionHeader(
-                if (dark) "深色主题方案" else "浅色主题方案",
+                if (dark) L.theme.darkScheme else L.theme.lightScheme,
                 icon = if (dark) Icons.Outlined.DarkMode else Icons.Outlined.LightMode,
             )
         }
@@ -341,9 +352,9 @@ private fun SchemeRow(scheme: ThemeScheme, selected: Boolean, onClick: () -> Uni
             Box(Modifier.weight(1f).fillMaxWidth().background(scheme.surfaceContainerLow))
         }
         Column(Modifier.weight(1f).padding(start = 12.dp)) {
-            Text(scheme.name, style = MaterialTheme.typography.bodyMedium)
+            Text(OptionLabels.scheme(scheme.name), style = MaterialTheme.typography.bodyMedium)
             Text(
-                scheme.description,
+                OptionLabels.schemeDesc(scheme.name),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp),
@@ -379,7 +390,7 @@ private fun AccentColorCard(preset: AccentPreset, modifier: Modifier = Modifier)
                     if (selected) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.outline,
                     CircleShape,
                 )
-                .semantics { contentDescription = preset.name }
+                .semantics { contentDescription = OptionLabels.accent(preset.name) }
                 .clickable(onClick = {
                     // 点预设色块 = 切回预设并关闭自定义
                     SettingsStore.customAccentEnabled = false
@@ -409,11 +420,11 @@ private fun BackgroundTabContent() {
     Box(Modifier.fillMaxSize()) {
         LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
             // ── 自定义背景 ──
-            item { SectionHeader("自定义背景", icon = Icons.Outlined.Image) }
+            item { SectionHeader(L.theme.customBackground, icon = Icons.Outlined.Image) }
             item { CustomBackgroundCard(onTrimVideo = { showTrimDialog = true }) }
 
             // ── 背景效果 ──
-            item { SectionHeader("背景效果", icon = Icons.Outlined.BlurOn) }
+            item { SectionHeader(L.theme.backgroundEffects, icon = Icons.Outlined.BlurOn) }
             item { BackgroundEffectsCard() }
         }
         if (showTrimDialog && SettingsStore.backgroundVideoUri != null) {
@@ -443,11 +454,11 @@ private fun CustomBackgroundCard(onTrimVideo: () -> Unit) {
                     SettingsStore.backgroundImageUri = internal.toString()
                     SettingsStore.backgroundMediaType = BackgroundMediaType.IMAGE
                 } else {
-                    Toast.makeText(context, "图片保存失败", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, L.theme.imageSaveFailed, Toast.LENGTH_SHORT).show()
                 }
             }
         } else if (result.error != null) {
-            Toast.makeText(context, "图片裁剪失败", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, L.theme.imageCropFailed, Toast.LENGTH_SHORT).show()
         }
     }
     // 裁剪页主题色（launchImageCrop 为非 Composable 局部函数，颜色在 Composable 作用域预解析；
@@ -464,8 +475,8 @@ private fun CustomBackgroundCard(onTrimVideo: () -> Unit) {
                     outputCompressFormat = android.graphics.Bitmap.CompressFormat.JPEG
                     outputCompressQuality = 90
                     fixAspectRatio = false
-                    cropMenuCropButtonTitle = "裁剪"
-                    activityTitle = "裁剪图片"
+                    cropMenuCropButtonTitle = L.theme.crop
+                    activityTitle = L.theme.cropImageTitle
                     toolbarColor = cropPrimary
                     toolbarBackButtonColor = cropIconColor
                     toolbarTitleColor = cropIconColor
@@ -499,7 +510,7 @@ private fun CustomBackgroundCard(onTrimVideo: () -> Unit) {
                         if (internal != null) {
                             SettingsStore.backgroundVideoUri = internal.toString()
                         } else {
-                            Toast.makeText(context, "视频保存失败", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, L.theme.videoSaveFailed, Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -510,7 +521,7 @@ private fun CustomBackgroundCard(onTrimVideo: () -> Unit) {
     Card {
         Column(Modifier.padding(12.dp)) {
             PientSegmented(
-                labels = listOf("图片", "视频"),
+                labels = listOf(L.common.image, L.theme.video),
                 selected = SettingsStore.backgroundMediaType.ordinal,
                 onSelect = { SettingsStore.backgroundMediaType = BackgroundMediaType.entries[it] },
                 icons = listOf(Icons.Outlined.Image, Icons.Outlined.Videocam),
@@ -522,7 +533,7 @@ private fun CustomBackgroundCard(onTrimVideo: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
             ) {
                 PientButton(
-                    if (isImage) "移除图片" else "移除视频",
+                    if (isImage) L.theme.removeImage else L.theme.removeVideo,
                     onClick = {
                         if (isImage) SettingsStore.backgroundImageUri = null
                         else SettingsStore.backgroundVideoUri = null
@@ -532,7 +543,7 @@ private fun CustomBackgroundCard(onTrimVideo: () -> Unit) {
                     modifier = Modifier.weight(1f),
                 )
                 PientButton(
-                    if (isImage) "选择图片" else "选择视频",
+                    if (isImage) L.theme.pickImage else L.theme.pickVideo,
                     onClick = {
                         mediaLauncher.launch(arrayOf(if (isImage) "image/*" else "video/*"))
                     },
@@ -544,42 +555,42 @@ private fun CustomBackgroundCard(onTrimVideo: () -> Unit) {
                 DividerLine(Modifier.padding(top = 12.dp))
                 SettingsRow(
                     icon = Icons.Filled.Crop,
-                    title = "图片裁剪",
+                    title = L.theme.imageCrop,
                     onClick = {
                         SettingsStore.backgroundImageUri?.let { launchImageCrop(Uri.parse(it)) }
-                            ?: Toast.makeText(context, "请先选择图片", Toast.LENGTH_SHORT).show()
+                            ?: Toast.makeText(context, L.theme.pickImageFirst, Toast.LENGTH_SHORT).show()
                     },
-                    subtitle = "重新裁剪当前的背景图片",
+                    subtitle = L.theme.recropImageDesc,
                 )
             } else {
                 DividerLine(Modifier.padding(top = 12.dp))
                 SettingsRow(
                     icon = Icons.Filled.Schedule,
-                    title = "视频剪辑",
+                    title = L.theme.videoTrimTitle,
                     onClick = {
                         if (SettingsStore.backgroundVideoUri != null) {
                             onTrimVideo()
                         } else {
-                            Toast.makeText(context, "请先选择视频", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, L.theme.pickVideoFirst, Toast.LENGTH_SHORT).show()
                         }
                     },
-                    subtitle = "截取播放时段与画面",
+                    subtitle = L.theme.videoTrimDesc,
                 )
                 DividerLine()
                 SettingsSwitchRow(
                     icon = Icons.AutoMirrored.Rounded.VolumeUp,
-                    title = "视频声音",
+                    title = L.theme.videoSound,
                     checked = !SettingsStore.videoBackgroundMuted,
                     onChecked = { SettingsStore.videoBackgroundMuted = !it },
-                    desc = "开启或关闭视频背景的声音",
+                    desc = L.theme.videoSoundDesc,
                 )
                 DividerLine()
                 SettingsSwitchRow(
                     icon = Icons.Outlined.Loop,
-                    title = "视频循环",
+                    title = L.theme.videoLoop,
                     checked = SettingsStore.videoBackgroundLoop,
                     onChecked = { SettingsStore.videoBackgroundLoop = it },
-                    desc = "开启或关闭视频背景的循环播放",
+                    desc = L.theme.videoLoopDesc,
                 )
             }
         }
@@ -638,7 +649,7 @@ private fun BackgroundPreview(mediaType: BackgroundMediaType, uri: String?) {
             Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {
             Text(
-                "点击选择按钮来添加背景",
+                L.theme.addBackgroundHint,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -681,16 +692,16 @@ private fun VideoTrimDialog(videoUri: String, onDismiss: () -> Unit) {
             durationSec = dur
             if (SettingsStore.videoTrimEndSec == null) endSec = dur
         } else {
-            Toast.makeText(context, "无法读取视频时长", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, L.theme.videoDurationFailed, Toast.LENGTH_SHORT).show()
             onDismiss()
         }
     }
     val textColor = MaterialTheme.colorScheme.onSurfaceVariant
     val dur = durationSec
     PientDialog(
-        title = "视频剪辑",
+        title = L.theme.videoTrimTitle,
         onDismiss = onDismiss,
-        confirmText = "确定",
+        confirmText = L.common.confirm,
         confirmEnabled = dur != null,
         showClose = false,
         onConfirm = {
@@ -705,7 +716,7 @@ private fun VideoTrimDialog(videoUri: String, onDismiss: () -> Unit) {
     ) {
         if (dur == null) {
             Text(
-                "正在读取视频信息…",
+                L.theme.readingVideoInfo,
                 style = MaterialTheme.typography.bodyMedium,
                 color = textColor,
                 modifier = Modifier.padding(vertical = 24.dp),
@@ -714,27 +725,27 @@ private fun VideoTrimDialog(videoUri: String, onDismiss: () -> Unit) {
             Column {
                 // ── 截取播放时段 ──
                 Text(
-                    "开始时间",
+                    L.theme.startTime,
                     style = MaterialTheme.typography.bodyMedium,
                     color = textColor,
                 )
                 PientSlider(value = startSec, onValueChange = { startSec = it }, valueRange = 0f..dur)
                 Text(
-                    "${startSec.roundToInt()} 秒",
+                    L.theme.startSeconds(startSec.roundToInt()),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.align(Alignment.End),
                 )
                 Text(
-                    "结束时间",
+                    L.theme.endTime,
                     style = MaterialTheme.typography.bodyMedium,
                     color = textColor,
                     modifier = Modifier.padding(top = 8.dp),
                 )
                 PientSlider(value = endSec, onValueChange = { endSec = it }, valueRange = 0f..dur)
                 Text(
-                    "${endSec.roundToInt()} 秒",
+                    L.theme.endSeconds(endSec.roundToInt()),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
@@ -742,7 +753,7 @@ private fun VideoTrimDialog(videoUri: String, onDismiss: () -> Unit) {
                 )
                 // ── 画面裁剪 ──
                 Text(
-                    "画面裁剪",
+                    L.theme.frameCrop,
                     style = MaterialTheme.typography.bodyMedium,
                     color = textColor,
                     modifier = Modifier.padding(top = 12.dp),
@@ -755,7 +766,7 @@ private fun VideoTrimDialog(videoUri: String, onDismiss: () -> Unit) {
                 )
                 // ── 视频倍速 ──
                 Text(
-                    "视频倍速",
+                    L.theme.playbackSpeed,
                     style = MaterialTheme.typography.bodyMedium,
                     color = textColor,
                     modifier = Modifier.padding(top = 12.dp),
@@ -820,9 +831,9 @@ private fun BackgroundEffectsCard() {
                     modifier = Modifier.size(16.dp),
                 )
                 Column(Modifier.weight(1f).padding(start = 6.dp)) {
-                    Text("高斯模糊", style = MaterialTheme.typography.bodyMedium)
+                    Text(L.theme.gaussianBlur, style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "为背景图片或视频添加高斯模糊效果",
+                        L.theme.gaussianBlurDesc,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp),
@@ -841,7 +852,7 @@ private fun BackgroundEffectsCard() {
                     valueRange = 1f..25f,
                 )
                 SliderRangeRow(
-                    range = "范围：1 - 25",
+                    range = L.theme.blurRange,
                     value = SettingsStore.backgroundBlurRadius.roundToInt().toString(),
                 )
             }
@@ -854,9 +865,9 @@ private fun BackgroundEffectsCard() {
                     modifier = Modifier.size(16.dp),
                 )
                 Column(Modifier.weight(1f).padding(start = 6.dp)) {
-                    Text("亮度", style = MaterialTheme.typography.bodyMedium)
+                    Text(L.theme.brightness, style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "调节背景图片或视频的明暗程度",
+                        L.theme.brightnessDesc,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp),
@@ -869,7 +880,7 @@ private fun BackgroundEffectsCard() {
                 valueRange = 0.1f..1.5f,
             )
             SliderRangeRow(
-                range = "范围：10% - 150%",
+                range = L.theme.brightnessRange,
                 value = "${(SettingsStore.backgroundBrightness * 100).roundToInt()}%",
             )
         }
@@ -914,11 +925,11 @@ private fun FontTabContent() {
     Box(Modifier.fillMaxSize()) {
         LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
             // ── 字体样式 ──
-            item { SectionHeader("字体样式", icon = Icons.Outlined.FontDownload) }
+            item { SectionHeader(L.theme.fontStyle, icon = Icons.Outlined.FontDownload) }
             item { FontStyleCard(onPickFont = { showPicker = true }) }
 
             // ── 字体大小 ──
-            item { SectionHeader("字体大小", icon = Icons.Outlined.FormatSize) }
+            item { SectionHeader(L.theme.fontSize, icon = Icons.Outlined.FormatSize) }
             item { FontSizeCard() }
         }
         if (showPicker) {
@@ -951,30 +962,30 @@ private fun FontStyleCard(onPickFont: () -> Unit) {
                 SettingsStore.customFontPath = imported.second
                 SettingsStore.customFontLabel = imported.first
             } else {
-                Toast.makeText(context, "字体文件无效", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, L.theme.invalidFontFile, Toast.LENGTH_SHORT).show()
             }
         }
     }
     Card {
         Column(Modifier.padding(12.dp)) {
             PientSegmented(
-                labels = listOf("内置字体", "自定义字体"),
+                labels = listOf(L.theme.builtinFonts, L.theme.customFonts),
                 selected = SettingsStore.fontSource.ordinal,
                 onSelect = { SettingsStore.fontSource = FontSource.entries[it] },
                 modifier = Modifier.fillMaxWidth(),
             )
             FontPickerRow(
                 icon = Icons.Outlined.TextFields,
-                label = if (isBuiltin) "内置字体" else "自定义字体",
-                subtitle = if (isBuiltin) "使用系统内置的字体" else "使用导入的字体文件",
+                label = if (isBuiltin) L.theme.builtinFonts else L.theme.customFonts,
+                subtitle = if (isBuiltin) L.theme.builtinFontDesc else L.theme.customFontDesc,
                 onClick = onPickFont,
                 modifier = Modifier.padding(top = 12.dp),
             )
             if (!isBuiltin) {
                 FontPickerRow(
                     icon = Icons.Outlined.Add,
-                    label = "导入字体文件",
-                    subtitle = "支持 TTF / OTF 格式",
+                    label = L.theme.importFont,
+                    subtitle = L.theme.fontFormat,
                     onClick = { importLauncher.launch(FONT_MIME_TYPES) },
                     modifier = Modifier.padding(top = 12.dp),
                 )
@@ -1038,7 +1049,7 @@ private fun FontPickerDialog(onDismiss: () -> Unit) {
     val current = if (isBuiltin) SettingsStore.builtinFontName else SettingsStore.customFontPath
     var pending by remember { mutableStateOf(current) }
     val options: List<Pair<String, String>> = if (isBuiltin) {
-        BuiltinFonts.map { it.name to it.name }
+        BuiltinFonts.map { it.name to OptionLabels.font(it.name) }
     } else {
         // 显示名 = 导入时保存的原始文件名（无则回退去扩展名的文件名）；键 = 文件名
         java.io.File(context.filesDir, "fonts").listFiles()
@@ -1061,7 +1072,7 @@ private fun FontPickerDialog(onDismiss: () -> Unit) {
         if (pending == key) pending = null
     }
     PientDialog(
-        title = "选择字体",
+        title = L.theme.chooseFont,
         onDismiss = onDismiss,
         showClose = false,
         onConfirm = {
@@ -1074,7 +1085,7 @@ private fun FontPickerDialog(onDismiss: () -> Unit) {
     ) {
         if (options.isEmpty()) {
             Text(
-                "暂无自定义字体，请先导入字体文件",
+                L.theme.noCustomFonts,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(vertical = 16.dp),
@@ -1101,7 +1112,7 @@ private fun FontPickerDialog(onDismiss: () -> Unit) {
                                 modifier = Modifier.size(28.dp),
                             ) {
                                 Icon(
-                                    Icons.Outlined.Delete, "删除",
+                                    Icons.Outlined.Delete, L.common.delete,
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(18.dp),
                                 )
@@ -1134,7 +1145,7 @@ private fun FontPreview(family: FontFamily, modifier: Modifier = Modifier) {
             .background(MaterialTheme.colorScheme.surfaceContainer)
             .padding(12.dp),
     ) {
-        Text("这是一段预览文本，用于展示当前语言的显示效果。", style = MaterialTheme.typography.bodyMedium, fontFamily = family)
+        Text(L.theme.previewSentence, style = MaterialTheme.typography.bodyMedium, fontFamily = family)
         Text("The quick brown fox jumps over the lazy dog.", style = MaterialTheme.typography.bodyMedium, fontFamily = family)
         Text("0123456789", style = MaterialTheme.typography.bodyMedium, fontFamily = family)
     }
@@ -1153,11 +1164,11 @@ private fun FontSizeCard() {
                 )
                 Column(Modifier.weight(1f).padding(start = 6.dp)) {
                     Text(
-                        "字体大小",
+                        L.theme.fontSize,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(
-                        "调节界面文字的显示大小",
+                        L.theme.fontSizeDesc,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp),
@@ -1224,7 +1235,7 @@ private fun FontSizePreview(family: FontFamily, modifier: Modifier = Modifier) {
             .padding(horizontal = 12.dp, vertical = 20.dp),
     ) {
         Text(
-            "预览文本 Preview",
+            L.theme.previewLabel,
             fontSize = SettingsStore.fontSize.sp,
             fontFamily = family,
         )
@@ -1277,7 +1288,7 @@ private fun copyFontToInternalStorage(context: android.content.Context, uri: Uri
 @Composable
 private fun InputBarTabContent() {
     LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
-        item { SectionHeader("输入框样式", icon = Icons.Outlined.SpaceBar) }
+        item { SectionHeader(L.theme.inputBarStyle, icon = Icons.Outlined.SpaceBar) }
         item {
             Card {
                 InputBarStyleOptions.forEachIndexed { i, option ->
@@ -1293,7 +1304,7 @@ private fun InputBarTabContent() {
             }
         }
 
-        item { SectionHeader("输入框材质", icon = Icons.Outlined.BlurOn) }
+        item { SectionHeader(L.theme.inputBarMaterial, icon = Icons.Outlined.BlurOn) }
         item {
             Card {
                 PanelMaterialOptions.forEachIndexed { i, option ->
@@ -1310,19 +1321,19 @@ private fun InputBarTabContent() {
                     if (SettingsStore.inputBarMaterial == option.material) {
                         when (option.material) {
                             PanelMaterial.DEFAULT -> MaterialSliderRow(
-                                title = "透明度",
+                                title = L.theme.transparency,
                                 value = SettingsStore.inputBarTransparency,
                                 onValueChange = { SettingsStore.inputBarTransparency = it },
                                 range = 0f..PANEL_TRANSPARENCY_MAX.toFloat(),
-                                rangeLabel = "范围：0 - 100",
+                                rangeLabel = L.theme.transparencyRange,
                                 valueLabel = "${SettingsStore.inputBarTransparency.roundToInt()}%",
                             )
                             PanelMaterial.FROSTED -> MaterialSliderRow(
-                                title = "纹理强度",
+                                title = L.theme.frostIntensity,
                                 value = SettingsStore.inputBarFrostIntensity,
                                 onValueChange = { SettingsStore.inputBarFrostIntensity = it },
                                 range = 0f..PANEL_FROST_INTENSITY_MAX.toFloat(),
-                                rangeLabel = "范围：0 - 300",
+                                rangeLabel = L.theme.frostIntensityRange,
                                 valueLabel = SettingsStore.inputBarFrostIntensity.roundToInt().toString(),
                             )
                             PanelMaterial.LIQUID -> Unit
@@ -1346,7 +1357,7 @@ private fun InputBarTabContent() {
 @Composable
 private fun SidebarTabContent() {
     LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
-        item { SectionHeader("侧边栏样式", icon = Icons.AutoMirrored.Outlined.ViewSidebar) }
+        item { SectionHeader(L.theme.sidebarStyle, icon = Icons.AutoMirrored.Outlined.ViewSidebar) }
         item {
             Card {
                 SidebarStyleOptions.forEachIndexed { i, option ->
@@ -1362,7 +1373,7 @@ private fun SidebarTabContent() {
             }
         }
 
-        item { SectionHeader("侧边栏材质", icon = Icons.Outlined.BlurOn) }
+        item { SectionHeader(L.theme.sidebarMaterial, icon = Icons.Outlined.BlurOn) }
         item {
             Card {
                 PanelMaterialOptions.forEachIndexed { i, option ->
@@ -1378,19 +1389,19 @@ private fun SidebarTabContent() {
                     if (SettingsStore.sidebarMaterial == option.material) {
                         when (option.material) {
                             PanelMaterial.DEFAULT -> MaterialSliderRow(
-                                title = "透明度",
+                                title = L.theme.transparency,
                                 value = SettingsStore.sidebarTransparency,
                                 onValueChange = { SettingsStore.sidebarTransparency = it },
                                 range = 0f..PANEL_TRANSPARENCY_MAX.toFloat(),
-                                rangeLabel = "范围：0 - 100",
+                                rangeLabel = L.theme.transparencyRange,
                                 valueLabel = "${SettingsStore.sidebarTransparency.roundToInt()}%",
                             )
                             PanelMaterial.FROSTED -> MaterialSliderRow(
-                                title = "纹理强度",
+                                title = L.theme.frostIntensity,
                                 value = SettingsStore.sidebarFrostIntensity,
                                 onValueChange = { SettingsStore.sidebarFrostIntensity = it },
                                 range = 0f..PANEL_FROST_INTENSITY_MAX.toFloat(),
-                                rangeLabel = "范围：0 - 300",
+                                rangeLabel = L.theme.frostIntensityRange,
                                 valueLabel = SettingsStore.sidebarFrostIntensity.roundToInt().toString(),
                             )
                             PanelMaterial.LIQUID -> Unit
@@ -1469,7 +1480,7 @@ private fun PanelPreviewCard(material: PanelMaterial, preview: @Composable () ->
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "卡片预览",
+                L.theme.cardPreview,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1552,7 +1563,7 @@ private fun InputBarPreviewArea(material: PanelMaterial, floating: Boolean) {
                     .padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
                 Text(
-                    "给 Agent 派个任务…",
+                    L.theme.agentTaskHint,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.9f),
                     maxLines = 1,
@@ -1743,18 +1754,19 @@ private data class InputBarStyleOption(
     val desc: String,
 )
 
-private val InputBarStyleOptions = listOf(
+private val InputBarStyleOptions: List<InputBarStyleOption>
+    get() = listOf(
     InputBarStyleOption(
         style = InputBarStyle.BOTTOM,
         icon = Icons.Outlined.VerticalAlignBottom,
-        title = "贴底输入框（默认）",
-        desc = "输入框与屏幕底边齐平，仅上方两角圆角。",
+        title = L.theme.inputBarBottom,
+        desc = L.theme.inputBarBottomDesc,
     ),
     InputBarStyleOption(
         style = InputBarStyle.FLOATING,
         icon = Icons.Outlined.RoundedCorner,
-        title = "悬浮输入框",
-        desc = "输入框变为悬浮的全圆角矩形，四周留白浮在页面上。",
+        title = L.theme.inputBarFloating,
+        desc = L.theme.inputBarFloatingDesc,
     ),
 )
 
@@ -1766,18 +1778,19 @@ private data class SidebarStyleOption(
     val desc: String,
 )
 
-private val SidebarStyleOptions = listOf(
+private val SidebarStyleOptions: List<SidebarStyleOption>
+    get() = listOf(
     SidebarStyleOption(
         style = SidebarStyle.EDGE,
         icon = Icons.AutoMirrored.Outlined.AlignHorizontalLeft,
-        title = "贴边侧边栏（默认）",
-        desc = "侧边栏贴屏幕左缘，仅右侧两角圆角。",
+        title = L.theme.sidebarEdge,
+        desc = L.theme.sidebarEdgeDesc,
     ),
     SidebarStyleOption(
         style = SidebarStyle.FLOATING,
         icon = Icons.Outlined.RoundedCorner,
-        title = "悬浮侧边栏",
-        desc = "侧边栏变为悬浮的全圆角矩形，四周留白浮在页面上。",
+        title = L.theme.sidebarFloating,
+        desc = L.theme.sidebarFloatingDesc,
     ),
 )
 
@@ -1789,24 +1802,25 @@ private data class PanelMaterialOption(
     val desc: String,
 )
 
-private val PanelMaterialOptions = listOf(
+private val PanelMaterialOptions: List<PanelMaterialOption>
+    get() = listOf(
     PanelMaterialOption(
         material = PanelMaterial.DEFAULT,
         icon = Icons.Outlined.Rectangle,
-        title = "简约（默认）",
-        desc = "实色面板、标准描边，清晰利落。",
+        title = L.theme.materialSimple,
+        desc = L.theme.materialSimpleDesc,
     ),
     PanelMaterialOption(
         material = PanelMaterial.FROSTED,
         icon = Icons.Outlined.BlurLinear,
-        title = "磨砂玻璃",
-        desc = "半通透模糊效果，方向光照浮雕纹理。",
+        title = L.theme.materialFrosted,
+        desc = L.theme.materialFrostedDesc,
     ),
     PanelMaterialOption(
         material = PanelMaterial.LIQUID,
         icon = Icons.Outlined.WaterDrop,
-        title = "液态玻璃",
-        desc = "水润折射色散质感。",
+        title = L.theme.materialLiquid,
+        desc = L.theme.materialLiquidDesc,
     ),
 )
 

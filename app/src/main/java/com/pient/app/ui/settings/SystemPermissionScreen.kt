@@ -1,5 +1,6 @@
 package com.pient.app.ui.settings
 
+import com.pient.app.data.i18n.L
 import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -137,16 +138,16 @@ fun SystemPermissionScreen(nav: NavController) {
         if (SystemPermissions.needsRuntimeStorage) {
             runtimeLauncher.launch(SystemPermissions.runtimeStoragePermissions)
         } else if (!SystemPermissions.openStorageSettings(context)) {
-            toast("无法打开存储权限设置")
+            toast(L.perm.openStorageSettingsFailed)
         }
     }
 
     fun grantOverlay() {
-        if (!SystemPermissions.openOverlaySettings(context)) toast("无法打开悬浮窗权限设置")
+        if (!SystemPermissions.openOverlaySettings(context)) toast(L.perm.openOverlaySettingsFailed)
     }
 
     fun grantBattery() {
-        if (!SystemPermissions.openBatterySettings(context)) toast("无法打开电池优化设置")
+        if (!SystemPermissions.openBatterySettings(context)) toast(L.perm.openBatterySettingsFailed)
     }
 
     fun grantLocation() {
@@ -157,13 +158,13 @@ fun SystemPermissionScreen(nav: NavController) {
     fun grantShizuku() {
         when {
             !shizukuInstalled -> if (!ShizukuGateway.openUrl(context, ShizukuGateway.DOWNLOAD_URL)) {
-                toast("无法打开 Shizuku 下载页")
+                toast(L.perm.openShizukuDownloadFailed)
             }
             !shizukuRunning -> if (!ShizukuGateway.openApp(context)) {
-                toast("无法打开 Shizuku 应用")
+                toast(L.perm.openShizukuAppFailed)
             }
             !shizukuAuthorized -> if (!ShizukuGateway.requestPermission()) {
-                toast("请先在 Shizuku 应用中启动服务")
+                toast(L.perm.startShizukuFirst)
             }
         }
     }
@@ -177,7 +178,7 @@ fun SystemPermissionScreen(nav: NavController) {
             rootProbed = true
             if (granted) deviceRooted = true
             rootRequesting = false
-            toast(if (granted) "已获得 Root 权限" else "未获得 Root 权限（设备未 Root 或授权被拒绝）")
+            toast(if (granted) L.perm.rootGranted else L.perm.rootNotGranted)
         }
     }
 
@@ -185,11 +186,11 @@ fun SystemPermissionScreen(nav: NavController) {
         SettingsStore.permissionTier = tier
         val hint = when {
             tierReady(tier, status, shizukuInstalled, shizukuRunning, shizukuAuthorized, deviceRooted, rootGranted) -> null
-            tier == PermissionTier.DEBUGGER -> "需先完成 Shizuku 安装与授权"
-            tier == PermissionTier.ROOT -> "需设备已 Root 并授予 Pient 权限"
-            else -> "基础权限未全部授权"
+            tier == PermissionTier.DEBUGGER -> L.perm.shizukuSetupFirst
+            tier == PermissionTier.ROOT -> L.perm.rootDeviceRequired
+            else -> L.perm.basicPermissionsMissing
         }
-        toast(if (hint == null) "已切换为「${tier.title}」" else "已切换为「${tier.title}」 · $hint")
+        toast(if (hint == null) L.perm.tierSwitched(tier.title) else L.perm.tierSwitchedWithHint(tier.title, hint))
     }
 
     // 进入页面即读一次；从系统设置/授权弹窗返回（ON_RESUME）自动重检
@@ -208,7 +209,7 @@ fun SystemPermissionScreen(nav: NavController) {
         val listener = Shizuku.OnRequestPermissionResultListener { _, grantResult ->
             val granted = grantResult == PackageManager.PERMISSION_GRANTED
             shizukuAuthorized = granted
-            toast(if (granted) "已获得 Shizuku 授权" else "Shizuku 授权被拒绝")
+            toast(if (granted) L.perm.shizukuGranted else L.perm.shizukuDenied)
         }
         ShizukuGateway.addPermissionResultListener(listener)
         onDispose { ShizukuGateway.removePermissionResultListener(listener) }
@@ -224,14 +225,14 @@ fun SystemPermissionScreen(nav: NavController) {
                 .padding(horizontal = 8.dp, vertical = 10.dp),
         ) {
             Icon(
-                Icons.Outlined.ArrowBack, "返回",
+                Icons.Outlined.ArrowBack, L.common.back,
                 tint = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier
                     .size(24.dp)
                     .clickable(onClick = { nav.popBackStack() }),
             )
             Text(
-                "系统权限设置",
+                L.settings.systemPermissions,
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(start = 12.dp),
             )
@@ -244,7 +245,7 @@ fun SystemPermissionScreen(nav: NavController) {
                 .padding(bottom = 24.dp),
         ) {
             // ═══════════ 权限档位卡 ═══════════
-            SectionHeader("权限档位", icon = Icons.Outlined.AdminPanelSettings)
+            SectionHeader(L.perm.tierTitle, icon = Icons.Outlined.AdminPanelSettings)
             PermissionCardBox {
                 Column(Modifier.padding(14.dp)) {
                     // 卡头：图标 + 标题 + 刷新（刷新中换成旋转圆弧）
@@ -256,7 +257,7 @@ fun SystemPermissionScreen(nav: NavController) {
                             modifier = Modifier.size(20.dp),
                         )
                         Text(
-                            "权限档位",
+                            L.perm.tierTitle,
                             style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.weight(1f).padding(start = 8.dp),
@@ -271,7 +272,7 @@ fun SystemPermissionScreen(nav: NavController) {
                                 ArcSpinner(size = 16.dp)
                             } else {
                                 Icon(
-                                    Icons.Outlined.Refresh, "刷新权限状态",
+                                    Icons.Outlined.Refresh, L.perm.refreshStatus,
                                     tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(18.dp),
                                 )
@@ -325,7 +326,7 @@ fun SystemPermissionScreen(nav: NavController) {
                                     modifier = Modifier.size(16.dp),
                                 )
                                 Text(
-                                    "设备不支持：未检测到 Root（Magisk / su）",
+                                    L.perm.rootNotDetectedHint,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(start = 4.dp),
@@ -333,7 +334,7 @@ fun SystemPermissionScreen(nav: NavController) {
                             }
                         } else if (displayed != activeTier) {
                             PientButton(
-                                "设为当前档位",
+                                L.perm.setActiveTier,
                                 onClick = { setActiveTier(displayed) },
                                 modifier = Modifier.widthIn(max = 200.dp),
                                 height = 38,   // 与同页「设置向导」按钮同高
@@ -346,7 +347,7 @@ fun SystemPermissionScreen(nav: NavController) {
                                     modifier = Modifier.size(16.dp),
                                 )
                                 Text(
-                                    "当前使用中",
+                                    L.perm.tierInUse,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.primary,
                                     fontWeight = FontWeight.Medium,
@@ -393,7 +394,7 @@ fun SystemPermissionScreen(nav: NavController) {
             //
             // 2026-09-15（要求 5）起这里是**真状态**：通道 = 应用在 Java 侧用 Shizuku / su 直接把命令
             // 扔给 Android 系统执行，即发即走、没有会话；AI 的工具 `android_shell` 与它同源。
-            SectionHeader("Android shell（系统命令通道）", icon = Icons.Outlined.Terminal)
+            SectionHeader(L.perm.shellSectionTitle, icon = Icons.Outlined.Terminal)
             PermissionCardBox {
                 Column(Modifier.padding(14.dp)) {
                     val shellReady = AndroidShell.available(context)
@@ -414,11 +415,11 @@ fun SystemPermissionScreen(nav: NavController) {
                         )
                     }
                     Text(
-                        "这是一条**独立通道**：命令由系统直接执行，不经过 Ubuntu、也不经过终端会话；" +
-                            "每次调用都是新进程（没有会话、不保留 cd/export 状态）。" +
-                            "AI 侧通过 `android_shell` 工具使用它。" +
+                        L.perm.shellNote1 +
+                            L.perm.shellNote2 +
+                            L.perm.shellNote3 +
                             if (shellReady && displayed == PermissionTier.ROOT) {
-                                " Root 档下还可以在「环境配置」把 Ubuntu 从 PRoot 升级为 chroot。"
+                                L.perm.shellNoteRoot
                             } else {
                                 ""
                             },
@@ -436,7 +437,7 @@ fun SystemPermissionScreen(nav: NavController) {
                 else -> displayed
             }
             if (wizardTier != null) {
-                SectionHeader("设置向导", icon = Icons.Outlined.Build)
+                SectionHeader(L.perm.wizardTitle, icon = Icons.Outlined.Build)
                 PermissionCardBox {
                     Column(Modifier.padding(14.dp)) {
                         when (wizardTier) {
@@ -447,7 +448,7 @@ fun SystemPermissionScreen(nav: NavController) {
                                 onAction = { grantShizuku() },
                                 onGuide = {
                                     if (!ShizukuGateway.openUrl(context, ShizukuGateway.GUIDE_URL)) {
-                                        toast("无法打开 Shizuku 激活教程")
+                                        toast(L.perm.openShizukuGuideFailed)
                                     }
                                 },
                             )
@@ -458,7 +459,7 @@ fun SystemPermissionScreen(nav: NavController) {
                                 onRequest = { requestRoot() },
                                 onGuide = {
                                     if (!ShizukuGateway.openUrl(context, ROOT_GUIDE_URL)) {
-                                        toast("无法打开 Root 教程")
+                                        toast(L.perm.openRootGuideFailed)
                                     }
                                 },
                             )
@@ -507,40 +508,40 @@ private fun TierPermissionList(
     onRoot: () -> Unit,
 ) {
     Column {
-        GroupLabel("基础权限", "${status.readyCount}/${SystemPermissions.TOTAL}")
-        PermissionStatusRow("存储权限", status.storage, onClick = onStorage)
-        PermissionStatusRow("电池优化豁免", status.battery, onClick = onBattery)
-        PermissionStatusRow("位置权限", status.location, onClick = onLocation)
-        PermissionStatusRow("悬浮窗权限", status.overlay, onClick = onOverlay)
+        GroupLabel(L.perm.basicPermissions, "${status.readyCount}/${SystemPermissions.TOTAL}")
+        PermissionStatusRow(L.perm.storagePermission, status.storage, onClick = onStorage)
+        PermissionStatusRow(L.perm.batteryExemption, status.battery, onClick = onBattery)
+        PermissionStatusRow(L.perm.locationPermission, status.location, onClick = onLocation)
+        PermissionStatusRow(L.perm.overlayPermission, status.overlay, onClick = onOverlay)
 
         when (tier) {
             PermissionTier.DEBUGGER -> {
                 Spacer(Modifier.height(8.dp))
-                GroupLabel("Shizuku 服务")
-                PermissionStatusRow("已安装 Shizuku 应用", shizukuInstalled, pendingText = "去下载 →", onClick = onShizuku)
-                PermissionStatusRow("服务运行中", shizukuRunning, pendingText = "去启动 →", onClick = onShizuku)
-                PermissionStatusRow("已授权 Pient", shizukuAuthorized, pendingText = "去授权 →", onClick = onShizuku)
+                GroupLabel(L.perm.shizukuService)
+                PermissionStatusRow(L.perm.shizukuAppInstalled, shizukuInstalled, pendingText = L.perm.goDownload, onClick = onShizuku)
+                PermissionStatusRow(L.perm.serviceRunning, shizukuRunning, pendingText = L.perm.goStart, onClick = onShizuku)
+                PermissionStatusRow(L.perm.pientAuthorized, shizukuAuthorized, pendingText = L.perm.goAuthorize, onClick = onShizuku)
             }
             PermissionTier.ROOT -> {
                 Spacer(Modifier.height(8.dp))
-                GroupLabel("Root 通道")
+                GroupLabel(L.perm.rootChannel)
                 PermissionStatusRow(
-                    "设备已 Root",
+                    L.perm.deviceRooted,
                     deviceRooted,
-                    pendingText = "未检测到",
+                    pendingText = L.perm.notDetected,
                     onClick = null,   // 设备是否 Root 由设备决定，本页只能如实显示
                 )
                 PermissionStatusRow(
-                    "已授予 Pient su 权限",
+                    L.perm.suGranted,
                     rootGranted,
-                    pendingText = if (rootProbed) "已拒绝" else "未验证",
+                    pendingText = if (rootProbed) L.perm.denied else L.perm.notVerified,
                     onClick = onRoot,
                 )
             }
             PermissionTier.STANDARD -> {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "标准权限开箱即用：无需安装任何额外组件，四项基础权限齐备即可使用日常 Agent 能力。",
+                    L.perm.standardHint,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -554,7 +555,7 @@ private fun TierPermissionList(
 private fun PermissionStatusRow(
     title: String,
     granted: Boolean,
-    pendingText: String = "去授权 →",
+    pendingText: String = L.perm.goAuthorize,
     onClick: (() -> Unit)? = null,
 ) {
     Row(
@@ -572,7 +573,7 @@ private fun PermissionStatusRow(
         )
         if (granted) {
             Text(
-                "已授权 ✓",
+                L.common.granted,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -616,7 +617,7 @@ private fun AndroidShellTierRow(
                 Text(title, style = MaterialTheme.typography.bodyMedium)
                 if (current) {
                     Text(
-                        "  当前生效",
+                        L.perm.activeNow,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                     )
@@ -631,7 +632,7 @@ private fun AndroidShellTierRow(
         }
         if (ready) {
             Text(
-                "可用 ✓",
+                L.perm.available,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(start = 8.dp),
@@ -639,14 +640,14 @@ private fun AndroidShellTierRow(
         } else if (!supported) {
             // 设备不具备该能力：如实标注、不给入口（用户不可能选到一条跑不通的通道）
             Text(
-                "设备不支持",
+                L.perm.notSupported,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 8.dp),
             )
         } else if (onAction != null) {
             PientButton(
-                text = "去授权",
+                text = L.perm.authorize,
                 onClick = onAction,
                 primary = false,
                 height = 32,
@@ -669,37 +670,37 @@ private fun ShizukuWizard(
 ) {
     WizardHeader(
         icon = Icons.Outlined.Build,
-        title = "Shizuku 服务",
+        title = L.perm.shizukuService,
         badge = when {
-            !installed -> "未安装" to MaterialTheme.colorScheme.error
-            !running -> "未运行" to MaterialTheme.colorScheme.error
-            !authorized -> "未授权" to MaterialTheme.colorScheme.error
-            else -> "已就绪" to MaterialTheme.colorScheme.primary
+            !installed -> L.perm.notInstalled to MaterialTheme.colorScheme.error
+            !running -> L.perm.notRunning to MaterialTheme.colorScheme.error
+            !authorized -> L.perm.unauthorized to MaterialTheme.colorScheme.error
+            else -> L.perm.ready to MaterialTheme.colorScheme.primary
         },
     )
     Text(
-        "Shizuku 以 ADB 权限运行，无需解锁 Bootloader；设备重启后服务需要重新激活（无线调试配对或一次 ADB 授权），授权本身不会丢失。",
+        L.perm.shizukuNote,
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 6.dp),
     )
     Spacer(Modifier.height(10.dp))
-    WizardStepRow(1, "安装 Shizuku 应用", installed, "去下载 →") { onAction() }
-    WizardStepRow(2, "启动 Shizuku 服务", running, "打开 Shizuku →") { onAction() }
-    WizardStepRow(3, "授权 Pient 使用 Shizuku", authorized, "请求授权 →") { onAction() }
+    WizardStepRow(1, L.perm.stepInstallShizuku, installed, L.perm.goDownload) { onAction() }
+    WizardStepRow(2, L.perm.stepStartShizuku, running, L.perm.openShizuku) { onAction() }
+    WizardStepRow(3, L.perm.stepAuthorizeShizuku, authorized, L.perm.requestAccess) { onAction() }
     Spacer(Modifier.height(12.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         PientButton(
             when {
-                !installed -> "下载 Shizuku"
-                !running -> "启动 Shizuku"
-                else -> "请求授权"
+                !installed -> L.perm.downloadShizuku
+                !running -> L.perm.startShizuku
+                else -> L.perm.requestAuthorization
             },
             onClick = onAction,
             modifier = Modifier.weight(1f),
             height = 38,
         )
-        PientButton("查看教程", onClick = onGuide, primary = false, modifier = Modifier.weight(1f), height = 38)
+        PientButton(L.perm.viewGuide, onClick = onGuide, primary = false, modifier = Modifier.weight(1f), height = 38)
     }
 }
 
@@ -713,32 +714,32 @@ private fun RootWizard(
 ) {
     WizardHeader(
         icon = Icons.Outlined.Lock,
-        title = "Root 通道",
+        title = L.perm.rootChannel,
         badge = when {
-            !rooted -> "未检测到 Root" to MaterialTheme.colorScheme.error
-            !granted -> "未授权" to MaterialTheme.colorScheme.error
-            else -> "已就绪" to MaterialTheme.colorScheme.primary
+            !rooted -> L.perm.rootNotDetected to MaterialTheme.colorScheme.error
+            !granted -> L.perm.unauthorized to MaterialTheme.colorScheme.error
+            else -> L.perm.ready to MaterialTheme.colorScheme.primary
         },
     )
     Text(
-        "Pient 通过 su 通道获得最高级系统能力（系统级文件操作与特权能力）。首次请求会由 Root 管理器（Magisk / KernelSU / APatch）弹出授权框；未 Root 的设备可继续使用标准 / 调试权限。",
+        L.perm.rootNote,
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 6.dp),
     )
     Spacer(Modifier.height(10.dp))
-    WizardStepRow(1, "设备已获取 Root 权限", rooted, "查看教程 →") { onGuide() }
-    WizardStepRow(2, "授予 Pient su 权限", granted, "请求授权 →") { onRequest() }
+    WizardStepRow(1, L.perm.stepRootDevice, rooted, L.perm.viewGuideArrow) { onGuide() }
+    WizardStepRow(2, L.perm.stepGrantSu, granted, L.perm.requestAccess) { onRequest() }
     Spacer(Modifier.height(12.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         PientButton(
-            "请求 Root 授权",
+            L.perm.requestRootAccess,
             onClick = onRequest,
             modifier = Modifier.weight(1f),
             loading = requesting,
             height = 38,
         )
-        PientButton("查看教程", onClick = onGuide, primary = false, modifier = Modifier.weight(1f), height = 38)
+        PientButton(L.perm.viewGuide, onClick = onGuide, primary = false, modifier = Modifier.weight(1f), height = 38)
     }
 }
 
@@ -808,7 +809,7 @@ private fun WizardStepRow(
         )
         if (done) {
             Text(
-                "已完成 ✓",
+                L.perm.completed,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
             )

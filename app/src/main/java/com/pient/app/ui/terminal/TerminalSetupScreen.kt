@@ -1,5 +1,7 @@
 package com.pient.app.ui.terminal
 
+import com.pient.app.data.i18n.OptionLabels
+import com.pient.app.data.i18n.L
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -143,8 +145,8 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
 
     /** 未就绪时右侧显示的原因 */
     fun envBlockedNote(env: ExecEnv): String = when (env) {
-        ExecEnv.UBUNTU_CHROOT -> "需 Root"
-        ExecEnv.UBUNTU -> "未就绪"
+        ExecEnv.UBUNTU_CHROOT -> L.terminal.needsRoot
+        ExecEnv.UBUNTU -> L.terminal.notReady
     }
 
     val installable = status?.let { m -> UBUNTU_COMPONENTS.filter { selected[it.id] == true && m[it.id] != true } }
@@ -158,8 +160,8 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
             val current = PiRuntime.piVersion(context)
             piVersion = current
             piUpdate = when {
-                latest.isNullOrBlank() -> PiUpdateState.Failed("检测失败：连不上 npm（网络？）")
-                current.isBlank() -> PiUpdateState.Failed("检测失败：读不到本机 pi 版本")
+                latest.isNullOrBlank() -> PiUpdateState.Failed(L.terminal.checkFailedNpm)
+                current.isBlank() -> PiUpdateState.Failed(L.terminal.checkFailedPiVersion)
                 EnvProvision.isNewer(latest, current) -> PiUpdateState.Available(current, latest)
                 else -> PiUpdateState.Latest(current)
             }
@@ -176,7 +178,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
 
     fun install() {
         if (installable.isEmpty()) {
-            toast("先勾选要安装的组件")
+            toast(L.terminal.pickComponentsFirst)
             return
         }
         val session = EnvProvision.installInTerminal(context, installable)
@@ -196,14 +198,14 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                 .padding(horizontal = 8.dp, vertical = 10.dp),
         ) {
             Icon(
-                Icons.Outlined.ArrowBack, "返回",
+                Icons.Outlined.ArrowBack, L.common.back,
                 tint = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier
                     .size(24.dp)
                     .clickable(onClick = { nav.popBackStack() }),
             )
             Text(
-                "环境配置",
+                L.common.environmentConfig,
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(start = 12.dp),
             )
@@ -212,7 +214,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                 ArcSpinner(Modifier.padding(end = 14.dp), size = 16.dp)
             } else {
                 Icon(
-                    Icons.Outlined.Refresh, "重新检测",
+                    Icons.Outlined.Refresh, L.terminal.recheck,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
                         .padding(end = 8.dp)
@@ -233,9 +235,9 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                     SetupCard {
                         Text(
                             when {
-                                PiRuntime.isUnpacking() -> "Ubuntu 正在后台解包：${PiRuntime.unpackNote()}"
-                                rootfsIssueText.isNotBlank() -> "Ubuntu 未就绪：$rootfsIssueText"
-                                else -> "Ubuntu 未就绪：可点右上角「重新检测」，或重启应用触发解包。"
+                                PiRuntime.isUnpacking() -> L.terminal.unpacking(PiRuntime.unpackNote())
+                                rootfsIssueText.isNotBlank() -> L.terminal.notReadyReason(rootfsIssueText)
+                                else -> L.terminal.notReadyHint
                             },
                             style = MaterialTheme.typography.labelMedium,
                             color = androidx.compose.material3.MaterialTheme.colorScheme.error,
@@ -245,7 +247,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
             }
 
             // ── 0.5 Pient 运行时（pi 本体：随包预置，这里只做更新 —— 不是"待安装组件"） ──
-            item { GroupTitle("Pient 运行时", "pi 随 Pient 预置，不需要安装；这一块只用来更新它") }
+            item { GroupTitle(L.terminal.groupRuntimeTitle, L.terminal.groupRuntimeNote) }
             item {
                 SetupCard {
                     Row(
@@ -258,17 +260,17 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("pi agent", style = MaterialTheme.typography.bodyMedium)
                                 if (piVersion.isNotEmpty()) Badge("v$piVersion")
-                                Badge("随包预置")
+                                Badge(L.terminal.bundled)
                             }
                             val (stateLine, warn) = when (val s = piUpdate) {
                                 PiUpdateState.Idle ->
-                                    (if (!rootfsReady) "Ubuntu 未就绪（解包后自动铺开）"
-                                     else if (piVersion.isEmpty()) "未解包（重开应用会自动解包）"
-                                     else "已就绪 · /usr/bin/pi · 点右侧可检测官方最新版") to false
-                                PiUpdateState.Checking -> "正在查 npm 官方最新版…" to false
-                                is PiUpdateState.Latest -> "已是最新（v${s.version}）" to false
+                                    (if (!rootfsReady) L.terminal.piNotReadyUnpack
+                                     else if (piVersion.isEmpty()) L.terminal.piNotUnpacked
+                                     else L.terminal.piReadyHint) to false
+                                PiUpdateState.Checking -> L.terminal.checkingNpm to false
+                                is PiUpdateState.Latest -> L.terminal.piUpToDate(s.version) to false
                                 is PiUpdateState.Available ->
-                                    "官方最新 v${s.latest} · 当前 v${s.current} —— 可更新" to true
+                                    L.terminal.piUpdateAvailable(s.latest, s.current) to true
                                 is PiUpdateState.Failed -> s.reason to true
                             }
                             Text(
@@ -284,9 +286,9 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                         }
                         PientButton(
                             text = when (val s = piUpdate) {
-                                PiUpdateState.Checking -> "检测中…"
-                                is PiUpdateState.Available -> "更新到 v${s.latest}"
-                                else -> "检测更新"
+                                PiUpdateState.Checking -> L.terminal.checking
+                                is PiUpdateState.Available -> L.terminal.updateTo(s.latest)
+                                else -> L.terminal.checkUpdate
                             },
                             enabled = rootfsReady && piVersion.isNotEmpty() && !EnvProvision.running &&
                                 piUpdate != PiUpdateState.Checking,
@@ -305,7 +307,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
             }
 
             // ── 1. 执行环境 ──
-            item { GroupTitle("执行环境", "终端里的命令跑在哪个环境（与「权限档位」是两条轴）") }
+            item { GroupTitle(L.terminal.execEnvTitle, L.terminal.execEnvNote) }
             item {
                 SetupCard {
                     ExecEnv.entries.forEachIndexed { i, env ->
@@ -319,7 +321,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                                 .clickable(enabled = ready) {
                                     SettingsStore.execEnv = env
                                     PiRuntime.prepareTerminal(context)   // 立刻写 exec_env，下一条命令生效
-                                    toast("已切到 ${env.title}")
+                                    toast(L.terminal.envSwitched(env.title))
                                 }
                                 .alpha(if (ready) 1f else 0.45f)
                                 .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -337,7 +339,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                                 )
                             }
                             if (chosen) {
-                                Icon(Icons.Outlined.Check, "已选", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                Icon(Icons.Outlined.Check, L.terminal.selected, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                             } else if (!ready) {
                                 Text(
                                     envBlockedNote(env),
@@ -354,8 +356,8 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
             // ── 2. apt 镜像源 ──
             item {
                 GroupTitle(
-                    "apt 镜像源",
-                    "写进 Ubuntu 的 /etc/apt/sources.list.d/ubuntu.sources；下面列出的是本机（$hostMachine）实际会写入的地址",
+                    L.terminal.aptMirror,
+                    L.terminal.aptMirrorNote(hostMachine),
                 )
             }
             item {
@@ -369,20 +371,20 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                                 .fillMaxWidth()
                                 .clickable {
                                     if (!rootfsReady) {
-                                        toast("Ubuntu 未就绪，暂不能写镜像源")
+                                        toast(L.terminal.mirrorNotReady)
                                         return@clickable
                                     }
                                     if (EnvProvision.applyMirror(context, mirror)) {
                                         SettingsStore.aptMirror = mirror.name
-                                        toast("镜像源已应用：${mirror.name}")
+                                        toast(L.terminal.mirrorApplied(OptionLabels.aptMirror(mirror.name)))
                                     } else {
-                                        toast("镜像源写入失败")
+                                        toast(L.terminal.mirrorFailed)
                                     }
                                 }
                                 .padding(horizontal = 14.dp, vertical = 12.dp),
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text(mirror.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                                Text(OptionLabels.aptMirror(mirror.name), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                                 Text(
                                     mirror.uriFor(hostMachine),
                                     style = MaterialTheme.typography.labelSmall,
@@ -392,7 +394,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                                 )
                             }
                             if (chosen) {
-                                Icon(Icons.Outlined.Check, "已选", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                Icon(Icons.Outlined.Check, L.terminal.selected, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                             }
                         }
                     }
@@ -402,16 +404,16 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
             // ── 3. 环境内软件（照 Operit：分类卡 + 全选 + 展开） ──
             item {
                 GroupTitle(
-                    "环境内软件",
-                    "按运行时分类；带「（Pient 必须）」的两类排在最前，已装好的会标出来",
+                    L.terminal.packagesTitle,
+                    L.terminal.packagesNote,
                 )
             }
             items(ComponentGroups.ORDER) { group ->
                 val list = UBUNTU_COMPONENTS.filter { it.group == group }
                 if (list.isEmpty()) return@items
                 CategoryCard(
-                    title = group,
-                    desc = ComponentGroups.DESCS[group].orEmpty(),
+                    title = OptionLabels.envGroup(group),
+                    desc = ComponentGroups.descOf(group),
                     requiredGroup = group in ComponentGroups.REQUIRED_GROUPS,
                     list = list,
                     status = status,
@@ -431,8 +433,8 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
         ) {
             val installedCount = status?.count { it.value } ?: 0
             Text(
-                if (EnvProvision.running) "正在安装：${EnvProvision.step}"
-                else "已装 $installedCount/${UBUNTU_COMPONENTS.size} · 已选 ${installable.size} 项",
+                if (EnvProvision.running) L.terminal.installingStep(EnvProvision.step)
+                else L.terminal.installedSummary(installedCount, UBUNTU_COMPONENTS.size, installable.size),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -442,8 +444,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
             }.orEmpty()
             if (missingRequired.isNotEmpty() && !EnvProvision.running) {
                 Text(
-                    "Pient 必须项还差 " + missingRequired.size + " 个：" +
-                        missingRequired.joinToString("、") { it.name } + " —— 点右侧「勾选必须项」再安装",
+                    L.terminal.mustMissing(missingRequired.size, missingRequired.joinToString("、") { it.name }),
                     style = MaterialTheme.typography.labelSmall,
                     color = if (isSystemInDarkTheme()) DarkWarn else LightWarn,
                     modifier = Modifier.padding(top = 4.dp),
@@ -454,14 +455,14 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                 modifier = Modifier.padding(top = 8.dp),
             ) {
                 Text(
-                    "安装过程在终端页可见",
+                    L.terminal.installVisibleInTerminal,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
                 if (!EnvProvision.running) {
                     Text(
-                        "勾选必须项",
+                        L.terminal.selectRequired,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier
@@ -475,7 +476,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                     )
                 }
                 PientButton(
-                    text = if (EnvProvision.running) "去终端查看" else "安装所选（${installable.size}）",
+                    text = if (EnvProvision.running) L.terminal.viewInTerminal else L.terminal.installSelectedCount(installable.size),
                     enabled = EnvProvision.running || installable.isNotEmpty(),
                     height = 38,
                     onClick = {
@@ -598,14 +599,14 @@ private fun CategoryCard(
                 // 「（Pient 必须）」：照 Operit 的做法写在分类标题下的橙色小字（不另做徽标）
                 if (requiredGroup) {
                     Text(
-                        "（Pient 必须）",
+                        L.terminal.pientRequired,
                         style = MaterialTheme.typography.labelSmall,
                         color = if (isSystemInDarkTheme()) DarkWarn else LightWarn,
                         modifier = Modifier.padding(top = 1.dp),
                     )
                 }
                 Text(
-                    "$installed/${list.size} 已装" + if (desc.isNotEmpty()) " · $desc" else "",
+                    L.terminal.installedOf(installed, list.size) + if (desc.isNotEmpty()) " · $desc" else "",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp),
@@ -628,13 +629,13 @@ private fun CategoryCard(
                     )
                     }
                 Text(
-                    if (uninstalled.isEmpty() && list.isNotEmpty()) "已齐" else "全选",
+                    if (uninstalled.isEmpty() && list.isNotEmpty()) L.terminal.allSet else L.common.selectAll,
                     style = MaterialTheme.typography.labelSmall,
                 )
                 }
             Icon(
                 if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                if (expanded) "收起" else "展开",
+                if (expanded) L.common.collapse else L.common.expand,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .padding(start = 4.dp)
@@ -695,14 +696,14 @@ private fun ComponentRow(
                 Text(component.name, style = MaterialTheme.typography.bodyMedium)
                 if (installed) {
                     Text(
-                        "已安装",
+                        L.common.installed,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(start = 6.dp),
                     )
                     }
-                if (component.required) Badge("必须", strong = true)
-                if (component.heavy) Badge("大")
+                if (component.required) Badge(L.terminal.requiredBadge, strong = true)
+                if (component.heavy) Badge(L.terminal.heavyBadge)
                 }
             Text(
                 component.desc,

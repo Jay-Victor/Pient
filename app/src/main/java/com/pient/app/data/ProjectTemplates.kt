@@ -1,5 +1,6 @@
 package com.pient.app.data
 
+import com.pient.app.data.i18n.L
 import org.json.JSONObject
 import java.io.File
 
@@ -13,14 +14,38 @@ import java.io.File
  * Pient 先落地 7 种**能给出真实可用内容**的模板；android / flutter 需要真脚手架（SDK / `flutter create`），
  * office 需要二进制文档模板 —— 造个空壳文件名不算模板，宁可先不给（要的话下一轮用 Ubuntu 里的真工具链生成）。
  */
-enum class ProjectType(val id: String, val title: String, val desc: String) {
-    BLANK("blank", "空白", "只建目录与项目配置"),
-    NODE("node", "Node.js", "package.json + index.js"),
-    TYPESCRIPT("typescript", "TypeScript", "tsconfig + src/index.ts"),
-    PYTHON("python", "Python", "main.py + requirements.txt"),
-    WEB("web", "Web", "index.html + style.css + app.js"),
-    JAVA("java", "Java", "src/Main.java（javac 可直接编）"),
-    GO("go", "Go", "go.mod + main.go");
+enum class ProjectType(val id: String) {
+    BLANK("blank"),
+    NODE("node"),
+    TYPESCRIPT("typescript"),
+    PYTHON("python"),
+    WEB("web"),
+    JAVA("java"),
+    GO("go");
+
+    /**
+     * 显示名 / 说明。**必须是计算属性**：枚举构造参数只在类加载时求值一次，
+     * 直接写 `L.…` 会把文案冻结成首帧语言（切语言不刷新）。
+     */
+    val title: String get() = when (this) {
+        BLANK -> L.project.typeBlank
+        NODE -> "Node.js"
+        TYPESCRIPT -> "TypeScript"
+        PYTHON -> "Python"
+        WEB -> "Web"
+        JAVA -> "Java"
+        GO -> "Go"
+    }
+
+    val desc: String get() = when (this) {
+        BLANK -> L.project.typeBlankDesc
+        NODE -> "package.json + index.js"
+        TYPESCRIPT -> "tsconfig + src/index.ts"
+        PYTHON -> "main.py + requirements.txt"
+        WEB -> "index.html + style.css + app.js"
+        JAVA -> L.project.typeJavaDesc
+        GO -> "go.mod + main.go"
+    }
 
     companion object {
         fun fromId(id: String?): ProjectType = entries.firstOrNull { it.id == id } ?: BLANK

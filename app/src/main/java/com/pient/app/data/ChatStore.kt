@@ -1,5 +1,6 @@
 package com.pient.app.data
 
+import com.pient.app.data.i18n.L
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
@@ -148,7 +149,7 @@ object ChatStore {
                         val updatedAt = s.optLong("updatedAt", 0)
                         list += Session(
                             id = sid,
-                            title = s.optString("title", "新建会话"),
+                            title = s.optString("title", L.runtime.newSessionTitle),
                             project = s.optString("project", key),
                             running = false, // 运行态不跨重启
                             pinned = s.optBoolean("pinned", false),

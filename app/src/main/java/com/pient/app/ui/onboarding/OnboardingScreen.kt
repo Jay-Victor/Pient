@@ -1,5 +1,6 @@
 package com.pient.app.ui.onboarding
 
+import com.pient.app.data.i18n.L
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -175,16 +176,16 @@ private fun WelcomePage(onNext: () -> Unit) {
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                FeatureLine(Icons.Outlined.SmartToy, "AI Agent 工作台", "基于 Pi Agent 的移动端工作台，支持深度任务编排与多步推理，全程本地运行")
-                FeatureLine(Icons.Outlined.Extension, "插件与 Skill 生态", "完整兼容 Pi 官方插件体系与 Skill 机制，桌面端生态能力无降级迁移")
-                FeatureLine(Icons.Outlined.Lock, "本地优先 · 数据自持", "会话与配置全部存储于设备本地，数据不上云、完全自持，隐私可控")
-                FeatureLine(Icons.Outlined.Shield, "三级权限体系", "标准 / 调试 / Root 三级权限按任务动态授权，兼顾能力与安全")
+                FeatureLine(Icons.Outlined.SmartToy, L.onboarding.featureAgentTitle, L.onboarding.featureAgentDesc)
+                FeatureLine(Icons.Outlined.Extension, L.onboarding.featureEcosystemTitle, L.onboarding.featureEcosystemDesc)
+                FeatureLine(Icons.Outlined.Lock, L.onboarding.featureLocalTitle, L.onboarding.featureLocalDesc)
+                FeatureLine(Icons.Outlined.Shield, L.onboarding.featurePermissionTitle, L.onboarding.featurePermissionDesc)
             }
             }
 
             Spacer(Modifier.height(20.dp))
             PientButton(
-                "确定",
+                L.common.confirm,
                 onClick = onNext,
                 modifier = Modifier.fillMaxWidth(),
                 height = 48,
@@ -224,11 +225,12 @@ private data class PermItem(
     val granted: (SystemPermissions.Status) -> Boolean,
 )
 
-private val permItems = listOf(
-    PermItem("storage", "存储权限", "读取项目文件 / 会话数据", Icons.Outlined.Storage, granted = { it.storage }),
-    PermItem("battery", "电池优化豁免", "保活 / 后台任务", Icons.Outlined.BatterySaver, granted = { it.battery }),
-    PermItem("location", "位置权限", "位置相关工具调用", Icons.Outlined.LocationOn, granted = { it.location }),
-    PermItem("overlay", "悬浮窗权限", "悬浮终端 / 快捷面板", Icons.Outlined.OpenInFull, granted = { it.overlay }),
+private val permItems: List<PermItem>
+    get() = listOf(
+    PermItem("storage", L.onboarding.permStorage, L.onboarding.permStorageDesc, Icons.Outlined.Storage, granted = { it.storage }),
+    PermItem("battery", L.onboarding.permBattery, L.onboarding.permBatteryDesc, Icons.Outlined.BatterySaver, granted = { it.battery }),
+    PermItem("location", L.onboarding.permLocation, L.onboarding.permLocationDesc, Icons.Outlined.LocationOn, granted = { it.location }),
+    PermItem("overlay", L.onboarding.permOverlay, L.onboarding.permOverlayDesc, Icons.Outlined.OpenInFull, granted = { it.overlay }),
 )
 
 @Composable
@@ -261,19 +263,19 @@ private fun PermissionPage(onNext: () -> Unit, onBackToWelcome: () -> Unit) {
         if (SystemPermissions.needsRuntimeStorage) {
             storageLauncher.launch(SystemPermissions.runtimeStoragePermissions)
         } else if (!SystemPermissions.openStorageSettings(context)) {
-            Toast.makeText(context, "无法打开存储权限设置", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, L.onboarding.storageSettingsFailed, Toast.LENGTH_SHORT).show()
         }
     }
 
     fun requestOverlay() {
         if (!SystemPermissions.openOverlaySettings(context)) {
-            Toast.makeText(context, "无法打开悬浮窗权限设置", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, L.onboarding.overlaySettingsFailed, Toast.LENGTH_SHORT).show()
         }
     }
 
     fun requestBattery() {
         if (!SystemPermissions.openBatterySettings(context)) {
-            Toast.makeText(context, "无法打开电池优化设置", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, L.onboarding.batterySettingsFailed, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -297,7 +299,7 @@ private fun PermissionPage(onNext: () -> Unit, onBackToWelcome: () -> Unit) {
         // 步骤指示器 + 标题（指示器可点击切页：未完成基础权限前无法跳到系统权限页）
         StepHeader(
             current = 1,
-            title = "基础权限设置",
+            title = L.onboarding.basicPermissionTitle,
             onSelect = { target ->
                 when (target) {
                     0 -> onBackToWelcome()
@@ -306,7 +308,7 @@ private fun PermissionPage(onNext: () -> Unit, onBackToWelcome: () -> Unit) {
                         if (status.allReady) {
                             onNext()
                         } else {
-                            Toast.makeText(context, "请先完成基础权限授权", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, L.onboarding.basicPermissionRequired, Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -343,16 +345,16 @@ private fun PermissionPage(onNext: () -> Unit, onBackToWelcome: () -> Unit) {
         val ready = status.readyCount
         Text(
             when {
-                checking -> "正在检查权限状态…"
-                lastCheck != null -> "上次检查：$lastCheck  ·  $ready/4 项已授权"
-                else -> "权限状态实时展示 · 点击下方重检"
+                checking -> L.onboarding.checkingPermissions
+                lastCheck != null -> L.onboarding.lastCheckSummary(lastCheck, ready)
+                else -> L.onboarding.permissionStatusHint
             },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp),
         )
         PientButton(
-            if (checking) "正在检查…" else "检查权限状态",
+            if (checking) L.onboarding.checking else L.onboarding.checkPermissions,
             onClick = {
                 checking = true
                 scope.launch {
@@ -368,7 +370,7 @@ private fun PermissionPage(onNext: () -> Unit, onBackToWelcome: () -> Unit) {
             modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
         )
         PientButton(
-            if (ready == 4) "下一步" else "下一步（$ready/4 已就绪）",
+            if (ready == 4) L.onboarding.next else L.onboarding.nextWithProgress(ready),
             onClick = onNext,
             enabled = ready == 4,
             modifier = Modifier.fillMaxWidth(),
@@ -409,7 +411,7 @@ private fun PermissionCard(
         }
         if (granted) {
             Text(
-                "已授权 ✓",
+                L.common.granted,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -421,7 +423,7 @@ private fun PermissionCard(
                     .padding(6.dp),
             ) {
                 Text(
-                    "去授权 →",
+                    L.onboarding.grant,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -458,7 +460,7 @@ private fun SystemPermissionPage(
         // 步骤指示器 + 标题（指示器可点击回退到前两页）
         StepHeader(
             current = 2,
-            title = "系统权限选项",
+            title = L.onboarding.systemPermissionTitle,
             onSelect = { target ->
                 when (target) {
                     0 -> onBackToWelcome()
@@ -499,7 +501,7 @@ private fun SystemPermissionPage(
                         // 推荐徽标
                         if (tier.recommended) {
                             Text(
-                                "〔推荐〕",
+                                L.onboarding.recommended,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier
@@ -538,7 +540,7 @@ private fun SystemPermissionPage(
         }
 
         PientButton(
-            "确定，进入 Pient",
+            L.onboarding.enterPient,
             onClick = {
                 // 选定档位写入设置（首启后可在「设置 → 数据与权限 → 系统权限设置」更改）
                 SettingsStore.permissionTier = tiers[selected]

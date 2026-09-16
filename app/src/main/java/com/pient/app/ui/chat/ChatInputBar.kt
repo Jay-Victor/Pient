@@ -1,5 +1,6 @@
 package com.pient.app.ui.chat
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -227,7 +228,7 @@ fun ChatInputBar(
                 decorationBox = { inner ->
                     if (text.text.isEmpty()) {
                         Text(
-                            "给 Agent 派个任务…",
+                            L.chat.inputPlaceholder,
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.9f),
                         )
@@ -241,7 +242,7 @@ fun ChatInputBar(
                 modifier = Modifier.size(36.dp),
             ) {
                 Icon(
-                    Icons.Outlined.OpenInFull, "全屏输入",
+                    Icons.Outlined.OpenInFull, L.chat.fullscreenInput,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp),
                 )
@@ -265,7 +266,7 @@ fun ChatInputBar(
                     .padding(horizontal = 8.dp, vertical = 5.dp),
             ) {
                 Text(
-                    chatState.selectedModel?.name ?: "未选择模型",
+                    chatState.selectedModel?.name ?: L.chat.noModelSelected,
                     style = MaterialTheme.typography.labelMedium,
                     color = if (streaming) MaterialTheme.colorScheme.onSurfaceVariant
                     else MaterialTheme.colorScheme.primary,
@@ -294,7 +295,7 @@ fun ChatInputBar(
             // 系统提示词只读按键（2026-09-01，pi-web system 面板同款：
             // 文件图标；systemPrompt 非空时 accent 高亮，点击弹出只读全文浮层）
             Icon(
-                Icons.Outlined.Description, "系统提示词",
+                Icons.Outlined.Description, L.chat.systemPrompt,
                 tint = if (chatState.systemPrompt.isNotEmpty()) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
@@ -314,7 +315,7 @@ fun ChatInputBar(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    Icons.Outlined.Add, "添加附件",
+                    Icons.Outlined.Add, L.chat.addAttachment,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(22.dp),
                 )
@@ -349,7 +350,7 @@ fun ChatInputBar(
                     )
                 } else {
                     Icon(
-                        Icons.Outlined.Send, "发送",
+                        Icons.Outlined.Send, L.chat.send,
                         tint = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(20.dp),
                     )
@@ -439,7 +440,7 @@ private fun AttachmentPill(
                 .widthIn(max = 220.dp),
         )
         Icon(
-            Icons.Outlined.Close, "移除附件",
+            Icons.Outlined.Close, L.chat.removeAttachment,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
                 .padding(start = 2.dp)

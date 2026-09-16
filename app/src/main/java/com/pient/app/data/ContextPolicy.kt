@@ -1,5 +1,6 @@
 package com.pient.app.data
 
+import com.pient.app.data.i18n.L
 /**
  * 上下文管理策略（**pi 原生口径**；2026-09-15 收口）。
  *
@@ -36,10 +37,10 @@ object ContextPolicy {
 
     /** 压缩原因 → 中文标签（pi `compaction_start/end` 的 `reason`；老会话里的压缩卡也用它） */
     fun compactReasonLabel(reason: String?): String = when (reason) {
-        "manual" -> "手动"
-        "threshold" -> "上下文接近上限"
-        "overflow" -> "超出上限"
-        else -> "上下文压缩"
+        "manual" -> L.runtime.compactReasonManual
+        "threshold" -> L.runtime.compactReasonThreshold
+        "overflow" -> L.runtime.compactReasonOverflow
+        else -> L.runtime.compactReasonDefault
     }
 
     /**

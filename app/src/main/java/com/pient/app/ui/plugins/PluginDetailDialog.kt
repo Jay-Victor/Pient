@@ -1,5 +1,6 @@
 package com.pient.app.ui.plugins
 
+import com.pient.app.data.i18n.L
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -126,7 +127,7 @@ fun PluginDetailDialog(
                     // ② 描述（无描述不显示）
                     if (item.desc.isNotBlank()) {
                         Text(
-                            "描述",
+                            L.plugins.description,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 12.dp),
@@ -149,14 +150,14 @@ fun PluginDetailDialog(
                             .clickable(enabled = item.readmeMd != null) { showReadme = !showReadme },
                     ) {
                         Text(
-                            "查看README.md",
+                            L.plugins.viewReadme,
                             style = MaterialTheme.typography.labelMedium,
                             color = if (item.readmeMd != null) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                         )
                         Icon(
                             if (showReadme) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
-                            "展开/收起",
+                            L.plugins.expandCollapse,
                             tint = if (item.readmeMd != null) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                             modifier = Modifier.size(16.dp),
@@ -191,7 +192,7 @@ fun PluginDetailDialog(
 
                     // ④ 状态（pi-web statusColor；包禁用时显示「已禁用」）
                     Text(
-                        "状态",
+                        L.plugins.status,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
@@ -205,7 +206,7 @@ fun PluginDetailDialog(
 
                     // ⑤ 版本（pi-web versionSummary：已安装 x · 已配置 y；均无显示「未知」）
                     Text(
-                        "版本",
+                        L.plugins.version,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
@@ -219,7 +220,7 @@ fun PluginDetailDialog(
 
                     // ⑥ 资源摘要（pi-web resourceSummary：N扩展 · N技能 · N提示词 · N主题）
                     Text(
-                        "资源",
+                        L.plugins.resources,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
@@ -233,7 +234,7 @@ fun PluginDetailDialog(
 
                     // ⑦ 来源（安装源 spec）
                     Text(
-                        "来源",
+                        L.plugins.source,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
@@ -247,7 +248,7 @@ fun PluginDetailDialog(
 
                     // ⑧ 安装路径
                     Text(
-                        "路径",
+                        L.common.path,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
@@ -261,14 +262,14 @@ fun PluginDetailDialog(
 
                     // ⑨ 已解析资源（pi-web ResourceList 分组清单 + 逐项启停）
                     Text(
-                        "已解析资源",
+                        L.plugins.resolvedResources,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
                     )
                     if (resources.isEmpty()) {
                         Text(
-                            if (!item.enabled) "包已禁用。" else "没有已解析资源",
+                            if (!item.enabled) L.plugins.packageDisabled else L.plugins.noResolvedResources,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 4.dp),
@@ -310,7 +311,7 @@ fun PluginDetailDialog(
                     // 三联等宽按钮行：每枚仅 ~97dp（窄屏更窄），须用小于组件默认 16dp 的内容内边距，
                     // 否则「检查更新」这类 4 字标签会被 Ellipsis 截断
                     PientButton(
-                        text = if (updateAvailable) "更新" else "检查更新",
+                        text = if (updateAvailable) L.common.update else L.common.checkUpdate,
                         enabled = !busy,
                         loading = busy,   // 检查中 / 更新中：文字位置都换成旋转圆弧
                         primary = false,
@@ -335,7 +336,7 @@ fun PluginDetailDialog(
                                     if (!hasUpdate) {
                                         Toast.makeText(
                                             context,
-                                            "已是最新版本" + (item.version?.let { " $it" } ?: ""),
+                                            L.plugins.upToDate + (item.version?.let { " $it" } ?: ""),
                                             Toast.LENGTH_SHORT,
                                         ).show()
                                     }
@@ -344,9 +345,9 @@ fun PluginDetailDialog(
                         },
                         modifier = Modifier.weight(1f),
                     )
-                    PientButton("删除", enabled = !busy, onClick = onDelete, contentPadding = 8, modifier = Modifier.weight(1f))
+                    PientButton(L.common.delete, enabled = !busy, onClick = onDelete, contentPadding = 8, modifier = Modifier.weight(1f))
                     PientButton(
-                        "关闭",
+                        L.common.close,
                         onClick = onDismiss,
                         primary = false,
                         contentPadding = 8,
@@ -398,11 +399,11 @@ private fun ResourceRow(
 
 /** 状态文案（enabled=false 显示「已禁用」，与 pi-web 语义一致） */
 private fun statusText(item: PluginItem): String = when {
-    !item.enabled -> "已禁用"
-    item.status == PluginStatus.LOADED -> "已加载"
-    item.status == PluginStatus.INSTALLED -> "已安装"
-    item.status == PluginStatus.DISABLED -> "已禁用"
-    else -> "缺失"
+    !item.enabled -> L.plugins.disabled
+    item.status == PluginStatus.LOADED -> L.plugins.loaded
+    item.status == PluginStatus.INSTALLED -> L.common.installed
+    item.status == PluginStatus.DISABLED -> L.plugins.disabled
+    else -> L.plugins.missing
 }
 
 /** 状态颜色（pi-web statusColor：loaded=accent、installed=amber、disabled=dim、missing=red） */
@@ -422,10 +423,10 @@ private fun statusColor(item: PluginItem): Color {
 /** 版本摘要（pi-web versionSummary：已安装 x · 已配置 y；均无 → 未知） */
 private fun versionSummary(item: PluginItem): String {
     val parts = buildList {
-        item.version?.let { add("已安装 $it") }
-        item.configuredVersion?.let { add("已配置 $it") }
+        item.version?.let { add(L.plugins.installedVersion(it)) }
+        item.configuredVersion?.let { add(L.plugins.configuredVersion(it)) }
     }
-    return if (parts.isEmpty()) "未知" else parts.joinToString(" · ")
+    return if (parts.isEmpty()) L.common.unknown else parts.joinToString(" · ")
 }
 
 /** 资源摘要（pi-web resourceSummary：N扩展 · N技能 · N提示词 · N主题；空 → 没有资源） */
@@ -435,20 +436,20 @@ private fun resourceSummary(resources: List<PluginResource>): String {
         val skill = resources.count { it.kind == PluginResourceKind.SKILL }
         val prompt = resources.count { it.kind == PluginResourceKind.PROMPT }
         val theme = resources.count { it.kind == PluginResourceKind.THEME }
-        if (ext > 0) add("${ext}扩展")
-        if (skill > 0) add("${skill}技能")
-        if (prompt > 0) add("${prompt}提示词")
-        if (theme > 0) add("${theme}主题")
+        if (ext > 0) add(L.plugins.resourceExtensions(ext))
+        if (skill > 0) add(L.plugins.resourceSkills(skill))
+        if (prompt > 0) add(L.plugins.resourcePrompts(prompt))
+        if (theme > 0) add(L.plugins.resourceThemes(theme))
     }
-    return if (parts.isEmpty()) "没有资源" else parts.joinToString(" · ")
+    return if (parts.isEmpty()) L.plugins.noResources else parts.joinToString(" · ")
 }
 
 /** 资源类型分组标题（pi-web i18n：extensions/skills/prompts/themes） */
 private fun kindLabel(kind: PluginResourceKind): String = when (kind) {
-    PluginResourceKind.EXTENSION -> "扩展"
-    PluginResourceKind.SKILL -> "技能"
-    PluginResourceKind.PROMPT -> "提示词"
-    PluginResourceKind.THEME -> "主题"
+    PluginResourceKind.EXTENSION -> L.plugins.extension
+    PluginResourceKind.SKILL -> L.common.skill
+    PluginResourceKind.PROMPT -> L.plugins.prompt
+    PluginResourceKind.THEME -> L.plugins.theme
 }
 
 /** 安装路径（占位：按 pi 的落盘规则推导，告诉用户它会去哪） */

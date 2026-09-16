@@ -1,5 +1,6 @@
 package com.pient.app.runtime
 
+import com.pient.app.data.i18n.L
 import android.content.Context
 import android.util.Log
 import androidx.compose.runtime.getValue
@@ -32,7 +33,8 @@ object PiPackages {
     private const val TAG = "PiPackages"
 
     /** 装/删/更新在哪个终端会话里跑（用户可切到终端页看全过程、看真报错） */
-    const val SESSION = "pi 包管理"
+    /** 专用会话名（计算属性：object 里的 val 只求值一次，写 `L.…` 会冻结成首帧语言） */
+    val SESSION: String get() = L.runtime.piPackagesSession
 
     var running by mutableStateOf(false); private set
     var step by mutableStateOf(""); private set
@@ -53,7 +55,7 @@ object PiPackages {
     suspend fun runPi(context: Context, args: String, timeoutMs: Long = 60_000): Pair<Int, String> =
         withContext(Dispatchers.IO) {
             val shell = PiRuntime.shellPath(context)
-            if (!shell.isFile) return@withContext -1 to "Ubuntu 还没就绪（缺 pient-shell）"
+            if (!shell.isFile) return@withContext -1 to L.runtime.ubuntuNotReady
             runCatching {
                 val proc = ProcessBuilder(
                     shell.absolutePath, "-c",
@@ -72,18 +74,18 @@ object PiPackages {
                 val finished = proc.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
                 if (!finished) {
                     runCatching { proc.destroy() }
-                    return@runCatching -1 to (out.toString() + "\n（超时 ${timeoutMs / 1000}s）")
+                    return@runCatching -1 to (out.toString() + L.runtime.timeoutSuffix(timeoutMs / 1000))
                 }
                 reader.join(1000)
                 proc.exitValue() to out.toString()
-            }.getOrElse { -1 to (it.message ?: "命令执行失败") }
+            }.getOrElse { -1 to (it.message ?: L.runtime.commandFailed) }
         }
 
     /** `pi list` → 填 [global] / [project]。返回 null 表示成功，否则是给页面看的错误文本。 */
     suspend fun refresh(context: Context): String? {
         val (code, out) = runPi(context, "list", 30_000)
         val text = stripAnsi(out)
-        if (code != 0) return text.trim().ifBlank { "pi list 失败（退出码 $code）" }
+        if (code != 0) return text.trim().ifBlank { L.runtime.piListFailed(code) }
         val (g, p) = parseList(text)
         global.clear(); global.addAll(g)
         project.clear(); project.addAll(p)
@@ -94,22 +96,22 @@ object PiPackages {
     /** 装包。source 原样传给 pi（`npm:@x/y@1.0.0` / `git:…` / 本地路径都合法） */
     fun install(context: Context, source: String, local: Boolean, onDone: (() -> Unit)? = null) {
         val cmd = "pi install $source" + if (local) " -l" else ""
-        runInTerminal(context, "安装 $source", cmd, onDone)
+        runInTerminal(context, L.runtime.installSource(source), cmd, onDone)
     }
 
     /** 删包（pi remove 支持 `-l`；source 要与 settings 里配置的写法一致） */
     fun remove(context: Context, source: String, local: Boolean, onDone: (() -> Unit)? = null) {
         val cmd = "pi remove $source" + if (local) " -l" else ""
-        runInTerminal(context, "移除 $source", cmd, onDone)
+        runInTerminal(context, L.runtime.removeSource(source), cmd, onDone)
     }
 
     /** 更新单个包 */
     fun update(context: Context, source: String, onDone: (() -> Unit)? = null) =
-        runInTerminal(context, "更新 $source", "pi update $source", onDone)
+        runInTerminal(context, L.runtime.updateSource(source), "pi update $source", onDone)
 
     /** 更新全部包（= 官方 `pi update --extensions`，会顺带对齐 pinned git ref） */
     fun updateAll(context: Context, onDone: (() -> Unit)? = null) =
-        runInTerminal(context, "更新全部包", "pi update --extensions", onDone)
+        runInTerminal(context, L.runtime.updateAllPackages, "pi update --extensions", onDone)
 
     // ─────────────────────────── 内部 ───────────────────────────
 
@@ -166,7 +168,7 @@ object PiPackages {
                         source = source,
                         enabled = true,                     // pi 里「配置了」即生效；包级过滤见 filtered 标记
                         global = scope == "user",
-                        desc = if (filtered) "该包在本项目被过滤（filtered）" else "",
+                        desc = if (filtered) L.runtime.packageFiltered else "",
                         version = versionOf(source),
                         configuredVersion = pinnedOf(source),
                         status = PluginStatus.LOADED,

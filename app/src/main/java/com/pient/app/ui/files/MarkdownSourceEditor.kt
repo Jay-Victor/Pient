@@ -1,5 +1,6 @@
 package com.pient.app.ui.files
 
+import com.pient.app.data.i18n.L
 import android.widget.Toast
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -43,12 +44,12 @@ import com.pient.app.data.FileNode
  */
 
 /** 占位文字（取 Mdcito strings.xml：文本 / 链接文本 / 代码） */
-private const val MdPlaceholderText = "文本"
-private const val MdPlaceholderLinkText = "链接文本"
-private const val MdPlaceholderCode = "代码"
-private const val MdPlaceholderImageAlt = "图片描述"
-private const val MdPlaceholderImageUrl = "图片路径"
-private const val MdPlaceholderUnused = "内容"
+private val MdPlaceholderText: String get() = L.files.placeholderText
+private val MdPlaceholderLinkText: String get() = L.files.placeholderLinkText
+private val MdPlaceholderCode: String get() = L.files.placeholderCode
+private val MdPlaceholderImageAlt: String get() = L.files.placeholderImageAlt
+private val MdPlaceholderImageUrl: String get() = L.files.placeholderImageUrl
+private val MdPlaceholderUnused: String get() = L.common.content
 private const val MdDefaultLinkUrl = "https://example.com"
 
 @Composable
@@ -202,7 +203,7 @@ internal fun MarkdownSourceEditor(chatState: ChatState, node: FileNode, text: St
                 onReplace = {
                     val checked = selectedMatches.toList()
                     if (checked.isEmpty()) {
-                        Toast.makeText(context, "请先勾选要替换的结果", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, L.files.replaceNothingSelected, Toast.LENGTH_SHORT).show()
                     } else {
                         replaceMatches(checked)
                         selectedMatches = emptySet()
@@ -386,7 +387,7 @@ private fun mdTable(value: TextFieldValue): TextFieldValue {
     val start = value.selection.start.coerceIn(0, text.length)
     val end = value.selection.end.coerceIn(0, text.length)
     val cols = 3
-    val header = "| " + (1..cols).joinToString(" | ") { "列 $it" } + " |"
+    val header = "| " + (1..cols).joinToString(" | ") { L.files.tableColumn(it) } + " |"
     val separator = "| " + (1..cols).joinToString(" | ") { "-----" } + " |"
     val row = "| " + (1..cols).joinToString(" | ") { MdPlaceholderUnused } + " |"
     val prefix = if (start > 0 && text.getOrNull(start - 1) != '\n') "\n" else ""

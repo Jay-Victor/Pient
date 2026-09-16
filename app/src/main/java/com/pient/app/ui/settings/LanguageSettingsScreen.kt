@@ -19,22 +19,24 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.pient.app.data.SettingsStore
+import com.pient.app.data.i18n.L
+import com.pient.app.data.i18n.Languages
 
 /**
- * 语言设置（设计计划 6.3，Operit LanguageSettingsScreen 参考）：
- * "跟随系统"置顶 + 语言列表（当前项 ✓）；切换即时生效（无需重启）。
- * UI 原型：仅切换选中态与设置值，文案国际化 v1 接入。
+ * 语言设置（设计计划 6.3：Operit `LanguageSettingsScreen` 参考）：
+ * 「跟随系统」置顶 + 语言列表（当前项 ✓）；**切换即时生效、无需重启**。
+ *
+ * 列表本身由 [Languages] 注册表驱动（新增语言只改语言包注册处），
+ * 文案取自当前语言包 —— 切完这一页立刻换语言。
  */
 @Composable
 fun LanguageSettingsScreen(nav: NavController) {
-    val languages = listOf(
-        "system" to "跟随系统",
-        "zh-CN" to "简体中文",
-        "en" to "English",
-    )
+    val ctx = LocalContext.current
+    val options = Languages.options()
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -45,31 +47,34 @@ fun LanguageSettingsScreen(nav: NavController) {
                 .padding(horizontal = 8.dp, vertical = 10.dp),
         ) {
             Icon(
-                Icons.Outlined.ArrowBack, "返回",
+                Icons.Outlined.ArrowBack, L.common.back,
                 tint = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier
                     .size(24.dp)
                     .clickable(onClick = { nav.popBackStack() }),
             )
             Text(
-                "语言设置",
+                L.settings.languageTitle,
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(start = 12.dp),
             )
         }
 
         LazyColumn {
-            items(languages, key = { it.first }) { (code, name) ->
-                val sel = SettingsStore.language == code
+            items(options, key = { it.id }) { opt ->
+                val sel = SettingsStore.language == opt.id
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(onClick = { SettingsStore.language = code })
+                        .clickable(onClick = {
+                            SettingsStore.language = opt.id
+                            SettingsStore.saveLanguage(ctx)
+                        })
                         .padding(horizontal = 20.dp, vertical = 14.dp),
                 ) {
                     Text(
-                        name,
+                        opt.label,
                         style = MaterialTheme.typography.bodyMedium,
                         color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier.weight(1f),
@@ -85,7 +90,7 @@ fun LanguageSettingsScreen(nav: NavController) {
             }
         }
         Text(
-            "切换后即时生效（原型演示）",
+            L.settings.languageApplied,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),

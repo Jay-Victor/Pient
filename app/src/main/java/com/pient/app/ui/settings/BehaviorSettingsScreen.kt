@@ -1,5 +1,6 @@
 package com.pient.app.ui.settings
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -57,14 +58,14 @@ fun BehaviorSettingsScreen(nav: NavController) {
                 .padding(horizontal = 8.dp, vertical = 10.dp),
         ) {
             Icon(
-                Icons.Outlined.ArrowBack, "返回",
+                Icons.Outlined.ArrowBack, L.common.back,
                 tint = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier
                     .size(24.dp)
                     .clickable(onClick = { nav.popBackStack() }),
             )
             Text(
-                "行为设置",
+                L.settings.behavior,
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(start = 12.dp),
             )
@@ -73,7 +74,7 @@ fun BehaviorSettingsScreen(nav: NavController) {
         LazyColumn(
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
-            item { SectionHeader("侧边栏展出方式") }
+            item { SectionHeader(L.settings.behaviorSubtitle) }
             item {
                 Column(
                     modifier = Modifier
@@ -87,8 +88,8 @@ fun BehaviorSettingsScreen(nav: NavController) {
                         // 因此整行不可点、也不写 prefs —— 手机端所选展出方式在平板仍被保留。
                         DrawerModeRow(
                             icon = Icons.Outlined.Compress,
-                            title = "压缩滑出（平板固定）",
-                            desc = "侧边栏展开时聊天页宽度收窄并同步右移，整页始终完整可见。",
+                            title = L.theme.compressSlide,
+                            desc = L.theme.compressSlideDesc,
                             selected = true,
                             onClick = null,
                         )
@@ -106,7 +107,7 @@ fun BehaviorSettingsScreen(nav: NavController) {
                     }
                 }
             }
-            item { SectionHeader("文件预览页设置") }
+            item { SectionHeader(L.theme.filePreview) }
             item {
                 Column(
                     modifier = Modifier
@@ -117,14 +118,14 @@ fun BehaviorSettingsScreen(nav: NavController) {
                 ) {
                     SettingToggleRow(
                         icon = Icons.Outlined.SwapHoriz,
-                        title = "长行不折行（向右延展）",
-                        desc = "带行号的文件：每行内容向右延伸并可横向滚动，行号与内容始终一一对应；关闭时超出宽度自动折行。",
+                        title = L.theme.noWrap,
+                        desc = L.theme.noWrapDesc,
                         checked = SettingsStore.filePreviewNoWrap,
                         onCheckedChange = { SettingsStore.filePreviewNoWrap = it },
                     )
                 }
             }
-            item { SectionHeader("开屏设置") }
+            item { SectionHeader(L.theme.startup) }
             item {
                 Column(
                     modifier = Modifier
@@ -135,8 +136,8 @@ fun BehaviorSettingsScreen(nav: NavController) {
                 ) {
                     SettingToggleRow(
                         icon = Icons.Outlined.Animation,
-                        title = "开屏动画",
-                        desc = "启动时显示品牌开屏页（logo + π 轮廓加载动画 + PIENT 解码文字），并保留最短展示时长；关闭后不显示开屏页、不做等待，直接进入主界面（首屏数据仍在后台加载）。",
+                        title = L.theme.startupAnimation,
+                        desc = L.theme.startupAnimationDesc,
                         checked = SettingsStore.startupAnimation,
                         onCheckedChange = { SettingsStore.startupAnimation = it },
                     )
@@ -197,24 +198,25 @@ private data class DrawerModeOption(
     val desc: String,
 )
 
-private val DrawerModeOptions = listOf(
+private val DrawerModeOptions: List<DrawerModeOption>
+    get() = listOf(
     DrawerModeOption(
         mode = DrawerMode.SLIDE,
         icon = Icons.AutoMirrored.Outlined.ViewSidebar,
-        title = "水平滑出（默认）",
-        desc = "侧边栏浮在聊天页之上滑出，遮罩同步淡入；主内容保持不动。",
+        title = L.theme.drawerSlide,
+        desc = L.theme.drawerSlideDesc,
     ),
     DrawerModeOption(
         mode = DrawerMode.PERSPECTIVE,
         icon = Icons.Outlined.ViewInAr,
-        title = "3D 透视展开",
-        desc = "侧边栏展开时聊天页透视让位：右移、下沉、缩小并绕 Y 轴旋转。",
+        title = L.theme.drawerPerspective,
+        desc = L.theme.drawerPerspectiveDesc,
     ),
     DrawerModeOption(
         mode = DrawerMode.PUSH,
         icon = Icons.AutoMirrored.Outlined.FormatIndentIncrease,
-        title = "推动展开",
-        desc = "侧边栏展开时，主内容区域被“推”向另一侧，两者同时移动。",
+        title = L.theme.drawerPush,
+        desc = L.theme.drawerPushDesc,
     ),
 )
 

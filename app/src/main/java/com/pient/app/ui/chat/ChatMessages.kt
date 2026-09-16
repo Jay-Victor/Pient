@@ -1,5 +1,6 @@
 package com.pient.app.ui.chat
 
+import com.pient.app.data.i18n.L
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import com.pient.app.data.UsageStore
@@ -297,7 +298,7 @@ fun ChatMessages(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            "显示更早的消息",
+                            L.chat.showEarlier,
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier
@@ -412,7 +413,7 @@ fun ChatMessages(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    Icons.Outlined.ExpandMore, "回到底部",
+                    Icons.Outlined.ExpandMore, L.chat.backToBottom,
                     tint = MaterialTheme.colorScheme.primary,
                 )
             }
@@ -543,12 +544,12 @@ fun MessageLocatorDialog(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        "消息定位",
+                        L.chat.messageLocator,
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.weight(1f),
                     )
                     Text(
-                        "当前定位：第${currentIndex + 1}/${messages.size}条",
+                        L.chat.locatorPosition(currentIndex + 1, messages.size),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -583,7 +584,7 @@ fun MessageLocatorDialog(
                                 Box {
                                     if (locatorQuery.isEmpty()) {
                                         Text(
-                                            "搜索消息",
+                                            L.chat.searchMessages,
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -600,7 +601,7 @@ fun MessageLocatorDialog(
                                     .padding(4.dp),
                             ) {
                                 Icon(
-                                    Icons.Outlined.Close, "清空搜索",
+                                    Icons.Outlined.Close, L.common.clearSearch,
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(14.dp),
                                 )
@@ -627,7 +628,7 @@ fun MessageLocatorDialog(
                                 .clickable(onClick = { filterMenuOpen = true }),
                         ) {
                             Icon(
-                                Icons.Outlined.FilterList, "筛选消息",
+                                Icons.Outlined.FilterList, L.chat.filterMessages,
                                 tint = if (locatorFilter != 0) MaterialTheme.colorScheme.primary
                                 else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp),
@@ -637,7 +638,7 @@ fun MessageLocatorDialog(
                             expanded = filterMenuOpen,
                             onDismissRequest = { filterMenuOpen = false },
                         ) {
-                            listOf("全部消息", "用户消息", "AI消息").forEachIndexed { i, label ->
+                            listOf(L.chat.filterAll, L.chat.filterUser, L.chat.filterAi).forEachIndexed { i, label ->
                                 DropdownMenuItem(
                                     text = {
                                         Text(
@@ -667,7 +668,7 @@ fun MessageLocatorDialog(
                 }
                 // 跳转提示（搜索行下方）
                 Text(
-                    "点击任意一条消息即可快速跳转",
+                    L.chat.locatorHint,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
@@ -678,7 +679,7 @@ fun MessageLocatorDialog(
                         modifier = Modifier.fillMaxWidth().height(160.dp).padding(top = 8.dp),
                     ) {
                         Text(
-                            "无匹配消息",
+                            L.chat.noMatchingMessages,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -720,7 +721,7 @@ fun MessageLocatorDialog(
                                             else MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                         Text(
-                                            if (msg is Msg.User) "用户" else "AI",
+                                            if (msg is Msg.User) L.chat.roleUser else "AI",
                                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -739,7 +740,7 @@ fun MessageLocatorDialog(
                     }
                 }
                 PientButton(
-                    "取消",
+                    L.common.cancel,
                     onClick = onDismiss,
                     primary = false,
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
@@ -814,26 +815,26 @@ fun ForkContextMenu(
         Column(Modifier.padding(vertical = 4.dp)) {
             MenuRow(
                 icon = Icons.Outlined.ForkRight,
-                label = "从此处创建新会话",
+                label = L.chat.forkFromHere,
                 enabled = forkEnabled,
                 onClick = onFork,
             )
             MenuRow(
                 icon = Icons.Outlined.ContentCopy,
-                label = "复制消息",
+                label = L.chat.copyMessage,
                 enabled = true,
                 onClick = onCopy,
             )
             MenuRow(
                 icon = Icons.Outlined.FormatQuote,
-                label = "引用",
+                label = L.chat.quote,
                 enabled = true,
                 onClick = onQuote,
             )
             if (showRegenerate) {
                 MenuRow(
                     icon = Icons.Outlined.Refresh,
-                    label = "重新生成",
+                    label = L.chat.regenerate,
                     enabled = regenerateEnabled,
                     onClick = onRegenerate,
                 )
@@ -876,7 +877,7 @@ fun QuoteCard(
                 .padding(start = 8.dp, end = 4.dp),
         ) {
             Text(
-                if (quote.role == "assistant") "引用 AI 回答" else "引用用户消息",
+                if (quote.role == "assistant") L.chat.quoteAssistant else L.chat.quoteUser,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -895,7 +896,7 @@ fun QuoteCard(
                 modifier = Modifier.size(28.dp),
             ) {
                 Icon(
-                    Icons.Outlined.Close, "取消引用",
+                    Icons.Outlined.Close, L.chat.removeQuote,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(16.dp),
                 )
@@ -948,12 +949,12 @@ fun MessageCopyCard(
         ) {
             Column(Modifier.padding(16.dp)) {
                 Text(
-                    "复制消息",
+                    L.chat.copyMessage,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onBackground,
                 )
                 PientSegmented(
-                    labels = listOf("纯文本", "Markdown 源码"),
+                    labels = listOf(L.chat.plainText, L.chat.markdownSource),
                     selected = mode,
                     onSelect = { mode = it },
                     modifier = Modifier
@@ -994,10 +995,10 @@ fun MessageCopyCard(
                         enabled = mode == 1 || plain != null,
                         onClick = {
                             clipboard.setText(AnnotatedString(display))
-                            Toast.makeText(context, "消息已复制到剪贴板", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, L.chat.messageCopied, Toast.LENGTH_SHORT).show()
                         },
                     ) {
-                        Text(if (mode == 0) "复制纯文本" else "复制 Markdown 源码")
+                        Text(if (mode == 0) L.chat.copyPlainText else L.chat.copyMarkdownSource)
                     }
                 }
             }
@@ -1259,10 +1260,10 @@ internal fun ThinkingDisclosure(
 
 /** 思考标题文案（Hermes i18n 逐字：思考中 / 思考了 3s / 思考了片刻 / 已思考） */
 private fun thoughtLabel(live: Boolean, durationMs: Long?): String = when {
-    live -> "思考中"
-    durationMs == null -> "已思考"
-    durationMs < 1000L -> "思考了片刻"
-    else -> "思考了 ${formatElapsedSeconds(durationMs / 1000)}"
+    live -> L.chat.thinkingLive
+    durationMs == null -> L.chat.thought
+    durationMs < 1000L -> L.chat.thoughtBriefly
+    else -> L.chat.thoughtFor(formatElapsedSeconds(durationMs / 1000))
 }
 
 /** Hermes `formatElapsed`：<60s → `3s`；≥60s → `1:20` */
@@ -1377,7 +1378,7 @@ private fun CompactionCard(msg: Msg.Compaction) {
                 modifier = Modifier.size(16.dp),
             )
             Text(
-                "上下文已压缩",
+                L.chat.contextCompacted,
                 style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.padding(start = 6.dp),
             )
@@ -1392,7 +1393,7 @@ private fun CompactionCard(msg: Msg.Compaction) {
                 )
             }
             Text(
-                "前 ${tok(msg.tokensBefore)} · 节省 ${tok(msg.saved)}",
+                L.chat.compactTokens(tok(msg.tokensBefore), tok(msg.saved)),
                 style = MaterialTheme.typography.labelSmall,
                 fontFamily = MonoFont,
                 color = MaterialTheme.colorScheme.primary,
@@ -1400,7 +1401,7 @@ private fun CompactionCard(msg: Msg.Compaction) {
             )
             Spacer(Modifier.weight(1f))
             Text(
-                "查看摘要",
+                L.chat.viewSummary,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -1522,10 +1523,10 @@ private fun renderGap(items: List<ChatRender>, messages: List<Msg>, i: Int): Dp 
 private fun locatorPreview(msg: Msg): String = when (msg) {
     is Msg.User -> msg.text.replace('\n', ' ')
     is Msg.Assistant -> msg.markdown.replace('\n', ' ')
-    is Msg.Thinking -> "思考 · ${msg.level}"
-    is Msg.ToolCall -> "工具 · ${msg.name}"
-    is Msg.ToolResult -> "结果 · ${msg.preview.replace('\n', ' ')}"
-    is Msg.Compaction -> "上下文已压缩 · 节省 ${msg.saved} tokens"
+    is Msg.Thinking -> L.chat.previewThinking(msg.level)
+    is Msg.ToolCall -> L.chat.previewTool(msg.name)
+    is Msg.ToolResult -> L.chat.previewResult(msg.preview.replace('\n', ' '))
+    is Msg.Compaction -> L.chat.previewCompacted(msg.saved)
 }
 
 /**

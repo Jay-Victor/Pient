@@ -1,5 +1,6 @@
 package com.pient.app.ui.files
 
+import com.pient.app.data.i18n.L
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -86,7 +87,7 @@ fun FilesPanel(chatState: ChatState) {
         val ok = chatState.saveFile(context, node)
         Toast.makeText(
             context,
-            if (ok) "已保存 ${node.name}" else "保存失败：${node.name}",
+            if (ok) L.files.saved(node.name) else L.files.saveFailedFor(node.name),
             Toast.LENGTH_SHORT,
         ).show()
     }
@@ -102,9 +103,9 @@ fun FilesPanel(chatState: ChatState) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.fillMaxSize().padding(32.dp),
                     ) {
-                        Text("文件内容预览区", style = MaterialTheme.typography.titleMedium)
+                        Text(L.files.previewTitle, style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "点右下角文件夹图标打开项目文件树\n文本/代码：高亮 + 等宽 · Markdown：GFM 渲染 · 图片：预览",
+                            L.files.emptyHint,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 8.dp),
@@ -128,7 +129,7 @@ fun FilesPanel(chatState: ChatState) {
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                Icons.Outlined.FolderOpen, "文件树",
+                Icons.Outlined.FolderOpen, L.files.fileTree,
                 tint = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier.size(24.dp),
             )
@@ -178,28 +179,28 @@ fun FilesPanel(chatState: ChatState) {
         val closingNode = closingIndex?.let { chatState.openTabs.getOrNull(it) }
         if (closingNode != null && closingIndex != null) {
             PientDialog(
-                title = "保存更改？",
+                title = L.files.saveChangesTitle,
                 onDismiss = { chatState.closingTabIndex = null },
-                confirmText = "保存",
+                confirmText = L.common.save,
                 onConfirm = {
                     val ok = chatState.saveFile(context, closingNode)
                     Toast.makeText(
                         context,
-                        if (ok) "已保存 ${closingNode.name}" else "保存失败：${closingNode.name}",
+                        if (ok) L.files.savedOnClose(closingNode.name) else L.files.saveFailedOnClose(closingNode.name),
                         Toast.LENGTH_SHORT,
                     ).show()
                     chatState.closingTabIndex = null
                     if (ok) chatState.closeTab(closingIndex)   // 保存失败不关标签，避免改动丢失
                 },
                 showClose = false,   // 全局原则：带取消按钮的确认弹窗不显示右上角 ×
-                extraActionText = "不保存",
+                extraActionText = L.files.dontSave,
                 onExtraAction = {
                     chatState.closingTabIndex = null
                     chatState.closeTab(closingIndex)
                 },
             ) {
                 Text(
-                    "文件 ${closingNode.name} 已被修改，是否保存更改？",
+                    L.files.unsavedMessage(closingNode.name),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
@@ -279,13 +280,13 @@ private fun FileTabBar(chatState: ChatState, onSave: (FileNode) -> Unit) {
                     ) {
                         if (unsaved) {
                             Icon(
-                                Icons.Filled.FiberManualRecord, "未保存",
+                                Icons.Filled.FiberManualRecord, L.files.unsaved,
                                 tint = tailTint.copy(alpha = 0.9f),
                                 modifier = Modifier.size(8.dp),
                             )
                         } else {
                             Icon(
-                                Icons.Outlined.Close, "关闭",
+                                Icons.Outlined.Close, L.common.close,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(14.dp),
                             )
@@ -297,7 +298,7 @@ private fun FileTabBar(chatState: ChatState, onSave: (FileNode) -> Unit) {
         // 未保存改动的当前文件 → 保存键（Operit 工具栏同款：仅存在未保存改动时出现）
         if (active != null && chatState.isUnsaved(active)) {
             Icon(
-                Icons.Outlined.Save, "保存",
+                Icons.Outlined.Save, L.common.save,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
                     .padding(horizontal = 8.dp)
@@ -309,7 +310,7 @@ private fun FileTabBar(chatState: ChatState, onSave: (FileNode) -> Unit) {
         if (active != null && active.ext in SOURCE_TOGGLE_EXTS) {
             Icon(
                 if (chatState.sourceEditMode) Icons.Outlined.Visibility else Icons.Outlined.Edit,
-                if (chatState.sourceEditMode) "渲染模式" else "编辑模式",
+                if (chatState.sourceEditMode) L.files.renderMode else L.files.editMode,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
                     .padding(horizontal = 8.dp)

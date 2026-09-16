@@ -1,5 +1,6 @@
 package com.pient.app.data
 
+import com.pient.app.data.i18n.L
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -24,32 +25,35 @@ import rikka.shizuku.Shizuku
  */
 enum class PermissionTier(
     val code: String,          // L0 / L1 / L2
-    val title: String,
-    val desc: String,
-    val badge: String,         // 首启卡片徽标文案（推荐 / 需安装 Shizuku / ⚠ 需设备已 Root）
     val recommended: Boolean = false,
     val warn: Boolean = false,
 ) {
-    STANDARD(
-        code = "L0",
-        title = "标准权限",
-        desc = "使用系统标准权限模型：网络、存储、通知等常规授权，无需安装任何额外工具，覆盖日常 Agent 任务所需能力",
-        badge = "推荐",
-        recommended = true,
-    ),
-    DEBUGGER(
-        code = "L1",
-        title = "调试权限",
-        desc = "借助 Shizuku 获得 ADB 级调试能力：UI 自动化、应用管理、系统设置读写；无需解锁 Bootloader，设备重启后需重新激活",
-        badge = "需安装 Shizuku",
-    ),
-    ROOT(
-        code = "L2",
-        title = "Root 权限",
-        desc = "以 Root 身份运行：chroot 容器、系统级文件操作与完整工具链；权限等级最高、能力全部解锁，安全风险需自行评估",
-        badge = "⚠ 需设备已 Root",
-        warn = true,
-    );
+    STANDARD(code = "L0", recommended = true),
+    DEBUGGER(code = "L1"),
+    ROOT(code = "L2", warn = true);
+
+    /**
+     * 卡片标题 / 说明 / 徽标。**必须是计算属性**：枚举构造参数只在类加载时求值一次，
+     * 直接写 `L.…` 会把文案冻结成首帧语言（切语言不刷新）。
+     */
+    val title: String get() = when (this) {
+        STANDARD -> L.perm.tierStandard
+        DEBUGGER -> L.perm.tierDebug
+        ROOT -> L.perm.tierRoot
+    }
+
+    val desc: String get() = when (this) {
+        STANDARD -> L.perm.tierStandardDesc
+        DEBUGGER -> L.perm.tierDebugDesc
+        ROOT -> L.perm.tierRootDesc
+    }
+
+    /** 首启卡片徽标文案（推荐 / 需安装 Shizuku / ⚠ 需设备已 Root） */
+    val badge: String get() = when (this) {
+        STANDARD -> L.perm.recommended
+        DEBUGGER -> L.perm.shizukuRequired
+        ROOT -> L.perm.rootedDeviceRequired
+    }
 }
 
 /**

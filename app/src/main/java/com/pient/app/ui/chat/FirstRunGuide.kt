@@ -1,5 +1,6 @@
 package com.pient.app.ui.chat
 
+import com.pient.app.data.i18n.L
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.Image
@@ -90,12 +91,12 @@ fun FirstRunGuide(
                 )
             }
             Text(
-                "开始使用 Pient",
+                L.chat.getStarted,
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.padding(top = 16.dp),
             )
             Text(
-                "完成以下步骤后即可开始对话",
+                L.chat.firstRunSubtitle,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -103,10 +104,10 @@ fun FirstRunGuide(
             )
             GuideActionCard(
                 icon = Icons.Outlined.CreateNewFolder,
-                title = "创建项目",
+                title = L.chat.createProject,
                 desc = when {
-                    projectDone -> "已绑定项目：${chatState.currentProject}"
-                    else -> "新建项目文件夹（应用私有目录 Projects/ 下）"
+                    projectDone -> L.chat.projectBound(chatState.currentProject)
+                    else -> L.chat.createProjectDesc
                 },
                 done = projectDone,
                 onClick = { createDialogOpen = true },
@@ -114,25 +115,25 @@ fun FirstRunGuide(
             )
             GuideActionCard(
                 icon = Icons.Outlined.Tune,
-                title = "配置 AI 模型",
-                desc = if (aiDone) "已通过连接测试" else "接入服务商与模型，测试连接成功后即可对话",
+                title = L.chat.configureAi,
+                desc = if (aiDone) L.chat.aiReady else L.chat.configureAiDesc,
                 done = aiDone,
                 onClick = onConfigureAi,
                 modifier = Modifier.padding(top = 10.dp),
             )
             GuideActionCard(
                 icon = Icons.Outlined.Terminal,
-                title = "配置 Ubuntu 环境",
+                title = L.chat.configureEnv,
                 // 三态文案（2026-09-15 修）：
                 // - 已完成 → 打勾 + 一句结论；
                 // - **上一步（AI 模型）还没配时不说"检测中/未就绪"**：那时 pi 根本没法起，
                 //   探针给的原因会是「没有可用的服务商 / 模型」—— 那是第二步的事，摆在环境这一步会串味；
                 // - 其余 → 探针给的真实原因（rootfs 未解 / 缺 Node / 通道起不来…）。
                 desc = when {
-                    envDone -> "环境已就绪：Node 与 pi 可用"
-                    !aiDone -> "到「环境配置」装 Node.js（pi 是 Node 程序；rg/fd 是它的搜索工具）"
+                    envDone -> L.chat.envReady
+                    !aiDone -> L.chat.envInstallNode
                     chatState.piUnreadyReason.isNotBlank() -> chatState.piUnreadyReason
-                    else -> "到「环境配置」装 Node.js（pi 是 Node 程序；rg/fd 是它的搜索工具）"
+                    else -> L.chat.envInstallNode
                 },
                 done = envDone,
                 onClick = onOpenEnvSetup,
@@ -224,9 +225,9 @@ private fun CreateProjectDialog(
 
     Box(Modifier.fillMaxSize()) {
         PientDialog(
-            title = "创建项目",
+            title = L.chat.createProject,
             onDismiss = onDismiss,
-            confirmText = "创建",
+            confirmText = L.common.create,
             showClose = false,
             confirmEnabled = confirmEnabled,
             onConfirm = {
@@ -235,7 +236,7 @@ private fun CreateProjectDialog(
                     chatState.addProject(name.trim(), dir.absolutePath)
                     onDismiss()
                 } else {
-                    Toast.makeText(context, "文件夹创建失败", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, L.chat.folderCreateFailed, Toast.LENGTH_SHORT).show()
                 }
             },
         ) {
@@ -253,7 +254,7 @@ private fun CreateProjectDialog(
                         .padding(12.dp),
                 )
                 Text(
-                    "将在应用私有目录 Projects/ 下创建该文件夹",
+                    L.chat.createProjectFolderHint,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),

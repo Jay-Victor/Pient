@@ -1,5 +1,6 @@
 package com.pient.app.ui.chat
 
+import com.pient.app.data.i18n.L
 import android.widget.Toast
 
 import androidx.compose.animation.core.LinearEasing
@@ -142,7 +143,7 @@ internal fun ScaffoldCaret(open: Boolean, size: Dp = 12.dp) {
     )
     Icon(
         Icons.AutoMirrored.Outlined.KeyboardArrowRight,
-        contentDescription = if (open) "收起" else "展开",
+        contentDescription = if (open) L.common.collapse else L.common.expand,
         tint = scaffoldLabelColor(),
         modifier = Modifier
             .size(size)
@@ -242,14 +243,14 @@ private fun compact(raw: String, max: Int = 48): String {
 
 /** 逐工具标题（`i18n/zh.ts` 的 titles：done / pending）。 */
 private fun baseTitle(name: String, pending: Boolean): String = when (name) {
-    "read" -> if (pending) "正在读取文件" else "已读取文件"
-    "write" -> if (pending) "正在编辑文件" else "已编辑文件"
-    "edit" -> if (pending) "正在修补文件" else "已修补文件"
-    "grep" -> if (pending) "正在搜索文件" else "已搜索文件"
-    "find" -> if (pending) "正在查找文件" else "已查找文件"
-    "ls" -> if (pending) "正在列出文件" else "已列出文件"
-    "bash", "terminal" -> if (pending) "正在运行命令" else "已运行命令"
-    else -> if (pending) "正在运行 $name" else "已运行 $name"
+    "read" -> if (pending) L.chat.toolReadingFile else L.chat.toolReadFile
+    "write" -> if (pending) L.chat.toolEditingFile else L.chat.toolEditedFile
+    "edit" -> if (pending) L.chat.toolPatchingFile else L.chat.toolPatchedFile
+    "grep" -> if (pending) L.chat.toolSearchingFiles else L.chat.toolSearchedFiles
+    "find" -> if (pending) L.chat.toolFindingFiles else L.chat.toolFoundFiles
+    "ls" -> if (pending) L.chat.toolListingFiles else L.chat.toolListedFiles
+    "bash", "terminal" -> if (pending) L.chat.toolRunningCommand else L.chat.toolRanCommand
+    else -> if (pending) L.chat.toolRunningName(name) else L.chat.toolRanName(name)
 }
 
 /**
@@ -268,7 +269,7 @@ private fun readLineLabel(call: Msg.ToolCall, output: String?): String {
     if (offset > 0) {
         return if (limit <= 1) "L$offset" else "L$offset-${offset + limit - 1}"
     }
-    return if (limit > 1) "共 $limit 行" else ""
+    return if (limit > 1) L.chat.lineCountLabel(limit) else ""
 }
 
 /** 行标题：优先「动作 + 目标」（Hermes `dynamicTitle` → `actionTarget` / `actionCommand` / `actionQuoted`）。 */
@@ -329,8 +330,8 @@ internal fun toolRowTitle(call: Msg.ToolCall): String {
 internal fun toolRowTitleParts(call: Msg.ToolCall): Pair<String, String> {
     val full = toolRowTitle(call)
     val verbs = listOf(
-        "正在运行", "正在读取", "正在编辑", "正在修补", "正在写入",
-        "正在搜索", "正在查找", "正在列出",
+        L.chat.toolRunning, L.chat.toolReading, L.chat.toolEditing, L.chat.toolPatching, L.chat.toolWriting,
+        L.chat.toolSearching, L.chat.toolFinding, L.chat.toolListing,
     )
     val verb = verbs.firstOrNull { full.startsWith(it) } ?: return full to ""
     return verb to full.removePrefix(verb)
@@ -354,13 +355,13 @@ private fun countLabel(call: Msg.ToolCall, output: String): String? {
     val lines = output.lines().count { it.isNotBlank() }
     if (lines <= 0) return null
     return when (call.name) {
-        "grep" -> "$lines 处匹配"
-        "find" -> "$lines 个文件"
-        "ls" -> "$lines 项"
-        "read" -> "$lines 行"
+        "grep" -> L.chat.matchCount(lines)
+        "find" -> L.chat.fileCountLabel(lines)
+        "ls" -> L.chat.entryCountLabel(lines)
+        "read" -> L.chat.rowCountLabel(lines)
         // edit：pi 的结果文本 = "Successfully replaced N block(s) in <path>." → 「N 处替换」
         "edit", "write" -> Regex("replaced (\\d+) block")
-            .find(output)?.groupValues?.get(1)?.let { "$it 处替换" }
+            .find(output)?.groupValues?.get(1)?.let { L.chat.replacedCount(it) }
         else -> null
     }
 }
@@ -507,7 +508,7 @@ private fun ToolGlyph(call: Msg.ToolCall, palette: ToolPalette) {
                 color = palette.scaffoldText,
             )
             ToolStatus.FAILED -> Icon(
-                Icons.Outlined.ErrorOutline, contentDescription = "错误",
+                Icons.Outlined.ErrorOutline, contentDescription = L.chat.error,
                 tint = palette.error, modifier = Modifier.size(14.dp),
             )
             ToolStatus.DONE -> Icon(
@@ -616,7 +617,7 @@ private fun ToolBody(call: Msg.ToolCall, output: String?, palette: ToolPalette) 
             val content = firstArg(call.params, "content")
             if (content.isNotEmpty()) {
                 ToolSectionBlock(
-                    label = "写入内容",
+                    label = L.chat.writtenContent,
                     text = clipPreview(content),
                     palette = palette,
                     error = call.status == ToolStatus.FAILED,
@@ -678,7 +679,7 @@ private fun clipPreview(text: String, maxLines: Int = 200, maxBytes: Int = 8 * 1
     if (out.toByteArray().size > maxBytes) {
         out = out.toByteArray().copyOf(maxBytes).toString(Charsets.UTF_8)
     }
-    return if (out.length < text.length) "$out\n…（内容过长，已截断）" else out
+    return if (out.length < text.length) L.chat.truncatedContent(out) else out
 }
 
 /**
@@ -748,7 +749,7 @@ private fun PathEntryList(entries: List<String>, palette: ToolPalette) {
         }
         if (entries.size > 60) {
             Text(
-                "另有 ${entries.size - 60} 项…",
+                L.chat.moreItems(entries.size - 60),
                 style = toolStyle(ToolSectionLabelSize).copy(color = palette.meta),
             )
         }
@@ -785,7 +786,7 @@ private fun GrepHitsList(hits: List<GrepHit>, palette: ToolPalette) {
         }
         if (hits.size > 20) {
             Text(
-                "另有 ${hits.size - 20} 处…",
+                L.chat.moreMatches(hits.size - 20),
                 style = toolStyle(ToolSectionLabelSize).copy(color = palette.meta),
             )
         }
@@ -836,9 +837,9 @@ private fun DiffPanel(diff: String, palette: ToolPalette) {
 }
 
 private fun sectionLabelFor(name: String) = when (name) {
-    "read" -> "内容"
-    "grep", "find", "ls" -> "结果"
-    else -> "输出"
+    "read" -> L.common.content
+    "grep", "find", "ls" -> L.chat.results
+    else -> L.common.output
 }
 
 /** `$ 命令` + `exit N` 徽标 +（android_shell）通道徽标（Hermes `TerminalTranscript` 几何/配色）。 */
@@ -861,7 +862,7 @@ private fun ToolCommandBlock(command: String, exitCode: Int?, channel: String?, 
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        CopyButton(text = command, label = "复制命令")
+        CopyButton(text = command, label = L.chat.copyCommand)
         // android_shell 的通道徽标（Pient 专有工具：标准 / ADB(Shizuku) / Root 三档，Hermes 无此类工具）
         if (channel != null) {
             Text(
@@ -905,7 +906,7 @@ private fun ToolSectionBlock(
                 ),
             )
             Spacer(Modifier.weight(1f))
-            CopyButton(text = text, label = "复制输出")
+            CopyButton(text = text, label = L.chat.copyOutput)
         }
         Text(
             text,
@@ -938,7 +939,7 @@ private fun CopyButton(text: String, label: String) {
             .alpha(CaretRestAlpha)
             .clickable {
                 clipboard.setText(AnnotatedString(text))
-                Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, L.common.copied, Toast.LENGTH_SHORT).show()
             },
     )
 }
@@ -955,7 +956,7 @@ private fun ToolPayloadDisclosure(call: Msg.ToolCall, result: Msg.ToolResult?, p
             ScaffoldCaret(open = open, size = 10.dp)
             Spacer(Modifier.width(ToolRowGap))
             Text(
-                "工具负载",
+                L.chat.toolPayload,
                 style = toolStyle(ToolSectionLabelSize).copy(
                     color = palette.meta,
                     fontWeight = FontWeight.Medium,
@@ -991,12 +992,14 @@ private fun payloadText(call: Msg.ToolCall, result: Msg.ToolResult?): String {
 
 private data class CatCopy(val noun: String, val past: String, val present: String)
 
-private val CatCopyOf = mapOf(
-    ToolKind.EDIT to CatCopy("文件", "已编辑", "正在编辑"),
-    ToolKind.EXPLORE to CatCopy("文件", "已读取", "正在读取"),
-    ToolKind.RUN to CatCopy("命令", "已运行", "正在运行"),
-    ToolKind.OTHER to CatCopy("工具", "已使用", "正在使用"),
-)
+/** 工具行分句文案（计算属性/函数：顶层 val 只求值一次，写 `L.…` 会冻结成首帧语言） */
+private val CatCopyOf: Map<ToolKind, CatCopy>
+    get() = mapOf(
+        ToolKind.EDIT to CatCopy(L.common.file, L.chat.toolEdited, L.chat.toolEditing),
+        ToolKind.EXPLORE to CatCopy(L.common.file, L.chat.toolRead, L.chat.toolReading),
+        ToolKind.RUN to CatCopy(L.chat.nounCommand, L.chat.toolRan, L.chat.toolRunning),
+        ToolKind.OTHER to CatCopy(L.chat.nounTool, L.chat.toolUsed, L.chat.toolUsing),
+    )
 
 /** 分句顺序固定（Hermes `CATEGORY_ORDER`）：编辑 → 读取 → 运行 → 其他。 */
 private val CatOrder = listOf(ToolKind.EDIT, ToolKind.EXPLORE, ToolKind.RUN, ToolKind.OTHER)
@@ -1025,7 +1028,7 @@ internal fun summarizeToolRun(calls: List<Msg.ToolCall>, live: Boolean): String 
         val target = if (group.size == 1) runTarget(group[0]) else ""
         // 一条「已结束」的命令不写命令行（Hermes：命令行只在正等着它的时候占位置）
         if (target.isNotEmpty() && (kind == liveKind || kind != ToolKind.RUN)) "$verb $target"
-        else "$verb ${group.size} 个${copy.noun}"
+        else L.chat.runSummaryClause(verb, group.size, copy.noun)
     }
     return clauses.joinToString("、")
 }

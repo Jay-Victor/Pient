@@ -1,5 +1,6 @@
 package com.pient.app.ui.files
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -74,51 +75,51 @@ internal fun MarkdownEditorToolbar(
             horizontalArrangement = Arrangement.spacedBy(0.dp),
             modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
         ) {
-            EditorToolbarButton(icon = Icons.AutoMirrored.Outlined.Undo, desc = "撤销", enabled = canUndo, onClick = onUndo)
-            EditorToolbarButton(icon = Icons.AutoMirrored.Outlined.Redo, desc = "取消撤销", enabled = canRedo, onClick = onRedo)
+            EditorToolbarButton(icon = Icons.AutoMirrored.Outlined.Undo, desc = L.common.undo, enabled = canUndo, onClick = onUndo)
+            EditorToolbarButton(icon = Icons.AutoMirrored.Outlined.Redo, desc = L.files.redo, enabled = canRedo, onClick = onRedo)
 
             EditorToolbarDivider()
 
             for (level in 1..6) {
                 EditorToolbarButton(
                     text = "H$level",
-                    desc = "$level 级标题",
+                    desc = L.files.headingLevel(level),
                     onClick = { onFormat(MdFormat.Heading(level)) },
                 )
             }
 
             EditorToolbarDivider()
 
-            EditorToolbarButton(icon = Icons.Outlined.FormatItalic, desc = "斜体", onClick = { onFormat(MdFormat.Italic) })
-            EditorToolbarButton(icon = Icons.Outlined.FormatBold, desc = "粗体", onClick = { onFormat(MdFormat.Bold) })
-            EditorToolbarButton(text = "B I", boldText = true, desc = "粗斜体", onClick = { onFormat(MdFormat.BoldItalic) })
+            EditorToolbarButton(icon = Icons.Outlined.FormatItalic, desc = L.files.italic, onClick = { onFormat(MdFormat.Italic) })
+            EditorToolbarButton(icon = Icons.Outlined.FormatBold, desc = L.files.bold, onClick = { onFormat(MdFormat.Bold) })
+            EditorToolbarButton(text = "B I", boldText = true, desc = L.files.boldItalic, onClick = { onFormat(MdFormat.BoldItalic) })
 
             EditorToolbarDivider()
 
-            EditorToolbarButton(icon = Icons.Outlined.FormatStrikethrough, desc = "删除线", onClick = { onFormat(MdFormat.Strike) })
-            EditorToolbarButton(icon = Icons.Outlined.HorizontalRule, desc = "分割线", onClick = { onFormat(MdFormat.Rule) })
+            EditorToolbarButton(icon = Icons.Outlined.FormatStrikethrough, desc = L.files.strikethrough, onClick = { onFormat(MdFormat.Strike) })
+            EditorToolbarButton(icon = Icons.Outlined.HorizontalRule, desc = L.files.horizontalRule, onClick = { onFormat(MdFormat.Rule) })
 
             EditorToolbarDivider()
 
-            EditorToolbarButton(icon = Icons.AutoMirrored.Outlined.FormatListBulleted, desc = "无序列表", onClick = { onFormat(MdFormat.UnorderedList) })
-            EditorToolbarButton(icon = Icons.Outlined.FormatListNumbered, desc = "有序列表", onClick = { onFormat(MdFormat.OrderedList) })
-            EditorToolbarButton(icon = Icons.Outlined.CheckBox, desc = "任务列表", onClick = { onFormat(MdFormat.TaskList) })
+            EditorToolbarButton(icon = Icons.AutoMirrored.Outlined.FormatListBulleted, desc = L.files.bulletList, onClick = { onFormat(MdFormat.UnorderedList) })
+            EditorToolbarButton(icon = Icons.Outlined.FormatListNumbered, desc = L.files.numberedList, onClick = { onFormat(MdFormat.OrderedList) })
+            EditorToolbarButton(icon = Icons.Outlined.CheckBox, desc = L.files.taskList, onClick = { onFormat(MdFormat.TaskList) })
 
             EditorToolbarDivider()
 
-            EditorToolbarButton(icon = Icons.Outlined.Code, desc = "行内代码", onClick = { onFormat(MdFormat.InlineCode) })
-            EditorToolbarButton(icon = Icons.Outlined.DataObject, desc = "代码块", onClick = { onFormat(MdFormat.CodeBlock) })
-            EditorToolbarButton(icon = Icons.Outlined.FormatQuote, desc = "引用", onClick = { onFormat(MdFormat.Quote) })
+            EditorToolbarButton(icon = Icons.Outlined.Code, desc = L.files.inlineCode, onClick = { onFormat(MdFormat.InlineCode) })
+            EditorToolbarButton(icon = Icons.Outlined.DataObject, desc = L.files.codeBlock, onClick = { onFormat(MdFormat.CodeBlock) })
+            EditorToolbarButton(icon = Icons.Outlined.FormatQuote, desc = L.files.quote, onClick = { onFormat(MdFormat.Quote) })
 
             EditorToolbarDivider()
 
-            EditorToolbarButton(icon = Icons.Outlined.InsertLink, desc = "链接", onClick = { onFormat(MdFormat.Link) })
-            EditorToolbarButton(icon = Icons.Outlined.Image, desc = "图片", onClick = { onFormat(MdFormat.Image) })
-            EditorToolbarButton(icon = Icons.Outlined.TableChart, desc = "表格", onClick = { onFormat(MdFormat.Table) })
+            EditorToolbarButton(icon = Icons.Outlined.InsertLink, desc = L.files.link, onClick = { onFormat(MdFormat.Link) })
+            EditorToolbarButton(icon = Icons.Outlined.Image, desc = L.common.image, onClick = { onFormat(MdFormat.Image) })
+            EditorToolbarButton(icon = Icons.Outlined.TableChart, desc = L.files.table, onClick = { onFormat(MdFormat.Table) })
         }
 
         // 搜索键固定在右侧，不随滚动隐藏（Mdcito 同款）
         EditorToolbarDivider()
-        EditorToolbarButton(icon = Icons.Outlined.Search, desc = "搜索", onClick = onSearch)
+        EditorToolbarButton(icon = Icons.Outlined.Search, desc = L.common.search, onClick = onSearch)
     }
 }

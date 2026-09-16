@@ -1,5 +1,6 @@
 package com.pient.app.ui.settings
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -86,9 +87,20 @@ import kotlin.math.log10
 import kotlin.math.pow
 
 /** 时间维度（deepseek 开放平台用量页同款维度） */
-private enum class UsageRange(val label: String) {
-    ALL("全部"), TODAY("今天"), YESTERDAY("昨天"),
-    LAST_7("近7天"), LAST_30("近30天"), WEEK("本周"), MONTH("本月"), CUSTOM("自定义"),
+private enum class UsageRange {
+    ALL, TODAY, YESTERDAY, LAST_7, LAST_30, WEEK, MONTH, CUSTOM;
+
+    /** 显示名（计算属性：枚举构造参数只求值一次，写 `L.…` 会冻结成首帧语言） */
+    val label: String get() = when (this) {
+        ALL -> L.common.all
+        TODAY -> L.models.usageRangeToday
+        YESTERDAY -> L.models.usageRangeYesterday
+        LAST_7 -> L.models.usageRangeLast7
+        LAST_30 -> L.models.usageRangeLast30
+        WEEK -> L.models.usageRangeWeek
+        MONTH -> L.models.usageRangeMonth
+        CUSTOM -> L.models.usageRangeCustom
+    }
 }
 
 /**
@@ -186,7 +198,7 @@ fun UsageScreen(nav: NavController) {
     }
 
     val rangeText = if (start != null && end != null) "${fmtDate(start)} ~ ${fmtDate(end)}"
-    else "请选择时间范围"
+    else L.models.usageSelectRange
 
     // 选中模型的计费方式（单模型视图的图例/费用柱随计费方式变：按次计费不拆输入/输出）
     val selectedBillingMode = remember(daily, model) {
@@ -213,8 +225,8 @@ fun UsageScreen(nav: NavController) {
                 val u = perModel[m] ?: return@map emptyList()
                 val c = modelColor(m, modelNames)
                 listOf(
-                    StackSegment("输入", c.copy(alpha = 0.45f), u.inputTokens.toDouble()),
-                    StackSegment("输出", c, u.outputTokens.toDouble()),
+                    StackSegment(L.common.input, c.copy(alpha = 0.45f), u.inputTokens.toDouble()),
+                    StackSegment(L.common.output, c, u.outputTokens.toDouble()),
                 )
             }
         }
@@ -232,11 +244,11 @@ fun UsageScreen(nav: NavController) {
                 val c = modelColor(m, modelNames)
                 if (selectedBillingMode == BillingMode.COUNT) {
                     // 按次计费：无输入/输出拆分，单段显示（Operit 按次计费只算每次请求价）
-                    listOf(StackSegment("按次", c, u.cost))
+                    listOf(StackSegment(L.models.usageChartPerRequest, c, u.cost))
                 } else {
                     listOf(
-                        StackSegment("输入", c.copy(alpha = 0.45f), u.inputCost),
-                        StackSegment("输出", c, u.outputCost),
+                        StackSegment(L.common.input, c.copy(alpha = 0.45f), u.inputCost),
+                        StackSegment(L.common.output, c, u.outputCost),
                     )
                 }
             }
@@ -248,11 +260,11 @@ fun UsageScreen(nav: NavController) {
             modelNames.map { it to modelColor(it, modelNames) }
         } else {
             val c = modelColor(m, modelNames)
-            if (selectedBillingMode == BillingMode.COUNT) listOf("按次" to c)
-            else listOf("输入" to c.copy(alpha = 0.45f), "输出" to c)
+            if (selectedBillingMode == BillingMode.COUNT) listOf(L.models.usageChartPerRequest to c)
+            else listOf(L.common.input to c.copy(alpha = 0.45f), L.common.output to c)
         }
     }
-    val modelLabel = model ?: "全部模型"
+    val modelLabel = model ?: L.models.usageAllModels
 
     // 用量排行（模型消耗榜）：每模型 token 总量 + 费用；卡片内分段控制器切换维度
     val rankData = remember(days, modelNames) {
@@ -278,14 +290,14 @@ fun UsageScreen(nav: NavController) {
                     .padding(horizontal = 8.dp, vertical = 6.dp),
             ) {
                 Icon(
-                    Icons.Outlined.ArrowBack, "返回",
+                    Icons.Outlined.ArrowBack, L.common.back,
                     tint = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier
                         .size(24.dp)
                         .clickable(onClick = { nav.popBackStack() }),
                 )
                 Text(
-                    "模型用量信息",
+                    L.settings.usage,
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(start = 12.dp).weight(1f),
                 )
@@ -305,7 +317,7 @@ fun UsageScreen(nav: NavController) {
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                 ) {
                     SelectorCard(
-                        label = "时间维度",
+                        label = L.models.usageTimeRange,
                         value = range.label,
                         expanded = rangeMenu,
                         onArrowClick = { rangeMenu = true },
@@ -333,7 +345,7 @@ fun UsageScreen(nav: NavController) {
                     Spacer(Modifier.width(8.dp))
                     // 模型卡独占剩余宽度（fillMax 通栏）
                     SelectorCard(
-                        label = "模型",
+                        label = L.common.model,
                         value = modelLabel,
                         expanded = modelMenu,
                         onArrowClick = { modelMenu = true },
@@ -347,7 +359,7 @@ fun UsageScreen(nav: NavController) {
                             DropdownMenuItem(
                                 text = {
                                     Text(
-                                        m ?: "全部模型",
+                                        m ?: L.models.usageAllModels,
                                         color = if (m == model) MaterialTheme.colorScheme.primary
                                         else MaterialTheme.colorScheme.onBackground,
                                     )
@@ -371,14 +383,14 @@ fun UsageScreen(nav: NavController) {
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                 ) {
-                    StatCard("消费金额", formatMoney(totals.third), Modifier.weight(1f))
-                    StatCard("API请求次数", formatCount(totals.second), Modifier.weight(1f))
+                    StatCard(L.models.usageAmountSpent, formatMoney(totals.third), Modifier.weight(1f))
+                    StatCard(L.models.usageApiRequests, formatCount(totals.second), Modifier.weight(1f))
                     StatCard("Tokens", formatCompact(totals.first), Modifier.weight(1f))
                 }
                 // 汇率折算提示（有 USD 计价模型的费用时显示；Operit settings_rate_applied_hint 同款）
                 if (hasUsdCost) {
                     Text(
-                        "总费用按 1 USD = ${"%.4f".format(AiConfigStore.usdToCnyRate)} CNY 折算",
+                        L.models.usageTotalCostNote("%.4f".format(AiConfigStore.usdToCnyRate)),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
@@ -397,7 +409,7 @@ fun UsageScreen(nav: NavController) {
                 Spacer(Modifier.height(12.dp))
                 // ── 费用趋势图卡 ──
                 UsageChartCard(
-                    title = "费用",
+                    title = L.models.usageChartCost,
                     rangeText = rangeText,
                     days = days.map { it.first },
                     stacks = costStacks,
@@ -421,9 +433,9 @@ fun UsageScreen(nav: NavController) {
                         val parsed = rateInput.trim().toDoubleOrNull()
                         if (parsed != null && parsed > 0.0) {
                             AiConfigStore.usdToCnyRate = parsed
-                            toast(context, "汇率已保存")
+                            toast(context, L.models.usageRateSaved)
                         } else {
-                            toast(context, "请输入大于 0 的汇率")
+                            toast(context, L.models.usageRateInvalid)
                         }
                     },
                 )
@@ -444,7 +456,7 @@ fun UsageScreen(nav: NavController) {
                         range = UsageRange.CUSTOM
                         showCustom = false
                     } else {
-                        toast(context, "请选择完整的开始与结束日期")
+                        toast(context, L.models.usageDateIncomplete)
                     }
                 },
                 onDismiss = { showCustom = false },
@@ -509,7 +521,7 @@ private fun SelectorCard(
             )
             Icon(
                 if (expanded) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
-                "选择$label",
+                L.models.usageSelectLabel(label),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(18.dp),
             )
@@ -574,13 +586,13 @@ private fun UsageRankingCard(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "用量排行",
+                L.models.usageRanking,
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.weight(1f),
             )
             PientSegmented(
-                labels = listOf("Token", "费用"),
+                labels = listOf("Token", L.models.usageChartCost),
                 selected = unit,
                 onSelect = { unit = it },
                 modifier = Modifier.width(150.dp),
@@ -645,7 +657,7 @@ private fun UsageRankingCard(
             }
             // 计费摘要 + 编辑入口提示（Operit 模型卡：计费方式 chip +「点击编辑定价和计费方式」）
             Text(
-                billingSummary(pricing) + " · 点击编辑定价和计费方式",
+                billingSummary(pricing) + L.models.usageEditPricingHint,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -713,7 +725,7 @@ private fun UsageChartCard(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    "所选范围内暂无用量记录 · 对话完成后自动统计",
+                    L.models.usageEmpty,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -983,7 +995,7 @@ private fun BarTooltip(
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "合计",
+                    L.models.usageTotal,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
@@ -1012,15 +1024,15 @@ private fun CustomRangeDialog(
 ) {
     var pickFor by remember { mutableStateOf<Int?>(null) }   // 0 = 开始，1 = 结束
     PientDialog(
-        title = "自定义时间范围",
+        title = L.models.usageCustomRangeTitle,
         onDismiss = onDismiss,
-        confirmText = "确定",
+        confirmText = L.common.confirm,
         onConfirm = onConfirm,
         showClose = false,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            DateField("开始日期", start) { pickFor = 0 }
-            DateField("结束日期", end) { pickFor = 1 }
+            DateField(L.models.usageStartDate, start) { pickFor = 0 }
+            DateField(L.models.usageEndDate, end) { pickFor = 1 }
         }
     }
     val picking = pickFor ?: return
@@ -1037,10 +1049,10 @@ private fun CustomRangeDialog(
                     if (picking == 0) onStart(date) else onEnd(date)
                 }
                 pickFor = null
-            }) { Text("确定") }
+            }) { Text(L.common.confirm) }
         },
         dismissButton = {
-            TextButton(onClick = { pickFor = null }) { Text("取消") }
+            TextButton(onClick = { pickFor = null }) { Text(L.common.cancel) }
         },
     ) {
         DatePicker(state = state)
@@ -1066,7 +1078,7 @@ private fun DateField(label: String, value: LocalDate?, onClick: () -> Unit) {
             modifier = Modifier.weight(1f),
         )
         Text(
-            value?.let { "${it.year}-${"%02d".format(it.monthValue)}-${"%02d".format(it.dayOfMonth)}" } ?: "请选择",
+            value?.let { "${it.year}-${"%02d".format(it.monthValue)}-${"%02d".format(it.dayOfMonth)}" } ?: L.models.usageSelectDate,
             style = MaterialTheme.typography.bodyMedium,
             color = if (value != null) MaterialTheme.colorScheme.primary
             else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1076,9 +1088,9 @@ private fun DateField(label: String, value: LocalDate?, onClick: () -> Unit) {
 
 // ───────────────────────────── 工具 ─────────────────────────────
 
-/** 金额：¥ 千分位两位小数；≥1 万缩写为 x.xx万 */
+/** 金额：¥ 千分位两位小数；≥1 万缩写（中文 x.xx万 / 英文 x.xxk，量级单位走语言表） */
 private fun formatMoney(v: Double): String =
-    if (v >= 10_000) String.format("¥%.2f万", v / 10_000)
+    if (v >= 10_000) L.models.costWan("%.2f".format(v / 10_000))
     else String.format("¥%,.2f", v)
 
 /** 数量千分位 */
@@ -1127,8 +1139,8 @@ private fun billingSummary(p: ModelPricing): String {
     val sym = p.currency.symbol
     return when (p.billingMode) {
         BillingMode.TOKEN ->
-            "按Token计费 · 输入 ${sym}${fmtPrice(p.inputPerMillion)}/百万 · 输出 ${sym}${fmtPrice(p.outputPerMillion)}/百万"
-        BillingMode.COUNT -> "按次计费 · 每次 ${sym}${fmtPrice(p.pricePerRequest)}"
+            L.models.usageBillingSummaryToken(sym, fmtPrice(p.inputPerMillion), sym, fmtPrice(p.outputPerMillion))
+        BillingMode.COUNT -> L.models.usageBillingSummaryCount(sym, fmtPrice(p.pricePerRequest))
     }
 }
 
@@ -1184,12 +1196,12 @@ private fun ExchangeRateCard(
             .padding(14.dp),
     ) {
         Text(
-            "汇率设置",
+            L.models.usageRateTitle,
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onBackground,
         )
         Text(
-            "美元计费模型会按此汇率折算为人民币总费用",
+            L.models.usageRateHint,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp),
@@ -1197,7 +1209,7 @@ private fun ExchangeRateCard(
         PientInputBox(
             value = rateInput,
             onValueChange = { v -> onRateInputChange(v.filter { c -> c.isDigit() || c == '.' }) },
-            placeholder = "USD → CNY 汇率",
+            placeholder = L.models.usageRatePlaceholder,
             number = true,
             suffix = "CNY",
             modifier = Modifier
@@ -1211,7 +1223,7 @@ private fun ExchangeRateCard(
             horizontalArrangement = Arrangement.End,
         ) {
             Text(
-                "保存",
+                L.common.save,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
@@ -1249,9 +1261,9 @@ private fun ModelPricingDialog(model: String, onDismiss: () -> Unit) {
     }
 
     PientDialog(
-        title = "编辑模型定价 - $model",
+        title = L.models.usageEditPricingTitle(model),
         onDismiss = onDismiss,
-        confirmText = "保存",
+        confirmText = L.common.save,
         confirmEnabled = valid,
         showClose = false, // 底部已有取消按钮（全项目确认类弹窗口径）
         onConfirm = {
@@ -1275,45 +1287,45 @@ private fun ModelPricingDialog(model: String, onDismiss: () -> Unit) {
     ) {
         Column(Modifier.fillMaxWidth()) {
             Text(
-                "当前计价币种：CNY",
+                L.models.usageCurrencyNote,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                "计费方式",
+                L.models.usageBillingMode,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onBackground,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
             )
             PientSegmented(
-                labels = listOf("按Token计费", "按次计费"),
+                labels = listOf(L.models.billingPerToken, L.models.billingPerRequest),
                 selected = if (mode == BillingMode.TOKEN) 0 else 1,
                 onSelect = { mode = if (it == 0) BillingMode.TOKEN else BillingMode.COUNT },
                 modifier = Modifier.fillMaxWidth(),
             )
             if (mode == BillingMode.TOKEN) {
                 Text(
-                    "设置每百万Token价格（CNY）",
+                    L.models.usageTokenPriceHeader,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 12.dp),
                 )
-                PriceField("输入价格（每百万Token） (CNY)", inputPrice) { inputPrice = it }
-                PriceField("缓存输入价格（每百万Token） (CNY)", cachedPrice) { cachedPrice = it }
-                PriceField("输出价格（每百万Token） (CNY)", outputPrice) { outputPrice = it }
+                PriceField(L.models.usageInputPrice, inputPrice) { inputPrice = it }
+                PriceField(L.models.usageCachedInputPrice, cachedPrice) { cachedPrice = it }
+                PriceField(L.models.usageOutputPrice, outputPrice) { outputPrice = it }
             } else {
                 Text(
-                    "设置每次API请求价格（CNY）",
+                    L.models.usageRequestPriceHeader,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 12.dp),
                 )
-                PriceField("单次请求价格（CNY）", requestPrice) { requestPrice = it }
+                PriceField(L.models.usageRequestPrice, requestPrice) { requestPrice = it }
             }
             if (!valid) {
                 Text(
-                    "请输入有效的非负价格",
+                    L.models.usageInvalidPrice,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(top = 8.dp),

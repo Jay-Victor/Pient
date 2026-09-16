@@ -1,5 +1,6 @@
 package com.pient.app.data
 
+import com.pient.app.data.i18n.L
 import com.pient.app.AppCtx
 import com.pient.app.runtime.PiKeepAlive
 
@@ -343,7 +344,7 @@ class ChatState {
         val proj = currentProject ?: return "" // 未绑定项目：调用方 Toast 提示
         val list = sessions.getOrPut(proj) { mutableStateListOf() }
         val id = newSessionId()
-        list.add(0, Session(id, "新建会话", proj, updatedAt = System.currentTimeMillis()))
+        list.add(0, Session(id, L.runtime.newSessionTitle, proj, updatedAt = System.currentTimeMillis()))
         currentSessionId = id
         messagesBySession[id] = mutableStateListOf()
         entriesBySession[id] = mutableStateListOf()
@@ -366,7 +367,7 @@ class ChatState {
         if (i < 0) return
         val old = list[i]
         val now = System.currentTimeMillis()
-        val autoTitle = if (old.title == "新建会话" && !firstUserText.isNullOrBlank()) {
+        val autoTitle = if (old.title == L.runtime.newSessionTitle && !firstUserText.isNullOrBlank()) {
             val t = firstUserText.trim().take(20)
             if (firstUserText.trim().length > 20) "$t…" else t
         } else old.title
@@ -503,7 +504,7 @@ class ChatState {
     /** 终端镜像：工具结束那一行（结果首行截断，方便一眼看出跑没跑通） */
     private fun mirrorEndLine(name: String, failed: Boolean, result: String): String {
         val head = result.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(120).orEmpty()
-        return "  ↳ " + (if (failed) "失败" else "完成") + (if (head.isNotEmpty()) " · $head" else "")
+        return "  ↳ " + (if (failed) L.runtime.mirrorFailed else L.common.done) + (if (head.isNotEmpty()) " · $head" else "")
     }
 
     /** 一条消息的可检索文本（内容检索用；工具类条目把名称与参数也算进去） */
@@ -671,21 +672,21 @@ class ChatState {
      */
     fun renameProject(oldName: String, newNameRaw: String): String? {
         val newName = newNameRaw.trim()
-        if (newName.isBlank()) return "项目名不能为空"
+        if (newName.isBlank()) return L.runtime.projectNameEmpty
         if (newName == oldName) return null
-        if (projects.any { it.name == newName }) return "已存在同名项目"
+        if (projects.any { it.name == newName }) return L.runtime.projectNameExists
         val i = projects.indexOfFirst { it.name == oldName }
-        if (i < 0) return "项目不存在"
+        if (i < 0) return L.runtime.projectNotFound
         val old = projects[i]
         val saf = old.path.startsWith("content://")
         var newPath = old.path
         if (!saf) {
             val src = java.io.File(old.path)
-            val parent = src.parentFile ?: return "项目路径异常，无法改名"
+            val parent = src.parentFile ?: return L.runtime.projectPathInvalid
             val dst = java.io.File(parent, newName)
             if (src.exists()) {
-                if (dst.exists()) return "目录已存在同名文件夹：$newName"
-                if (!src.renameTo(dst)) return "目录改名失败（可能被占用）"
+                if (dst.exists()) return L.runtime.dirNameExists(newName)
+                if (!src.renameTo(dst)) return L.runtime.dirRenameFailed
             }
             newPath = dst.absolutePath
         }
@@ -761,7 +762,7 @@ class ChatState {
     /** 重新生成一轮（同 [startTurn] 的口径：UI scope 会随页面销毁静默取消，pi 却还在跑） */
     fun startRegenerate(index: Int) = launchTurn {
         val err = regenerateMessage(index)
-        if (err != null) blockedNote = "重新生成失败：$err"
+        if (err != null) blockedNote = L.runtime.regenerateFailed(err)
     }
 
     /**
@@ -776,7 +777,7 @@ class ChatState {
                 throw e
             } catch (e: Throwable) {
                 Log.e(TAG_CHAT, "本轮异常逃逸：${e.message}", e)
-                blockedNote = "本轮异常：${e.message ?: "未知错误"}"
+                blockedNote = L.runtime.turnException(e.message ?: L.common.unknownError)
             }
         }
     }
@@ -843,30 +844,30 @@ class ChatState {
     private suspend fun probePiReadiness(ctx: Context): Pair<PiReadiness, String> {
         val target = piChannelTarget()
         if (target == null) {
-            return PiReadiness.Unready to "没有可用的服务商 / 模型：先到「服务商与模型配置」里配好"
+            return PiReadiness.Unready to L.runtime.noProviderOrModelHint
         }
         if (!PiRuntime.rootfsReady(ctx)) {
             // 原因文案与「环境配置」页共用一处（rootfsIssue）：避免两处说法不一致（2026-09-15）
             return PiReadiness.Unready to PiRuntime.rootfsIssue(ctx)
         }
         if (!PiRuntime.piReady(ctx)) {
-            return PiReadiness.Unready to "pi 未就绪：随包运行时还没解出来（可在「环境配置」里重新检测）"
+            return PiReadiness.Unready to L.runtime.piNotUnpacked
         }
         if (!PiRpc.start(target.first, target.second)) {
             val tail = PiRpc.stderrText().lines().lastOrNull { it.isNotBlank() }.orEmpty()
-            return PiReadiness.Unready to ("pi 通道启动失败" + if (tail.isBlank()) "" else "：$tail")
+            return PiReadiness.Unready to (L.runtime.piChannelStartFailed + if (tail.isBlank()) "" else "：$tail")
         }
         // 起得来 ≠ 活着：进程秒退（rootfs 不可执行 / proot 报错）时 start() 仍返回 true（2026-09-15 实测）
         if (!PiRpc.aliveAfterStartup()) {
             val tail = PiRpc.stderrText().lines().lastOrNull { it.isNotBlank() }.orEmpty()
             PiRpc.stop()
-            return PiReadiness.Unready to ("pi 通道起来后立刻退出" + if (tail.isBlank()) "" else "：$tail")
+            return PiReadiness.Unready to (L.runtime.piChannelExitedImmediately + if (tail.isBlank()) "" else "：$tail")
         }
         // 再要一次真实往返（RPC 通了才算真的可用；失败 = 管道/进程有问题）
         if (PiRpc.getState() == null) {
             val tail = PiRpc.stderrText().lines().lastOrNull { it.isNotBlank() }.orEmpty()
             PiRpc.stop()
-            return PiReadiness.Unready to ("pi 通道无响应" + if (tail.isBlank()) "" else "：$tail")
+            return PiReadiness.Unready to (L.runtime.piChannelUnresponsive + if (tail.isBlank()) "" else "：$tail")
         }
         return PiReadiness.Ready to ""
     }
@@ -883,7 +884,7 @@ class ChatState {
         // ── pi 唯一产品路径的门控（2026-09-15 拍板 B）─────────────────────────────
         // 已知未就绪 → 明确阻断：不发送、不落任何条目、草稿留在输入栏（ChatScreen 给提示）
         if (piReadiness == PiReadiness.Unready) {
-            blockedNote = "pi 运行时未就绪：消息未发送（点上方提示条的「环境配置」修复）"
+            blockedNote = L.runtime.piNotReadyNotSent
             Log.w(TAG_CHAT, "发送被阻断：pi 未就绪（$piUnreadyReason）")
             return
         }
@@ -895,7 +896,7 @@ class ChatState {
         if (workspaceRestartPending) applyPendingWorkspaceRestart()
         if (PiRpc.isStreamingNow() == true) {
             draftRestore = userText
-            blockedNote = "AI 还在处理上一条消息，本条没有发出去（等它收尾后再发）"
+            blockedNote = L.runtime.blockedPiBusy
             Log.w(TAG_CHAT, "发送被拦：pi 仍在处理上一轮（isStreaming=true）")
             return
         }
@@ -917,7 +918,7 @@ class ChatState {
         if (cfg == null || model == null) {
             appendEntry(
                 Msg.Assistant(
-                    "⚠️ 尚未配置可用模型：请在「服务商与模型配置」中添加服务商，填入 API 密钥后填写模型列表或点「刷新」拉取。",
+                    L.runtime.noModelConfiguredDetail,
                     error = true,
                 )
             )
@@ -969,7 +970,7 @@ class ChatState {
         } catch (e: Exception) {
             appendEntry(
                 Msg.Assistant(
-                    "⚠️ 请求失败：${e.message ?: "未知错误"}",
+                    L.runtime.requestFailed(e.message ?: L.common.unknownError),
                     error = true,
                 )
             )
@@ -994,16 +995,16 @@ class ChatState {
     suspend fun regenerateMessage(index: Int): String? {
         val list = currentMessages
         val original = list.getOrNull(index) as? Msg.Assistant
-            ?: return "该条消息无法重新生成"
+            ?: return L.runtime.cannotRegenerate
         // 只有最下方一条消息支持重新生成（2026-09-11 用户定）：中间消息重生成会与其后的
         // 对话上下文脱节（后续消息引用的正是旧回答），仅在会话末尾语义成立。
-        if (index != list.lastIndex) return "仅最后一条消息支持重新生成"
-        if (isStreaming) return "当前已有消息在处理中，请稍后再试"
-        val model = selectedModel ?: return "尚未配置可用模型"
-        val cfg = AiConfigStore.configs[model.provider] ?: return "尚未配置可用模型"
+        if (index != list.lastIndex) return L.runtime.onlyLastRegenerable
+        if (isStreaming) return L.runtime.busyTryLater
+        val model = selectedModel ?: return L.runtime.noModelConfigured
+        val cfg = AiConfigStore.configs[model.provider] ?: return L.runtime.noModelConfigured
         // 重新生成 = 拿「该消息之前最近的一条用户消息」再问一次（上下文由 pi 维护，App 不拼历史）
         val prevUser = list.subList(0, index).lastOrNull { it is Msg.User } as? Msg.User
-            ?: return "缺少可用的上下文"
+            ?: return L.runtime.noContextAvailable
         val prevText = ContextPolicy.promptTextFor(prevUser)
             .let { t -> prevUser.quote?.toPrompt(t) ?: t }
         val effectiveModel = model.name.takeIf { cfg.models.contains(it) }
@@ -1036,7 +1037,7 @@ class ChatState {
             throw e
         } catch (e: Exception) {
             replaceMessageAt(runInsertAt ?: index, original)
-            e.message ?: "未知错误"
+            e.message ?: L.runtime.unknownError
         } finally {
             runInsertAt = null
             streamDraft = ""
@@ -1075,8 +1076,8 @@ class ChatState {
         // 「只在本地的新消息」这种状态 —— 所以只有一条路：如实报错，让用户去修环境。
         Log.w(TAG_CHAT, "pi 通道不可用，本轮没走 pi：${PiRpc.stderrText().takeLast(300)}")
         piReadiness = PiReadiness.Unready
-        if (piUnreadyReason.isBlank()) piUnreadyReason = "pi 通道启动失败：可到「环境配置」里检测/更新"
-        throw AiException("pi 运行时未就绪：本轮没有发送。请到「终端 → 环境配置」检查 Ubuntu / pi。")
+        if (piUnreadyReason.isBlank()) piUnreadyReason = L.runtime.piChannelStartFailedHint
+        throw AiException(L.runtime.piNotReadyTurnNotSent)
     }
 
 
@@ -1452,7 +1453,7 @@ class ChatState {
                 PiRpc.fork(entryId)
                 val file = PiRpc.getSessionStats()?.optString("sessionFile").orEmpty()
                 if (file.isBlank()) return@runCatching
-                val title = "分支 · " + (sessionRecord()?.title ?: "会话")
+                val title = L.runtime.branchTitlePrefix + (sessionRecord()?.title ?: L.runtime.sessionTitle)
                 sessions.getOrPut(proj) { mutableStateListOf() }
                     .add(0, Session(newId, title, proj, updatedAt = System.currentTimeMillis(), piSessionFile = file))
                 messagesBySession[newId] = mutableStateListOf()
@@ -1639,11 +1640,11 @@ class ChatState {
         // 别落一条空回答让用户以为"AI 回了但看不到内容"（2026-09-15 实测：pi 秒退时就这样）
         if (!PiRpc.processAlive() && text.isBlank() && think.isBlank()) {
             val tail = PiRpc.stderrText().lines().lastOrNull { it.isNotBlank() }.orEmpty()
-            throw AiException("pi 通道中途断开（本轮未完成）" + if (tail.isBlank()) "" else "：$tail")
+            throw AiException(L.runtime.piChannelDisconnected + if (tail.isBlank()) "" else "：$tail")
         }
         if (!ok) {
             bgScope.launch { PiRpc.abort() }
-            throw AiException("pi 通道超时（10 分钟未见 agent_settled）")
+            throw AiException(L.runtime.piChannelTimeout)
         }
         lastPiError?.let { err ->
             lastPiError = null
@@ -1671,16 +1672,16 @@ class ChatState {
 
     /** 工具行预览（截断；全文进 [Msg.ToolResult.full]，点开才看） */
     private fun piPreview(text: String): String =
-        if (text.length <= 800) text else text.take(800) + "\n…（共 ${text.length} 字）"
+        if (text.length <= 800) text else text.take(800) + L.runtime.toolPreviewTruncated(text.length)
 
     /**
      * pi 的报错 → 面向用户的文案。pi 的错误串是给调用方（开发者）看的英文，直接上屏用户读不懂；
      * 已知的按语义翻译，**其余原样透出**（不编造、不静默）。
      */
     private fun piErrorText(raw: String): String = when {
-        raw.isBlank() -> "pi 拒绝了这次请求"
+        raw.isBlank() -> L.runtime.piRejectedRequest
         raw.contains("Agent is already processing", ignoreCase = true) ->
-            "AI 还在处理上一条消息，本条没有发出去（等它收尾后再发）"
+            L.runtime.blockedPiBusy
         else -> raw
     }
 
@@ -1726,18 +1727,18 @@ class ChatState {
      * 返回 null = 成功；非空 = 如实回报的原因。
      */
     suspend fun compactNow(): String? {
-        val target = piChannelTarget() ?: return "没有可用的服务商 / 模型"
+        val target = piChannelTarget() ?: return L.runtime.noProviderOrModel
         if (!PiRpc.usable() || !PiRpc.start(target.first, target.second)) {
-            return "pi 通道未就绪：先到「环境配置」检查 Ubuntu / pi"
+            return L.runtime.piChannelNotReady
         }
-        if (compacting) return "上一次压缩还在进行中"
+        if (compacting) return L.runtime.compactInProgress
         compacting = true
         return try {
             val cfg = selectedModel?.provider?.let { AiConfigStore.configs[it] }
             val res = PiRpc.compact(cfg?.compactInstructions?.ifBlank { null })
-                ?: return "压缩没有完成：pi 通道无响应"
+                ?: return L.runtime.compactNoResponse
             if (!res.optBoolean("success", true)) {
-                return "压缩失败：" + res.optString("error").ifBlank { "pi 拒绝了这次压缩" }
+                return L.runtime.compactFailedPrefix + res.optString("error").ifBlank { L.runtime.piRejectedCompact }
             }
             // 压缩后上下文换了形态（pi 重建了活跃消息）→ 画布与上屏流都要跟上
             runCatching { refreshPiTree(follow = true) }
@@ -1745,7 +1746,7 @@ class ChatState {
             Log.i(TAG_CHAT, "上下文已压缩（pi 原生 compact）：${res.toString().take(200)}")
             null
         } catch (e: Exception) {
-            "压缩失败：" + (e.message ?: "未知错误")
+            L.runtime.compactFailedPrefix + (e.message ?: L.runtime.unknownError)
         } finally {
             compacting = false
         }
@@ -1760,15 +1761,15 @@ class ChatState {
      * 返回 null = 成功（[systemPrompt] 已更新）；非空 = 原因。
      */
     suspend fun refreshSystemPrompt(): String? {
-        val ctx = AppCtx.get() ?: return "应用上下文未就绪"
-        val target = piChannelTarget() ?: return "没有可用的服务商 / 模型"
+        val ctx = AppCtx.get() ?: return L.runtime.appContextNotReady
+        val target = piChannelTarget() ?: return L.runtime.noProviderOrModel
         if (!PiRpc.usable() || !PiRpc.start(target.first, target.second)) {
-            return "pi 通道未就绪（先到「环境配置」检查 Ubuntu / pi）"
+            return L.runtime.piChannelNotReadyHint
         }
         val file = File(PiAgentFiles.agentDir(ctx), SYS_PROMPT_FILE)
         val before = file.lastModified()
         runCatching { PiRpc.prompt("/pient-sysprompt") }
-            .onFailure { return "取系统提示词失败：${it.message}" }
+            .onFailure { return L.runtime.systemPromptFetchFailed(it.message) }
         // 命令处理里同步写文件，但响应与落盘之间可能有几十毫秒 → 轮询等它变
         var waited = 0
         while (waited < 4000 && file.lastModified() <= before) {
@@ -1776,7 +1777,7 @@ class ChatState {
             waited += 120
         }
         val text = runCatching { file.takeIf { it.isFile }?.readText() }.getOrNull()?.trim().orEmpty()
-        if (text.isEmpty()) return "没拿到系统提示词（pi 可能还没起，或扩展命令未加载）"
+        if (text.isEmpty()) return L.runtime.systemPromptEmpty
         systemPrompt = text
         Log.i(TAG_CHAT, "系统提示词已按 pi 回流：${text.length} 字")
         return null
@@ -1830,7 +1831,7 @@ class ChatState {
         // pi 子进程与它的管道不会被系统清掉（清掉 = 本轮直接消失）。
         // 挂在 markRunning 上是因为它是「本轮是否在跑」的唯一收口点：
         // 开始 / 正常结束 / 中止 / 出错 / 「重新生成」都经过它。
-        if (running) PiKeepAlive.acquire(AppCtx.get(), "chat", "AI 正在回复…")
+        if (running) PiKeepAlive.acquire(AppCtx.get(), "chat", L.runtime.aiReplying)
         else {
             PiKeepAlive.release(AppCtx.get(), "chat")
             // 回合收尾时刷新上下文用量真值（get_session_stats.contextUsage；2026-09-16）
@@ -2116,7 +2117,7 @@ class ChatState {
     private fun forkTitle(msgs: List<Msg>, index: Int): String {
         val userIdx = if (msgs[index] is Msg.User) index
         else (index downTo 0).firstOrNull { msgs[it] is Msg.User }
-        if (userIdx == null) return "新建会话"
+        if (userIdx == null) return L.runtime.newSessionTitle
         val text = (msgs[userIdx] as Msg.User).text.trim()
         val t = text.take(20)
         return if (text.length > 20) "$t…" else t
@@ -2174,7 +2175,7 @@ class ChatState {
     // 用量是否已知：pi 在「压缩后还没有新回复」时给不出 tokens（agent-session.ts 的口径），
     // 此时卡上照 pi-web 显示 `?`，不编数字。
     var contextUsageKnown by mutableStateOf(false)
-    var connectionLabel by mutableStateOf("已连接")
+    var connectionLabel by mutableStateOf(L.runtime.connected)
     // 系统提示词只读展示（2026-09-01，对齐 pi-web system 面板）：
     // **真实值 = pi 当前生效的那一份**（base prompt + 项目 context 文件 + 扩展改写），
     // 打开面板时由 [refreshSystemPrompt] 经扩展命令 `/pient-sysprompt` 回流写入 ——

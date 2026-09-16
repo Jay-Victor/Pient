@@ -1,5 +1,6 @@
 package com.pient.app.runtime
 
+import com.pient.app.data.i18n.L
 import android.content.Context
 import android.os.Build
 import android.system.Os
@@ -141,10 +142,10 @@ object PiRuntime {
     fun rootfsIssue(context: Context): String {
         val bash = rootfsBash(context)
         return when {
-            !rootfsArchiveAvailable(context) -> "此安装包未内置 Ubuntu 环境（构建时未打包 rootfs 归档）"
-            !bash.isFile -> "Ubuntu 运行时还没解包完（可在本页「重新检测」，或重启应用继续解包）"
-            else -> "Ubuntu 运行时不可用：bash 架构 " + (elfMachine(bash) ?: "未知") +
-                " ≠ 本机 " + hostMachine() + "，或文件权限异常（bash 需可读可执行）"
+            !rootfsArchiveAvailable(context) -> L.runtime.noRootfsArchive
+            !bash.isFile -> L.runtime.rootfsNotUnpacked
+            else -> L.runtime.bashArchPrefix + (elfMachine(bash) ?: L.common.unknown) +
+                L.runtime.bashArchHostMismatch + hostMachine() + L.runtime.bashPermissionIssue
         }
     }
     @Volatile
@@ -173,12 +174,12 @@ object PiRuntime {
      */
     fun extractRootfs(context: Context, onProgress: (Float, String) -> Unit): Boolean {
         if (unpacking) {
-            onProgress(0f, "已有一个解包任务在进行中…")
+            onProgress(0f, L.runtime.unpackAlreadyRunning)
             return false
         }
         if (!rootfsArchiveAvailable(context)) {
-            val msg = "此 APK 未内置 Ubuntu 环境（构建时未拉取本机 ABI 的 rootfs：" +
-                "先跑 runtime/scripts/fetch_rootfs.py --abi ${abiLabel()} 再打包）"
+            val msg = L.runtime.apkNoUbuntuPrefix +
+                L.runtime.apkNoUbuntuHint(abiLabel())
             Log.w(TAG, msg)
             onProgress(0f, msg)
             return false
@@ -187,7 +188,7 @@ object PiRuntime {
         val rootfs = rootfsDir(context)
         if (!rootfs.exists() && !rootfs.mkdirs()) {
             unpacking = false
-            onProgress(0f, "无法创建 ${rootfs.absolutePath}")
+            onProgress(0f, L.runtime.cannotCreatePath(rootfs.absolutePath))
             return false
         }
         val tar = File(tmpDir(context), ROOTFS_ARCHIVE_ASSET)
@@ -195,12 +196,12 @@ object PiRuntime {
         // （实测：tmp 不存在时归档拷贝直接 `open failed: ENOENT`）。
         tar.parentFile?.mkdirs()
         try {
-            onProgress(0.02f, "释放归档…")
+            onProgress(0.02f, L.runtime.extractingArchive)
             context.assets.open(ROOTFS_ARCHIVE_ASSET).use { input ->
                 tar.outputStream().use { input.copyTo(it) }
             }
             val mb = tar.length() / 1048576
-            onProgress(0.05f, "解包中（$mb MB）…")
+            onProgress(0.05f, L.runtime.unpackingMb(mb))
             val cmd = "cd ${rootfs.absolutePath} && gunzip -c ${tar.absolutePath} | tar -x"
             val proc = ProcessBuilder("/system/bin/sh", "-c", cmd)
                 .redirectErrorStream(true)
@@ -209,7 +210,7 @@ object PiRuntime {
             while (proc.isAlive) {
                 val done = ROOTFS_TOP_ENTRIES.count { File(rootfs, it).exists() }
                 val pct = 0.05f + 0.9f * (done.toFloat() / ROOTFS_TOP_ENTRIES.size)
-                onProgress(pct.coerceAtMost(0.95f), "解包中…（$done/${ROOTFS_TOP_ENTRIES.size} 顶层目录）")
+                onProgress(pct.coerceAtMost(0.95f), L.runtime.unpackingDirs(done, ROOTFS_TOP_ENTRIES.size))
                 Thread.sleep(250)
             }
             val tail = runCatching { output.readText() }.getOrDefault("").trim()
@@ -228,12 +229,12 @@ object PiRuntime {
                 "解包结果 ok=$ok bash=${rootfsBash(context).isFile} " +
                     "arch=${elfMachine(rootfsBash(context))}（本机 ${hostMachine()}）",
             )
-            onProgress(1f, if (ok) "解包完成" else "解包后仍未找到 /bin/bash")
+            onProgress(1f, if (ok) L.runtime.unpackDone else L.runtime.unpackNoBash)
             if (ok) ensurePiAsync(context)      // rootfs 一就绪就把预置的 pi 铺进 npm 全局位置
             return ok
         } catch (e: Exception) {
             Log.w(TAG, "解包异常：${e.message}")
-            onProgress(0f, "解包异常：${e.message}")
+            onProgress(0f, L.runtime.unpackException(e.message))
             return false
         } finally {
             unpacking = false

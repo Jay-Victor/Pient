@@ -1,5 +1,6 @@
 package com.pient.app.ui.chat
 
+import com.pient.app.data.i18n.L
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -87,7 +88,7 @@ fun AttachmentSheet(
                 added++
             }
         }
-        if (added == 0) Toast.makeText(context, "图片读取失败", Toast.LENGTH_SHORT).show()
+        if (added == 0) Toast.makeText(context, L.chat.imageReadFailed, Toast.LENGTH_SHORT).show()
         onClose()
     }
 
@@ -104,7 +105,7 @@ fun AttachmentSheet(
         if (dest != null) {
             chatState.attachments += Attachment(name, AttachmentKind.IMAGE, dest.absolutePath)
         } else {
-            Toast.makeText(context, "拍照保存失败", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, L.chat.cameraSaveFailed, Toast.LENGTH_SHORT).show()
         }
         src.delete()
         onClose()
@@ -119,7 +120,7 @@ fun AttachmentSheet(
         if (copied != null) {
             chatState.attachments += Attachment(copied.first, AttachmentKind.FILE, copied.second)
         } else {
-            Toast.makeText(context, "文件读取失败", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, L.chat.fileReadFailed, Toast.LENGTH_SHORT).show()
         }
         onClose()
     }
@@ -137,16 +138,16 @@ fun AttachmentSheet(
     ) {
         // 顶部小标签（Hermes attachLabel：小号弱化）
         Text(
-            "附加",
+            L.chat.attach,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         Column(Modifier.padding(top = 6.dp)) {
-            AttachMenuItem(Icons.Outlined.Image, "照片") {
+            AttachMenuItem(Icons.Outlined.Image, L.chat.photos) {
                 photoPicker.launch(PickVisualMediaRequest())
             }
-            AttachMenuItem(Icons.Outlined.PhotoCamera, "拍照") {
+            AttachMenuItem(Icons.Outlined.PhotoCamera, L.chat.takePhoto) {
                 val dir = File(context.cacheDir, "camera")
                 dir.mkdirs()
                 val f = File(dir, "photo_${System.currentTimeMillis()}.jpg")
@@ -156,10 +157,10 @@ fun AttachmentSheet(
                     cameraLauncher.launch(uri)
                 } catch (e: Exception) {
                     cameraFile = null
-                    Toast.makeText(context, "无法调起相机", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, L.chat.cameraUnavailable, Toast.LENGTH_SHORT).show()
                 }
             }
-            AttachMenuItem(Icons.Outlined.AttachFile, "文件") {
+            AttachMenuItem(Icons.Outlined.AttachFile, L.common.file) {
                 filePicker.launch(arrayOf("*/*"))
             }
             AttachMenuItem(Icons.Outlined.Link, "URL") {
@@ -174,7 +175,7 @@ fun AttachmentSheet(
 
         // 底部提示（Hermes tipPre + @ + tipPost）
         Text(
-            "提示：输入 @ 以内联引用文件。",
+            L.chat.attachTip,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -280,15 +281,15 @@ fun UrlDialog(
     val looksLikeUrl = trimmed.startsWith("http://") || trimmed.startsWith("https://")
 
     PientDialog(
-        title = "附加 URL",
+        title = L.chat.attachUrlTitle,
         onDismiss = onDismiss,
-        confirmText = "附加",
+        confirmText = L.chat.attach,
         confirmEnabled = looksLikeUrl,
         onConfirm = { onConfirm(trimmed) },
     ) {
         Column {
             Text(
-                "Pient 将抓取该页面并作为本回合的上下文。",
+                L.chat.attachUrlDesc,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -304,7 +305,7 @@ fun UrlDialog(
             )
             if (trimmed.isNotEmpty() && !looksLikeUrl) {
                 Text(
-                    "请包含完整 URL，例如 https://…",
+                    L.chat.urlIncomplete,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),

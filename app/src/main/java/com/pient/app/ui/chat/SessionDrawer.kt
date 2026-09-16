@@ -1,5 +1,6 @@
 package com.pient.app.ui.chat
 
+import com.pient.app.data.i18n.L
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
@@ -234,7 +235,7 @@ fun SessionDrawer(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
             ) {
                 Text(
-                    "已选 ${selectedIds.size} 个会话",
+                    L.session.selectedCount(selectedIds.size),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
@@ -250,7 +251,7 @@ fun SessionDrawer(
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                 ) {
                     Text(
-                        "取消",
+                        L.common.cancel,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
@@ -267,7 +268,7 @@ fun SessionDrawer(
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                 ) {
                     Text(
-                        "完成",
+                        L.common.done,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
@@ -301,7 +302,7 @@ fun SessionDrawer(
                         .padding(6.dp),
                 ) {
                     Icon(
-                        Icons.Outlined.Search, "搜索",
+                        Icons.Outlined.Search, L.common.search,
                         tint = if (searchOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp),
                     )
@@ -323,7 +324,7 @@ fun SessionDrawer(
                         .padding(6.dp),
                 ) {
                     Icon(
-                        Icons.Outlined.Checklist, "批量管理",
+                        Icons.Outlined.Checklist, L.session.batchMode,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp),
                     )
@@ -336,7 +337,7 @@ fun SessionDrawer(
                         .clickable(onClick = {
                             // 未绑定项目时引导先创建项目（2026-09-08：无 mock 项目）
                             if (chatState.currentProject == null) {
-                                Toast.makeText(context, "请先创建项目", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, L.session.createProjectFirst, Toast.LENGTH_SHORT).show()
                             } else {
                                 chatState.newSession()
                             }
@@ -349,7 +350,7 @@ fun SessionDrawer(
                         modifier = Modifier.size(14.dp),
                     )
                     Text(
-                        "新建会话",
+                        L.session.newSession,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
@@ -369,7 +370,7 @@ fun SessionDrawer(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "项目：${chatState.currentProject ?: "未创建项目"}",
+                    L.session.projectLabel(chatState.currentProject ?: L.session.noProject),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
@@ -427,7 +428,7 @@ fun SessionDrawer(
                                     .padding(horizontal = 4.dp, vertical = 2.dp),
                             ) {
                                 Icon(
-                                    Icons.Outlined.MoreVert, "项目操作",
+                                    Icons.Outlined.MoreVert, L.project.projectActions,
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(16.dp),
                                 )
@@ -436,7 +437,7 @@ fun SessionDrawer(
                                     onDismissRequest = { projectMenuFor = null },
                                 ) {
                                     DropdownMenuItem(
-                                        text = { Text("详细信息") },
+                                        text = { Text(L.common.details) },
                                         leadingIcon = {
                                             Icon(
                                                 Icons.Outlined.Info, null,
@@ -450,7 +451,7 @@ fun SessionDrawer(
                                         },
                                     )
                                     DropdownMenuItem(
-                                        text = { Text("重命名") },
+                                        text = { Text(L.common.rename) },
                                         leadingIcon = {
                                             Icon(
                                                 Icons.Outlined.Edit, null,
@@ -464,7 +465,7 @@ fun SessionDrawer(
                                         },
                                     )
                                     DropdownMenuItem(
-                                        text = { Text("重置工作区", color = MaterialTheme.colorScheme.error) },
+                                        text = { Text(L.session.resetWorkspace, color = MaterialTheme.colorScheme.error) },
                                         leadingIcon = {
                                             Icon(
                                                 Icons.Outlined.RestartAlt, null,
@@ -478,7 +479,7 @@ fun SessionDrawer(
                                         },
                                     )
                                     DropdownMenuItem(
-                                        text = { Text("解绑") },
+                                        text = { Text(L.common.unbind) },
                                         leadingIcon = {
                                             Icon(
                                                 Icons.Outlined.LinkOff, null,
@@ -493,7 +494,7 @@ fun SessionDrawer(
                                         },
                                     )
                                     DropdownMenuItem(
-                                        text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+                                        text = { Text(L.common.delete, color = MaterialTheme.colorScheme.error) },
                                         leadingIcon = {
                                             Icon(
                                                 Icons.Outlined.Delete, null,
@@ -537,7 +538,7 @@ fun SessionDrawer(
                             modifier = Modifier.size(16.dp),
                         )
                         Text(
-                            "新建项目",
+                            L.session.newProject,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(start = 6.dp),
@@ -579,7 +580,7 @@ fun SessionDrawer(
                         Box {
                             if (searchQuery.isEmpty()) {
                                 Text(
-                                    "搜索会话标题",
+                                    L.session.searchSessions,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -596,7 +597,7 @@ fun SessionDrawer(
                             .padding(4.dp),
                     ) {
                         Icon(
-                            Icons.Outlined.Close, "清空搜索",
+                            Icons.Outlined.Close, L.common.clearSearch,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(14.dp),
                         )
@@ -631,7 +632,7 @@ fun SessionDrawer(
                         modifier = Modifier.size(18.dp),
                     )
                     Text(
-                        "全选",
+                        L.common.selectAll,
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(start = 6.dp),
@@ -650,7 +651,7 @@ fun SessionDrawer(
                         modifier = Modifier.size(16.dp),
                     )
                     Text(
-                        "删除",
+                        L.common.delete,
                         style = MaterialTheme.typography.labelLarge,
                         color = if (selectedIds.isNotEmpty()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outlineVariant,
                         modifier = Modifier.padding(start = 4.dp),
@@ -668,7 +669,7 @@ fun SessionDrawer(
                 if (visibleSessions.isEmpty()) {
                     item {
                         Text(
-                            "无匹配会话",
+                            L.session.noMatchingSessions,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(8.dp),
@@ -710,8 +711,8 @@ fun SessionDrawer(
                 if (pinned.isEmpty() && groups.isEmpty()) {
                     item {
                         Text(
-                            if (chatState.currentProject == null) "请先创建项目"
-                            else "暂无会话 · 点右上角 + 新建会话",
+                            if (chatState.currentProject == null) L.session.createProjectFirst
+                            else L.session.emptySessions,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(8.dp),
@@ -723,7 +724,7 @@ fun SessionDrawer(
                     // 统一视觉；折叠键 = "pinned" 进 collapsedTimeGroups，与其他日历桶同机制）
                     item(key = "g-pinned") {
                         TimeGroupHeader(
-                            label = "置顶",
+                            label = L.session.pin,
                             collapsed = "pinned" in chatState.collapsedTimeGroups,
                             onToggle = { chatState.toggleTimeGroup("pinned") },
                         )
@@ -830,7 +831,7 @@ fun SessionDrawer(
                             horizontalArrangement = Arrangement.End,
                         ) {
                             Icon(
-                                Icons.Outlined.MoreHoriz, "显示更多会话",
+                                Icons.Outlined.MoreHoriz, L.session.showMoreSessions,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier
                                     .padding(horizontal = 20.dp, vertical = 6.dp)
@@ -856,9 +857,9 @@ fun SessionDrawer(
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
-            DrawerEntry(Icons.Outlined.Code, "技能") { onNavigate("skills") }
-            DrawerEntry(Icons.Outlined.Extension, "插件") { onNavigate("plugins") }
-            DrawerEntry(Icons.Outlined.Settings, "设置") { onNavigate("settings") }
+            DrawerEntry(Icons.Outlined.Code, L.common.skill) { onNavigate("skills") }
+            DrawerEntry(Icons.Outlined.Extension, L.session.plugins) { onNavigate("plugins") }
+            DrawerEntry(Icons.Outlined.Settings, L.common.settings) { onNavigate("settings") }
         }
         }
     }
@@ -871,7 +872,7 @@ fun SessionDrawer(
         LaunchedEffect(project.path, project.uri) { info = computeProjectInfo(context, project) }
         Box(Modifier.fillMaxSize()) {
             PientDialog(
-                title = "详细信息",
+                title = L.common.details,
                 onDismiss = { projectDetailFor = null },
                 onConfirm = { projectDetailFor = null },
                 showClose = false,   // 2026-09-02 用户：详细信息卡片右上角 × 多余（点外/确定可关）
@@ -881,9 +882,9 @@ fun SessionDrawer(
                     modifier = Modifier.padding(top = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    DetailRow("位置", ProjectFiles.readablePath(project.path))
-                    DetailRow("大小", info?.size ?: "统计中…")
-                    DetailRow("修改时间", info?.modified ?: "统计中…")
+                    DetailRow(L.common.location, ProjectFiles.readablePath(project.path))
+                    DetailRow(L.common.size, info?.size ?: L.common.counting)
+                    DetailRow(L.common.modifiedAt, info?.modified ?: L.common.counting)
                 }
             }
         }
@@ -895,23 +896,23 @@ fun SessionDrawer(
         val rp = chatState.projects.firstOrNull { it.name == rn }
         if (rp != null) {
             PientDialog(
-                title = "重置工作区",
+                title = L.session.resetWorkspace,
                 onDismiss = { projectResetConfirmFor = null },
-                confirmText = "重置",
+                confirmText = L.session.resetConfirm,
                 showClose = false,
                 onConfirm = {
                     projectResetConfirmFor = null
                     val done = ProjectFiles.resetProjectRoot(context, rp)
                     Toast.makeText(
                         context,
-                        if (done) "工作区已重置：${rp.name}" else "重置失败（目录不可写？）",
+                        if (done) L.session.workspaceResetToast(rp.name) else L.session.resetFailed,
                         Toast.LENGTH_SHORT,
                     ).show()
                 },
             ) {
                 Text(
-                    "确定要清空项目「$rn」的全部文件吗？目录本身保留（项目仍绑定在原位置），" +
-                        "其中所有文件与子目录将被删除；项目标记（.pient-project.json）会重新写回。此操作不可撤销。",
+                    L.session.clearConfirm(rn) +
+                        L.session.clearConfirmSuffix,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
@@ -928,9 +929,9 @@ fun SessionDrawer(
             chatState.projects.none { it.name == name.trim() }
         Box(Modifier.fillMaxSize()) {
             PientDialog(
-                title = "新建项目",
+                title = L.session.newProject,
                 onDismiss = { newProjectDialogOpen = false },
-                confirmText = "创建",
+                confirmText = L.common.create,
                 showClose = false,
                 confirmEnabled = confirmEnabled,
                 onConfirm = {
@@ -943,14 +944,14 @@ fun SessionDrawer(
                         if (type != ProjectType.BLANK) {
                             Toast.makeText(
                                 context,
-                                "已按「${type.title}」模板创建（$written 个文件）",
+                                L.session.templateCreatedToast(type.title, written),
                                 Toast.LENGTH_SHORT,
                             ).show()
                         }
                         newProjectDialogOpen = false
                         projectPickerOpen = false
                     } else {
-                        Toast.makeText(context, "文件夹创建失败", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, L.session.folderCreateFailed, Toast.LENGTH_SHORT).show()
                     }
                 },
             ) {
@@ -968,7 +969,7 @@ fun SessionDrawer(
                         .padding(12.dp),
                 )
                 Text(
-                    "项目类型（模板）",
+                    L.session.projectTypeLabel,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
@@ -1007,7 +1008,7 @@ fun SessionDrawer(
                     }
                 }
                 Text(
-                    "${type.desc} · 将在应用私有目录 Projects/ 下创建",
+                    L.session.projectTypeHint(type.desc),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
@@ -1021,9 +1022,9 @@ fun SessionDrawer(
         var newName by remember(name) { mutableStateOf(name) }
         Box(Modifier.fillMaxSize()) {
             PientDialog(
-                title = "重命名项目",
+                title = L.project.renameProject,
                 onDismiss = { projectRenameFor = null },
-                confirmText = "保存",
+                confirmText = L.common.save,
                 showClose = false,
                 confirmEnabled = newName.isNotBlank() &&
                     (newName.trim() == name || chatState.projects.none { it.name == newName.trim() }),
@@ -1057,9 +1058,9 @@ fun SessionDrawer(
         val project = chatState.projects.firstOrNull { it.name == name }
         Box(Modifier.fillMaxSize()) {
             PientDialog(
-                title = "删除项目",
+                title = L.project.deleteProject,
                 onDismiss = { projectDeleteConfirmFor = null },
-                confirmText = "删除",
+                confirmText = L.common.delete,
                 showClose = false,
                 onConfirm = {
                     // 先删真实文件夹（成功/目录不存在视为成功），再移出列表与记录
@@ -1068,13 +1069,13 @@ fun SessionDrawer(
                         chatState.removeProject(name)
                         projectDeleteConfirmFor = null
                     } else {
-                        Toast.makeText(context, "项目文件夹删除失败", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, L.project.folderDeleteFailed, Toast.LENGTH_SHORT).show()
                         projectDeleteConfirmFor = null
                     }
                 },
             ) {
                 Text(
-                    "确定要删除项目「$name」吗？项目文件夹及其中所有文件、其下 ${chatState.sessionsFor(name).size} 个会话记录将一并删除。此操作不可撤销。",
+                    L.project.deleteConfirm(name, chatState.sessionsFor(name).size),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 12.dp),
@@ -1087,9 +1088,9 @@ fun SessionDrawer(
     projectUnbindConfirmFor?.let { name ->
         Box(Modifier.fillMaxSize()) {
             PientDialog(
-                title = "解绑项目",
+                title = L.project.unbindProject,
                 onDismiss = { projectUnbindConfirmFor = null },
-                confirmText = "解绑",
+                confirmText = L.common.unbind,
                 showClose = false,
                 onConfirm = {
                     chatState.removeProject(name)
@@ -1097,7 +1098,7 @@ fun SessionDrawer(
                 },
             ) {
                 Text(
-                    "确定要解绑项目「$name」吗？其下 ${chatState.sessionsFor(name).size} 个会话记录将一并删除，项目文件夹及其中文件不受影响。",
+                    L.project.unbindConfirm(name, chatState.sessionsFor(name).size),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 12.dp),
@@ -1112,9 +1113,9 @@ fun SessionDrawer(
         if (session != null) {
             Box(Modifier.fillMaxSize()) {
                 PientDialog(
-                    title = "删除会话",
+                    title = L.session.deleteSession,
                     onDismiss = { deleteConfirmFor = null },
-                    confirmText = "删除",
+                    confirmText = L.common.delete,
                     showClose = false,
                     onConfirm = {
                         chatState.deleteSession(id)
@@ -1123,7 +1124,7 @@ fun SessionDrawer(
                     },
                 ) {
                     Text(
-                        "确定要删除会话「${session.title}」吗？此操作不可撤销。",
+                        L.session.deleteConfirm(session.title),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
@@ -1137,9 +1138,9 @@ fun SessionDrawer(
     if (batchDeleteConfirm) {
         Box(Modifier.fillMaxSize()) {
             PientDialog(
-                title = "批量删除会话",
+                title = L.session.batchDeleteTitle,
                 onDismiss = { batchDeleteConfirm = false },
-                confirmText = "删除",
+                confirmText = L.common.delete,
                 showClose = false,
                 onConfirm = {
                     selectedIds.toList().forEach { chatState.deleteSession(it) }
@@ -1150,7 +1151,7 @@ fun SessionDrawer(
                 },
             ) {
                 Text(
-                    "确定要删除选中的 ${selectedIds.size} 个会话吗？此操作不可撤销。",
+                    L.session.batchDeleteConfirm(selectedIds.size),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 12.dp),
@@ -1164,9 +1165,9 @@ fun SessionDrawer(
         var newName by remember(id) { mutableStateOf(projectSessions.firstOrNull { it.id == id }?.title ?: "") }
         Box(Modifier.fillMaxSize()) {
             PientDialog(
-                title = "重命名会话",
+                title = L.session.renameSession,
                 onDismiss = { renameFor = null },
-                confirmText = "保存",
+                confirmText = L.common.save,
                 showClose = false,
                 confirmEnabled = newName.isNotBlank(),
                 onConfirm = {
@@ -1216,7 +1217,7 @@ private fun TimeGroupHeader(label: String, collapsed: Boolean, onToggle: () -> U
         Spacer(Modifier.width(4.dp))
         Icon(
             if (collapsed) Icons.Outlined.KeyboardArrowRight else Icons.Outlined.KeyboardArrowDown,
-            contentDescription = if (collapsed) "展开" else "收起",
+            contentDescription = if (collapsed) L.common.expand else L.common.collapse,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(14.dp),
         )
@@ -1326,7 +1327,7 @@ private fun SessionRow(
                 .padding(6.dp),
         ) {
             Icon(
-                Icons.Outlined.MoreVert, "更多操作",
+                Icons.Outlined.MoreVert, L.session.moreActions,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(16.dp),
             )
@@ -1337,7 +1338,7 @@ private fun SessionRow(
                 DropdownMenuItem(
                     text = {
                         Text(
-                            if (session.pinned) "取消置顶" else "置顶",
+                            if (session.pinned) L.session.unpin else L.session.pin,
                             color = if (session.pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                         )
                     },
@@ -1354,7 +1355,7 @@ private fun SessionRow(
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text("重命名") },
+                    text = { Text(L.common.rename) },
                     leadingIcon = {
                         Icon(
                             Icons.Outlined.Edit, null,
@@ -1368,7 +1369,7 @@ private fun SessionRow(
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+                    text = { Text(L.common.delete, color = MaterialTheme.colorScheme.error) },
                     leadingIcon = {
                         Icon(
                             Icons.Outlined.Delete, null,

@@ -1,5 +1,6 @@
 package com.pient.app.runtime
 
+import com.pient.app.data.i18n.L
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -28,7 +29,8 @@ object PiSkillsMarket {
     private const val TAG = "PiSkillsMarket"
 
     /** 安装/搜索在终端页用哪个会话（用户可切过去看全过程） */
-    const val SESSION = "技能市场"
+    /** 专用会话名（计算属性：object 里的 val 只求值一次，写 `L.…` 会冻结成首帧语言） */
+    val SESSION: String get() = L.runtime.skillMarketSession
 
     /** 市场服务地址（pi-web 里是环境变量 SKILLS_API_URL，默认 skills.sh） */
     private const val SEARCH_API_BASE = "https://skills.sh"
@@ -59,7 +61,7 @@ object PiSkillsMarket {
      */
     suspend fun search(context: Context, query: String, limit: Int = DEFAULT_LIMIT): Pair<List<Hit>, String?> {
         val q = query.trim()
-        if (q.isEmpty()) return emptyList<Hit>() to "请输入关键词"
+        if (q.isEmpty()) return emptyList<Hit>() to L.runtime.enterKeyword
         val api = runCatching { searchViaApi(q, limit) }
         api.getOrNull()?.let { hits ->
             Log.i(TAG, "skills.sh 搜索「$q」：${hits.size} 条")
@@ -94,7 +96,7 @@ object PiSkillsMarket {
             "勾选 Git 安装一次，再回来装技能。'; exit 3; fi; "
         // 项目作用域要在项目目录里跑（skills CLI 按 cwd 找 .agents/skills）；全局则无所谓
         val cmd = if (global) guard + args else "cd /workspace 2>/dev/null; " + guard + args
-        return GuestScripts.runInTerminal(context, SESSION, "安装技能 $pkg", cmd, onDone)
+        return GuestScripts.runInTerminal(context, SESSION, L.runtime.installSkillLabel(pkg), cmd, onDone)
     }
 
     // ─────────────────────────── 搜索实现 ───────────────────────────
@@ -149,9 +151,9 @@ object PiSkillsMarket {
         return when {
             hits.isNotEmpty() -> hits to null
             code == 3 || text.contains("缺少 npx") ->
-                emptyList<Hit>() to "技能市场不可用：Ubuntu 里还没有 Node/npx（去「环境配置 → Node.js」装一次即可）"
-            code != 0 -> emptyList<Hit>() to "搜索失败（退出码 $code）：${text.trim().lines().lastOrNull().orEmpty().take(160)}"
-            else -> emptyList<Hit>() to "没有匹配的技能（npx skills find 无结果）"
+                emptyList<Hit>() to L.runtime.marketNoNpx
+            code != 0 -> emptyList<Hit>() to L.runtime.searchFailed(code, text.trim().lines().lastOrNull().orEmpty().take(160))
+            else -> emptyList<Hit>() to L.runtime.searchFailedNoResult
         }
     }
 

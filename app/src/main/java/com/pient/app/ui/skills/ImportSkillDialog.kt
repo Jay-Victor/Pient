@@ -1,5 +1,6 @@
 package com.pient.app.ui.skills
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -77,9 +78,9 @@ fun ImportSkillDialog(
 
     Box(Modifier.fillMaxSize()) {
         PientDialog(
-            title = "导入技能",
+            title = L.skills.importTitle,
             onDismiss = onDismiss,
-            confirmText = "导入",
+            confirmText = L.common.importText,
             confirmEnabled = (tab == 0 && zipUri != null) || (tab == 1 && valid) && !importing,
             showClose = false,
             onConfirm = {
@@ -94,12 +95,12 @@ fun ImportSkillDialog(
         ) {
             Column(Modifier.padding(top = 12.dp)) {
                 PientSegmented(
-                    labels = listOf("ZIP 导入", "手动输入"),
+                    labels = listOf(L.skills.tabZip, L.skills.tabManual),
                     selected = tab,
                     onSelect = { tab = it },
                 )
                 Text(
-                    "导入目标：${if (global) "全局 ~/.pi/agent/skills/" else "当前项目 .pi/skills/"}",
+                    L.skills.importTarget(if (global) L.skills.importTargetGlobal else L.skills.importTargetProject),
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFont),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
@@ -126,7 +127,7 @@ fun ImportSkillDialog(
                             modifier = Modifier.size(18.dp),
                         )
                         Text(
-                            zipName ?: "选择 .zip 文件（解压导入）",
+                            zipName ?: L.skills.pickZip,
                             style = MaterialTheme.typography.bodySmall,
                             color = if (zipName != null) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -135,7 +136,7 @@ fun ImportSkillDialog(
                     }
                     Text(
                         "校验结构：压缩包需含 SKILL.md（可整体套一层目录）；导入后落在「${
-                            if (global) "全局 ~/.pi/agent/skills/" else "当前项目 .pi/skills/"
+                            if (global) L.skills.globalPiSkillsPath else L.skills.projectPiSkillsPath
                         }」",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -143,13 +144,13 @@ fun ImportSkillDialog(
                     )
                 } else {
                     // 手动输入
-                    LabeledField("技能名称", "1–64 字符 · 小写/数字/连字符（frontmatter name）") {
+                    LabeledField(L.skills.nameLabel, L.skills.nameHint) {
                         BasicTextField(
                             value = name,
                             onValueChange = {
                                 name = it
                                 nameError = if (nameRegex.matches(it) || it.isEmpty()) null
-                                else "名称仅限小写字母、数字、连字符，1–64 字符"
+                                else L.skills.nameInvalid
                             },
                             textStyle = MaterialTheme.typography.bodyMedium.copy(
                                 fontFamily = MonoFont,
@@ -168,7 +169,7 @@ fun ImportSkillDialog(
                             )
                         }
                     }
-                    LabeledField("技能简介", "必填 · ≤1024 字符（frontmatter description）") {
+                    LabeledField(L.skills.descLabel, L.skills.descHint) {
                         BasicTextField(
                             value = desc,
                             onValueChange = { desc = it },
@@ -178,7 +179,7 @@ fun ImportSkillDialog(
                             modifier = Modifier.fieldStyle(),
                         )
                     }
-                    LabeledField("技能内容", "生成 SKILL.md 正文") {
+                    LabeledField(L.skills.contentLabel, L.skills.contentHint) {
                         BasicTextField(
                             value = content,
                             onValueChange = { content = it },
@@ -204,7 +205,7 @@ fun ImportSkillDialog(
                             strokeWidth = 2.dp,
                         )
                         Text(
-                            "导入中…（完成后自动刷新列表）",
+                            L.skills.importing,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(start = 8.dp),
@@ -248,4 +249,4 @@ private fun zipDisplayName(context: android.content.Context, uri: Uri): String =
     runCatching {
         context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
             ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
-    }.getOrNull()?.takeIf { it.isNotBlank() } ?: "已选择压缩包"
+    }.getOrNull()?.takeIf { it.isNotBlank() } ?: L.skills.zipChosen

@@ -1,5 +1,6 @@
 package com.pient.app.data
 
+import com.pient.app.data.i18n.L
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
@@ -33,15 +34,15 @@ object SessionExport {
         val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())
         val sb = StringBuilder()
         sb.append("# ").append(title).append("\n\n")
-        sb.append("导出时间：").append(stamp).append("　·　会话数：").append(picks.size).append("\n\n")
+        sb.append(L.project.exportTime).append(stamp).append(L.project.exportSessionCount).append(picks.size).append("\n\n")
         picks.forEachIndexed { idx, s ->
-            sb.append("## ").append(s.title.ifBlank { "未命名会话" }).append("\n\n")
-            sb.append("- 项目：").append(s.project)
-                .append("　·　最后更新：").append(formatTime(s.updatedAt))
-                .append("　·　消息数：").append(chat.messagesForExport(s.id).size).append("\n\n")
+            sb.append("## ").append(s.title.ifBlank { L.project.untitledSession }).append("\n\n")
+            sb.append(L.project.exportProjectLabel).append(s.project)
+                .append(L.project.exportUpdatedAt).append(formatTime(s.updatedAt))
+                .append(L.project.exportMessageCount).append(chat.messagesForExport(s.id).size).append("\n\n")
             val msgs = chat.messagesForExport(s.id)
             if (msgs.isEmpty()) {
-                sb.append("（该会话没有可导出的消息）\n\n")
+                sb.append(L.project.exportNoMessages)
             } else {
                 msgs.forEach { appendMsg(sb, it) }
             }
@@ -65,7 +66,7 @@ object SessionExport {
             context.contentResolver.openOutputStream(uri)?.use { it.write(content.toByteArray()) }
                 ?: return@runCatching null
             Log.i(TAG, "已导出到下载/$REL_DIR/$fileName")
-            "下载/$REL_DIR/$fileName"
+            L.project.exportLocation(REL_DIR, fileName)
         } else {
             // API 26~28：公共下载目录需要 WRITE_EXTERNAL_STORAGE，不引权限 → 落应用外部下载目录
             val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return@runCatching null
@@ -84,39 +85,39 @@ object SessionExport {
     private fun appendMsg(sb: StringBuilder, m: Msg) {
         when (m) {
             is Msg.User -> {
-                sb.append("### 用户\n\n")
+                sb.append(L.project.exportUserHeading)
                 m.quote?.let { q ->
-                    sb.append("> 引用").append(if (q.role == "assistant") " AI 回答" else "用户消息").append("：\n")
+                    sb.append(L.project.exportQuote).append(if (q.role == "assistant") L.project.exportQuoteAi else L.project.exportQuoteUser).append("：\n")
                     q.text.trim().lines().forEach { sb.append("> ").append(it).append('\n') }
                     sb.append('\n')
                 }
                 sb.append(m.text.trim()).append("\n\n")
                 if (m.attachments.isNotEmpty()) {
-                    sb.append("附件：").append(m.attachments.joinToString("、") { it.name }).append("\n\n")
+                    sb.append(L.project.exportAttachments).append(m.attachments.joinToString("、") { it.name }).append("\n\n")
                 }
             }
             is Msg.Assistant -> {
                 sb.append("### AI").append(m.model?.let { "（$it）" } ?: "").append("\n\n")
-                sb.append(m.markdown.trim().ifEmpty { "（空回答）" }).append("\n\n")
+                sb.append(m.markdown.trim().ifEmpty { L.project.exportEmptyAnswer }).append("\n\n")
             }
             is Msg.Thinking -> {
                 val text = m.text.trim()
                 if (text.isNotEmpty()) {
-                    sb.append("<details><summary>思考过程</summary>\n\n")
+                    sb.append(L.project.exportThinkingSummary)
                     sb.append(text).append("\n\n</details>\n\n")
                 }
             }
             is Msg.ToolCall -> {
-                sb.append("### 工具调用 `").append(m.name).append("`\n\n")
+                sb.append(L.project.exportToolCallHeading).append(m.name).append("`\n\n")
                 sb.append("```json\n").append(m.params.trim()).append("\n```\n\n")
                 m.detail?.takeIf { it.isNotBlank() }?.let { sb.append(it.trim()).append("\n\n") }
             }
             is Msg.ToolResult -> {
-                sb.append("### 工具结果 `").append(m.toolName).append("`\n\n")
+                sb.append(L.project.exportToolResultHeading).append(m.toolName).append("`\n\n")
                 sb.append("```\n").append((m.full ?: m.preview).trim()).append("\n```\n\n")
             }
             is Msg.Compaction -> {
-                sb.append("> 上下文压缩：").append(m.tokensBefore).append(" → 省 ").append(m.saved)
+                sb.append(L.project.exportCompaction).append(m.tokensBefore).append(L.project.exportCompactionSaved).append(m.saved)
                     .append(" tokens").append(m.reason?.let { "（$it）" } ?: "").append("\n\n")
                 m.summary.trim().takeIf { it.isNotEmpty() }?.let { sb.append(it).append("\n\n") }
             }

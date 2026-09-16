@@ -1,5 +1,6 @@
 package com.pient.app.runtime
 
+import com.pient.app.data.i18n.L
 import android.util.Log
 import com.pient.app.AppCtx
 import kotlinx.coroutines.CompletableDeferred
@@ -112,13 +113,13 @@ object PiRpc {
         stop()
         val ctx = AppCtx.get() ?: return false
         if (!PiRuntime.rootfsReady(ctx) || !PiRuntime.piReady(ctx)) {
-            _state.value = PiRpcState.Failed("Ubuntu/pi 未就绪")
+            _state.value = PiRpcState.Failed(L.runtime.rpcNotReady)
             return false
         }
         PiRuntime.prepareTerminal(ctx)   // DNS / 启动器 / 执行环境（与终端页同源）
         val shell = PiRuntime.shellPath(ctx)
         if (!shell.isFile) {
-            _state.value = PiRpcState.Failed("缺少终端启动器：${shell.absolutePath}")
+            _state.value = PiRpcState.Failed(L.runtime.rpcLauncherMissing(shell.absolutePath))
             return false
         }
         val cmd = buildString {

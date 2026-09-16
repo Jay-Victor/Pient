@@ -1,5 +1,6 @@
 package com.pient.app.ui.skills
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -110,14 +111,14 @@ fun SkillSearchScreen(nav: NavController) {
                 .padding(horizontal = 8.dp, vertical = 10.dp),
         ) {
             Icon(
-                Icons.Outlined.ArrowBack, "返回",
+                Icons.Outlined.ArrowBack, L.common.back,
                 tint = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier
                     .size(24.dp)
                     .clickable(onClick = { nav.popBackStack() }),
             )
             Text(
-                "搜索技能",
+                L.skills.searchTitle,
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(start = 12.dp),
             )
@@ -132,7 +133,7 @@ fun SkillSearchScreen(nav: NavController) {
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .weight(1f)
-                    .height(44.dp) // 与右侧"搜索"按钮（height 44）等高（2026-08-27 对齐）
+                    .height(44.dp) // 与右侧L.common.search按钮（height 44）等高（2026-08-27 对齐）
                     .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(12.dp))
                     .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
                     .padding(horizontal = 12.dp),
@@ -158,7 +159,7 @@ fun SkillSearchScreen(nav: NavController) {
                     decorationBox = { inner ->
                         if (query.isEmpty()) {
                             Text(
-                                "输入技能名或关键词…",
+                                L.skills.searchPlaceholder,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                             )
@@ -170,7 +171,7 @@ fun SkillSearchScreen(nav: NavController) {
             // 搜索按钮：与输入框同高 44dp；宽度固定 72dp 以对齐输入框行
             //（PientButton 自身已带左右 20dp 内边距，2026-09-12 起）
             PientButton(
-                if (searching) "搜索中" else "搜索",
+                if (searching) L.skills.searching else L.common.search,
                 onClick = { searched = query },
                 height = 44,
                 enabled = !searching,
@@ -180,13 +181,13 @@ fun SkillSearchScreen(nav: NavController) {
 
         // 安装落点选择（与插件页同一套组件；pi 的两处技能目录）
         PientSegmented(
-            labels = listOf("装到全局", "装到项目"),
+            labels = listOf(L.skills.installGlobal, L.skills.installProject),
             selected = if (global) 0 else 1,
             onSelect = { global = it == 0 },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         )
         Text(
-            if (global) "~/.agents/skills（pi 全局技能目录）" else "当前项目 .agents/skills",
+            if (global) L.skills.globalAgentsPath else L.skills.projectAgentsPath,
             style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFont),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
@@ -199,7 +200,7 @@ fun SkillSearchScreen(nav: NavController) {
             if (searched.isBlank()) {
                 item {
                     Text(
-                        "输入关键词后搜索技能市场（skills.sh；搜索走应用直连，安装由 Ubuntu 里的 skills CLI 执行）",
+                        L.skills.marketHint,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -210,7 +211,7 @@ fun SkillSearchScreen(nav: NavController) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
                         Text(
-                            "正在搜索技能市场…",
+                            L.skills.searchingMarket,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(start = 8.dp),
@@ -229,7 +230,7 @@ fun SkillSearchScreen(nav: NavController) {
             }
             if (marketResults.isNotEmpty()) {
                 item {
-                    Text("市场结果（skills.sh）：", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    Text(L.skills.marketResults, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                 }
                 items(marketResults, key = { it.pkg }) { hit ->
                     MarketSkillRow(
@@ -237,13 +238,13 @@ fun SkillSearchScreen(nav: NavController) {
                         installing = installing == hit.pkg,
                         onInstall = {
                             installing = hit.pkg
-                            note = "已开始安装 ${hit.pkg} —— 终端页「${PiSkillsMarket.SESSION}」可看进度"
+                            note = L.skills.installStarted(hit.pkg, PiSkillsMarket.SESSION)
                             PiSkillsMarket.install(context, hit.pkg, global) { code ->
                                 installing = null
                                 note = if (code == 0) {
-                                    "已安装「${hit.name}」（${if (global) "全局" else "项目"}）"
+                                    L.skills.installedNote(hit.name, if (global) L.common.global else L.common.project)
                                 } else {
-                                    "安装失败（退出码 $code）—— 终端页「${PiSkillsMarket.SESSION}」有完整报错"
+                                    L.skills.installFailed(code, PiSkillsMarket.SESSION)
                                 }
                                 rescanLocal()
                             }
@@ -253,7 +254,7 @@ fun SkillSearchScreen(nav: NavController) {
             }
             if (localResults.isNotEmpty()) {
                 item {
-                    Text("已安装（本地匹配）：", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    Text(L.skills.installedLocal, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                 }
                 items(localResults, key = { "l-${it.global}-${it.name}-${it.relPath}" }) { skill ->
                     Row(
@@ -271,7 +272,7 @@ fun SkillSearchScreen(nav: NavController) {
                         )
                         if (!skill.enabled) {
                             Text(
-                                "已停用",
+                                L.skills.disabledBadge,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(end = 6.dp),
@@ -283,7 +284,7 @@ fun SkillSearchScreen(nav: NavController) {
                             modifier = Modifier.size(16.dp),
                         )
                         Text(
-                            "已安装",
+                            L.common.installed,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                         )
@@ -293,7 +294,7 @@ fun SkillSearchScreen(nav: NavController) {
             if (searched.isNotBlank() && !searching && marketResults.isEmpty() && localResults.isEmpty()) {
                 item {
                     Text(
-                        "没有找到与「$searched」相关的技能",
+                        L.skills.noResults(searched),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -344,7 +345,7 @@ private fun MarketSkillRow(
                     .clickable(onClick = onInstall)
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             ) {
-                Text("安装", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary)
+                Text(L.common.install, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary)
             }
         }
     }

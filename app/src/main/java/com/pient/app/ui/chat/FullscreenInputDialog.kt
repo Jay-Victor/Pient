@@ -1,5 +1,6 @@
 package com.pient.app.ui.chat
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -70,12 +71,12 @@ fun FullscreenInputDialog(
             ) {
                 IconButton(onClick = onDismiss) {
                     Icon(
-                        Icons.Outlined.Close, "收起",
+                        Icons.Outlined.Close, L.common.collapse,
                         tint = MaterialTheme.colorScheme.onBackground,
                     )
                 }
                 Text(
-                    "全屏输入",
+                    L.chat.fullscreenInput,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onBackground,
                     textAlign = TextAlign.Center,
@@ -93,7 +94,7 @@ fun FullscreenInputDialog(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        Icons.AutoMirrored.Outlined.Send, "发送",
+                        Icons.AutoMirrored.Outlined.Send, L.chat.send,
                         tint = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(20.dp),
                     )
@@ -115,7 +116,7 @@ fun FullscreenInputDialog(
                 decorationBox = { inner ->
                     if (text.text.isEmpty()) {
                         Text(
-                            "给 Agent 派个任务…",
+                            L.chat.inputPlaceholder,
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.9f),
                         )

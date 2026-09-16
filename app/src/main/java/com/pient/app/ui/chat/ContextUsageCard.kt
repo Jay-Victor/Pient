@@ -1,5 +1,6 @@
 package com.pient.app.ui.chat
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -79,7 +80,7 @@ fun ContextUsageCard(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
-                    "上下文用量",
+                    L.chat.contextUsage,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.weight(1f),
@@ -94,7 +95,7 @@ fun ContextUsageCard(
 
             // ② 已用百分比（Hermes copy.percentFull；数值 = pi 的 contextUsage.percent）
             Text(
-                if (known) "已用 ${chatState.contextPercent.toInt()}%" else "已用 ?（压缩后还没有新回复）",
+                if (known) L.chat.contextUsedPercent(chatState.contextPercent.toInt()) else L.chat.contextUsedUnknown,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.padding(top = 6.dp),
@@ -137,10 +138,10 @@ fun ContextUsageCard(
             ) {
                 Text(
                     when {
-                        cfg == null -> "上下文压缩：未配置服务商"
-                        !cfg.compactionEnabled -> "自动压缩已关闭"
-                        threshold != null -> "自动压缩：已用 ≥ $threshold% 时"
-                        else -> "自动压缩：接近上下文上限时"
+                        cfg == null -> L.chat.compactionNoProvider
+                        !cfg.compactionEnabled -> L.chat.autoCompactOff
+                        threshold != null -> L.chat.autoCompactAt(threshold)
+                        else -> L.chat.autoCompactNearLimit
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -149,7 +150,7 @@ fun ContextUsageCard(
                 )
                 if (onCompact != null) {
                     PientButton(
-                        text = if (chatState.compacting) "压缩中…" else "压缩上下文",
+                        text = if (chatState.compacting) L.chat.compacting else L.chat.compactContext,
                         onClick = { if (!chatState.compacting) onCompact() },
                         primary = false,
                         height = 28,

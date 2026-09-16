@@ -1,5 +1,6 @@
 package com.pient.app.runtime
 
+import com.pient.app.data.i18n.L
 import android.content.Context
 import android.util.Log
 import androidx.compose.runtime.getValue
@@ -177,7 +178,10 @@ object EnvProvision {
 
     /** 终端里那行「这是干什么」的标题（命令行的样子，读起来像用户在终端里敲的） */
     fun labelFor(components: List<UbuntuComponent>): String =
-        "环境配置 · 安装 ${components.size} 个组件（${components.joinToString(" · ") { it.name }}）"
+        L.runtime.installComponentsLabel(
+            components.size,
+            components.joinToString(" · ") { it.name },
+        )
 
     /**
      * 把选中组件交给**终端页的专用会话**去装：会话不存在就新建（`环境配置`），
@@ -192,7 +196,7 @@ object EnvProvision {
         // 索引刷新前先把镜像源写对（架构档位错 = apt 整轮 404；见 ensureSelectedMirror）
         ensureSelectedMirror(context)
         running = true
-        step = "安装 ${components.size} 个组件"
+        step = L.runtime.installComponentsStep(components.size)
         lastExitCode = null
         TerminalSessions.runScript(session, labelFor(components), commandsFor(components)) { code ->
             running = false

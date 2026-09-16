@@ -1,5 +1,6 @@
 package com.pient.app.ui.skills
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -71,7 +72,7 @@ fun SkillsScreen(nav: NavController) {
         scope.launch {
             val result = runCatching { withContext(Dispatchers.IO) { PiSkills.list(context) } }
             skills = result.getOrElse {
-                scanError = it.message ?: "扫描失败"; emptyList()
+                scanError = it.message ?: L.skills.scanFailed; emptyList()
             }
             scanError = null
             loadedOnce = true
@@ -94,14 +95,14 @@ fun SkillsScreen(nav: NavController) {
                     .padding(horizontal = 8.dp, vertical = 10.dp),
             ) {
                 Icon(
-                    Icons.Outlined.ArrowBack, "返回",
+                    Icons.Outlined.ArrowBack, L.common.back,
                     tint = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier
                         .size(24.dp)
                         .clickable(onClick = { nav.popBackStack() }),
                 )
                 Text(
-                    "技能管理",
+                    L.skills.manageTitle,
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(start = 12.dp),
                 )
@@ -109,13 +110,13 @@ fun SkillsScreen(nav: NavController) {
 
             // 分段控制器
             PientSegmented(
-                labels = listOf("全局", "项目"),
+                labels = listOf(L.common.global, L.common.project),
                 selected = segment,
                 onSelect = { segment = it },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             )
             Text(
-                if (segment == 0) "~/.pi/agent/skills/ · ~/.agents/skills/" else "当前项目 .pi/skills/ · .agents/skills/",
+                if (segment == 0) "~/.pi/agent/skills/ · ~/.agents/skills/" else L.skills.projectPaths,
                 style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFont),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
@@ -137,11 +138,11 @@ fun SkillsScreen(nav: NavController) {
                         onToggle = { on ->
                             val local = row.path?.let { byPath[it] }
                             if (local == null) {
-                                toast(context, "找不到技能文件")
+                                toast(context, L.skills.skillFileMissing)
                             } else {
                                 scope.launch {
                                     val ok = withContext(Dispatchers.IO) { PiSkills.setEnabled(local, on) }
-                                    toast(context, if (ok) (if (on) "已启用 ${local.name}" else "已停用 ${local.name}") else "操作失败")
+                                    toast(context, if (ok) (if (on) L.skills.enabledToast(local.name) else L.skills.disabledToast(local.name)) else L.skills.actionFailed)
                                     reload()
                                 }
                             }
@@ -152,10 +153,10 @@ fun SkillsScreen(nav: NavController) {
                     item {
                         Text(
                             when {
-                                scanError != null -> "扫描失败：$scanError"
-                                !loadedOnce -> "正在扫描技能目录…"
-                                segment == 0 -> "还没有全局技能。点右下「导入」新建，或用「搜索」查看技能市场。"
-                                else -> "当前项目没有技能（.pi/skills 或 .agents/skills 里放 SKILL.md 即可）。"
+                                scanError != null -> L.skills.scanFailedDetail(scanError)
+                                !loadedOnce -> L.skills.scanning
+                                segment == 0 -> L.skills.noGlobalSkills
+                                else -> L.skills.noProjectSkills
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -180,7 +181,7 @@ fun SkillsScreen(nav: NavController) {
                     .clickable(onClick = { nav.navigate("skill_search") }),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Outlined.Search, "搜索技能", tint = MaterialTheme.colorScheme.onPrimary)
+                Icon(Icons.Outlined.Search, L.skills.searchTitle, tint = MaterialTheme.colorScheme.onPrimary)
             }
             Box(
                 modifier = Modifier
@@ -190,7 +191,7 @@ fun SkillsScreen(nav: NavController) {
                     .clickable(onClick = { importOpen = true }),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Outlined.Download, "导入技能", tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Outlined.Download, L.skills.importTitle, tint = MaterialTheme.colorScheme.primary)
             }
         }
     }
@@ -208,7 +209,7 @@ fun SkillsScreen(nav: NavController) {
                     val err = withContext(Dispatchers.IO) {
                         PiSkills.import(context, name, skillMd, global = segment == 0)
                     }
-                    toast(context, err ?: "已导入技能 $name")
+                    toast(context, err ?: L.skills.importedName(name))
                     if (err == null) {
                         importOpen = false
                         reload()
@@ -221,7 +222,7 @@ fun SkillsScreen(nav: NavController) {
                     val (err, slug) = withContext(Dispatchers.IO) {
                         PiSkills.importZip(context, uri, global = segment == 0)
                     }
-                    toast(context, err ?: "已导入技能 $slug")
+                    toast(context, err ?: L.skills.importedSlug(slug))
                     if (err == null) {
                         importOpen = false
                         reload()
@@ -240,7 +241,7 @@ fun SkillsScreen(nav: NavController) {
                 val local = item.path?.let { byPath[it] }
                 scope.launch {
                     val ok = local != null && withContext(Dispatchers.IO) { PiSkills.delete(local) }
-                    toast(context, if (ok) "已删除技能 ${item.name}" else "删除失败")
+                    toast(context, if (ok) L.skills.deletedSkill(item.name) else L.common.deleteFailed)
                     detailFor = null
                     reload()
                 }

@@ -1,5 +1,6 @@
 package com.pient.app.ui.components
 
+import com.pient.app.data.i18n.L
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -579,7 +580,7 @@ private fun MarkdownCodeBlock(lang: String, code: String, s: MdStyles, modifier:
                     .padding(horizontal = 7.dp, vertical = 2.dp),
             ) {
                 Text(
-                    text = if (copied) "已复制" else "复制",
+                    text = if (copied) L.common.copied else L.common.copy,
                     style = TextStyle(fontSize = 11.sp, lineHeight = 1.25.em),
                     color = s.muted,
                 )

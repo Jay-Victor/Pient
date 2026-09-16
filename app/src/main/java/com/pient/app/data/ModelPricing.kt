@@ -1,11 +1,18 @@
 package com.pient.app.data
 
+import com.pient.app.data.i18n.L
 import android.content.Context
 
 /** 计费方式（Operit BillingMode 同款：按 Token 计费 / 按次计费） */
-enum class BillingMode(val label: String) {
-    TOKEN("按Token计费"),
-    COUNT("按次计费"),
+enum class BillingMode {
+    TOKEN,
+    COUNT;
+
+    /** 显示名（计算属性：枚举构造参数只求值一次，写 `L.…` 会冻结成首帧语言） */
+    val label: String get() = when (this) {
+        TOKEN -> L.models.billingPerToken
+        COUNT -> L.models.billingPerRequest
+    }
 }
 
 /** 计价币种（Operit PricingCurrency 同款） */

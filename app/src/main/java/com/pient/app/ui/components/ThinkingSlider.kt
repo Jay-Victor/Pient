@@ -1,5 +1,6 @@
 package com.pient.app.ui.components
 
+import com.pient.app.data.i18n.L
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -88,7 +89,7 @@ fun ThinkingLevelSlider(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(
-                "思考程度",
+                L.common.thinkingLevel,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

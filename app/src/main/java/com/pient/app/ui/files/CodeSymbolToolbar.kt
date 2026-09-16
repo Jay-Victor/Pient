@@ -1,5 +1,6 @@
 package com.pient.app.ui.files
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -58,63 +59,64 @@ internal data class CodeSymbol(
  * 括号族：**同种括号（开 + 闭）合并成一枚按键**（2026-09-11 用户口径）——点一下插入一对、
  * 光标落中间，有选区时包裹选区（由 [insertCodeSymbol] 处理）。
  */
-internal val CodeSymbolGroups: List<List<CodeSymbol>> = listOf(
+internal val CodeSymbolGroups: List<List<CodeSymbol>>
+    get() = listOf(
     // 括号族（同种括号合并：() [] {} <>，键面显示整对）
     listOf(
-        CodeSymbol("(", ")", "圆括号", kind = "round", label = "()"),
-        CodeSymbol("[", "]", "方括号", kind = "square", label = "[]"),
-        CodeSymbol("{", "}", "花括号", kind = "curly", label = "{}"),
-        CodeSymbol("<", ">", "尖括号", kind = "angle", label = "<>"),
+        CodeSymbol("(", ")", L.files.symParen, kind = "round", label = "()"),
+        CodeSymbol("[", "]", L.files.symBracket, kind = "square", label = "[]"),
+        CodeSymbol("{", "}", L.files.symBrace, kind = "curly", label = "{}"),
+        CodeSymbol("<", ">", L.files.symAngle, kind = "angle", label = "<>"),
     ),
     // 引号族（成对插入）
     listOf(
-        CodeSymbol("\"", "\"", "双引号"),
-        CodeSymbol("'", "'", "单引号"),
-        CodeSymbol("`", "`", "反引号"),
+        CodeSymbol("\"", "\"", L.files.symDoubleQuote),
+        CodeSymbol("'", "'", L.files.symSingleQuote),
+        CodeSymbol("`", "`", L.files.symBacktick),
     ),
     // 运算符
     listOf(
-        CodeSymbol("+", null, "加号"),
-        CodeSymbol("-", null, "减号"),
-        CodeSymbol("*", null, "乘号"),
-        CodeSymbol("/", null, "除号"),
-        CodeSymbol("%", null, "百分号"),
-        CodeSymbol("=", null, "等号"),
+        CodeSymbol("+", null, L.files.symPlus),
+        CodeSymbol("-", null, L.files.symMinus),
+        CodeSymbol("*", null, L.files.symMultiply),
+        CodeSymbol("/", null, L.files.symDivide),
+        CodeSymbol("%", null, L.files.symPercent),
+        CodeSymbol("=", null, L.files.symEquals),
     ),
     // 常见组合符（多字符，手机键盘上最难打的一类）
     listOf(
-        CodeSymbol("==", null, "等于"),
-        CodeSymbol("!=", null, "不等于"),
-        CodeSymbol("<=", null, "小于等于"),
-        CodeSymbol(">=", null, "大于等于"),
-        CodeSymbol("&&", null, "逻辑与"),
-        CodeSymbol("||", null, "逻辑或"),
-        CodeSymbol("->", null, "箭头"),
-        CodeSymbol("=>", null, "粗箭头"),
+        CodeSymbol("==", null, L.files.symEqualTo),
+        CodeSymbol("!=", null, L.files.symNotEqualTo),
+        CodeSymbol("<=", null, L.files.symLessOrEqual),
+        CodeSymbol(">=", null, L.files.symGreaterOrEqual),
+        CodeSymbol("&&", null, L.files.symLogicalAnd),
+        CodeSymbol("||", null, L.files.symLogicalOr),
+        CodeSymbol("->", null, L.files.symArrow),
+        CodeSymbol("=>", null, L.files.symFatArrow),
     ),
     // 逻辑 / 位运算
     listOf(
-        CodeSymbol("!", null, "非"),
-        CodeSymbol("&", null, "与"),
-        CodeSymbol("|", null, "或"),
-        CodeSymbol("~", null, "取反"),
+        CodeSymbol("!", null, L.files.symLogicalNot),
+        CodeSymbol("&", null, L.files.symBitwiseAnd),
+        CodeSymbol("|", null, L.files.symBitwiseOr),
+        CodeSymbol("~", null, L.files.symBitwiseNot),
     ),
     // 分隔符
     listOf(
-        CodeSymbol(",", null, "逗号"),
-        CodeSymbol(";", null, "分号"),
-        CodeSymbol(":", null, "冒号"),
-        CodeSymbol(".", null, "点号"),
-        CodeSymbol("_", null, "下划线"),
+        CodeSymbol(",", null, L.files.symComma),
+        CodeSymbol(";", null, L.files.symSemicolon),
+        CodeSymbol(":", null, L.files.symColon),
+        CodeSymbol(".", null, L.files.symDot),
+        CodeSymbol("_", null, L.files.symUnderscore),
     ),
     // 其它常用符号
     listOf(
-        CodeSymbol("#", null, "井号"),
-        CodeSymbol("@", null, "at 号"),
-        CodeSymbol("$", null, "美元号"),
-        CodeSymbol("^", null, "脱字符"),
-        CodeSymbol("?", null, "问号"),
-        CodeSymbol("\\", null, "反斜杠"),
+        CodeSymbol("#", null, L.files.symHash),
+        CodeSymbol("@", null, L.files.symAt),
+        CodeSymbol("$", null, L.files.symDollar),
+        CodeSymbol("^", null, L.files.symCaret),
+        CodeSymbol("?", null, L.files.symQuestion),
+        CodeSymbol("\\", null, L.files.symBackslash),
     ),
 )
 
@@ -158,13 +160,13 @@ internal fun CodeSymbolToolbar(
             // （共用 EditorUndoController：粒度按编辑动作、撤销与重做都恢复光标位置）
             EditorToolbarButton(
                 icon = Icons.AutoMirrored.Outlined.Undo,
-                desc = "撤销",
+                desc = L.common.undo,
                 enabled = canUndo,
                 onClick = onUndo,
             )
             EditorToolbarButton(
                 icon = Icons.AutoMirrored.Outlined.Redo,
-                desc = "取消撤销",
+                desc = L.files.redo,
                 enabled = canRedo,
                 onClick = onRedo,
             )

@@ -1,5 +1,6 @@
 package com.pient.app.ui.settings
 
+import com.pient.app.data.i18n.L
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
@@ -212,18 +213,18 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     ) {
         val cur = cfg ?: return
         if (cur.endpoint.isBlank()) {
-            onMessage("请先填写 API 端点")
+            onMessage(L.models.needEndpoint)
             return
         }
         if (cur.apiKey.isBlank()) {
-            onMessage("请先填写 API 密钥")
+            onMessage(L.models.needApiKey)
             return
         }
         scope.launch {
             try {
                 onSuccess(AiBackend.listModels(cur))
             } catch (e: Exception) {
-                onMessage("连接失败：${e.message ?: "未知错误"}")
+                onMessage(L.models.connectFailedDetail(e.message ?: L.common.unknownError))
             }
         }
     }
@@ -238,14 +239,14 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                 .padding(horizontal = 8.dp, vertical = 10.dp),
         ) {
             Icon(
-                Icons.Outlined.ArrowBack, "返回",
+                Icons.Outlined.ArrowBack, L.common.back,
                 tint = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier
                     .size(24.dp)
                     .clickable(onClick = { nav.popBackStack() }),
             )
             Text(
-                "服务商与模型配置",
+                L.settings.modelConfig,
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(start = 12.dp),
             )
@@ -272,7 +273,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            "选择服务商",
+                            L.models.selectProvider,
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.SemiBold,
@@ -281,7 +282,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                         )
                         ActionChipButton(
                             icon = Icons.Outlined.Add,
-                            text = "服务商",
+                            text = L.models.provider,
                             onClick = { providerPickerOpen = true },
                         )
                     }
@@ -301,7 +302,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                         .padding(start = 14.dp, end = 10.dp, top = 12.dp, bottom = 12.dp),
                                 ) {
                                     Text(
-                                        "未选择服务商 · 点击上方 +服务商 添加",
+                                        L.models.noProviderSelected,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -354,18 +355,18 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                             ) {
                                 ActionChipButton(
                                     icon = Icons.Outlined.Delete,
-                                    text = "删除",
+                                    text = L.common.delete,
                                     danger = true,
                                     onClick = { confirmDeleteOpen = true },
                                 )
                                 ActionChipButton(
                                     icon = Icons.Outlined.Dns, // 对齐 Operit ModelConfigScreen 测试连接按钮（Icons.Default.Dns）
-                                    text = "测试连接",
+                                    text = L.models.testConnection,
                                     onClick = {
-                                        testState = "测试中…"
+                                        testState = L.models.testing
                                         callModels { models ->
-                                            testState = if (models.isEmpty()) "连接成功（未返回模型）"
-                                            else "✓ 连接成功"
+                                            testState = if (models.isEmpty()) L.models.connectionOkNoModels
+                                            else L.models.connectionOk
                                             // 连接成功 = AI 配置完成（2026-09-08：聊天页首次引导第二步）
                                             chatState.aiConfigured = true
                                         }
@@ -378,10 +379,10 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 testState.orEmpty(),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = when {
-                                    testState == "✓ 连接成功" || testState == "连接成功（未返回模型）" ->
+                                    testState == L.models.connectionOk || testState == L.models.connectionOkNoModels ->
                                         MaterialTheme.colorScheme.primary
-                                    testState?.startsWith("连接失败") == true ||
-                                        testState?.startsWith("请先填写") == true ->
+                                    testState?.startsWith(L.models.connectFailed) == true ||
+                                        testState?.startsWith(L.models.fillFirstPrefix) == true ->
                                         MaterialTheme.colorScheme.error
                                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                                 },
@@ -396,11 +397,11 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             if (provider != null && cfg != null) {
                 item {
                     Column {
-                        SectionHeader("API设置", icon = Icons.Outlined.Api)
+                        SectionHeader(L.models.apiSettings, icon = Icons.Outlined.Api)
                         ConfigCard {
                             // 2.1 API端点
-                            ConfigFieldLabel("API端点")
-                            FieldHint("服务商 API 地址 · 切换服务商后自动填入，可手动修改")
+                            ConfigFieldLabel(L.models.apiEndpoint)
+                            FieldHint(L.models.endpointHint)
                             EndpointField(
                                 value = cfg.endpoint,
                                 onValueChange = { v -> updateConfig { it.copy(endpoint = v) } },
@@ -408,8 +409,8 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                             )
                             DividerLine()
                             // 2.2 API 类型（pi-ai 的 `api`：provider 级默认值，逐模型可在 JSON 里覆盖）
-                            ConfigFieldLabel("API 类型")
-                            FieldHint("pi-ai 的协议类型 · 默认取服务商预设；网关 / 自建端点可在这里改")
+                            ConfigFieldLabel(L.models.apiType)
+                            FieldHint(L.models.apiTypeHint)
                             Box {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -425,11 +426,11 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                         )
                                         Text(
                                             if (cfg.apiType.isBlank()) {
-                                                "服务商预设（${ProviderCatalog.apiOf(provider.id)}）"
+                                                L.models.providerPresetArg(ProviderCatalog.apiOf(provider.id))
                                             } else if (cfg.apiType == ProviderCatalog.apiOf(provider.id)) {
-                                                "与 pi 侧该服务商的事实表一致"
+                                                L.models.apiMatchesPi
                                             } else {
-                                                "已覆盖 pi 侧的事实表（写进 models.json 的 provider.api）"
+                                                L.models.apiOverridesPi
                                             },
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -455,14 +456,14 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                                     Column(Modifier.weight(1f)) {
                                                         Text(
-                                                            api.ifBlank { "跟随服务商预设" },
+                                                            api.ifBlank { L.models.followProviderPreset },
                                                             style = MaterialTheme.typography.bodyMedium.copy(
                                                                 fontFamily = if (api.isBlank()) null else MonoFont,
                                                             ),
                                                         )
                                                         Text(
                                                             if (api.isBlank()) ProviderCatalog.apiOf(provider.id)
-                                                            else if (i == 1 && options.size > 2) "该服务商可用的协议之一"
+                                                            else if (i == 1 && options.size > 2) L.models.apiOptionHint
                                                             else "provider.api",
                                                             style = MaterialTheme.typography.labelSmall,
                                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -487,8 +488,8 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                             }
                             DividerLine()
                             // 2.3 API密钥
-                            ConfigFieldLabel("API密钥")
-                            FieldHint("仅保存在本机 · 用于请求签名，界面不回显")
+                            ConfigFieldLabel(L.models.apiKey)
+                            FieldHint(L.models.apiKeyHint)
                             ApiKeyField(
                                 value = cfg.apiKey,
                                 onValueChange = { v -> updateConfig { it.copy(apiKey = v) } },
@@ -497,8 +498,8 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                             )
                             DividerLine()
                             // 2.4 模型列表
-                            ConfigFieldLabel("模型列表")
-                            FieldHint("多个模型用英文分号 ; 分隔 · 点击右侧按钮批量选择 · 需要别名时写 模型id=别名（pi 的 models[].name）")
+                            ConfigFieldLabel(L.models.modelList)
+                            FieldHint(L.models.modelListHint)
                             ModelListField(
                                 value = cfg.modelList,
                                 onValueChange = { v -> updateConfig { it.copy(modelList = v) } },
@@ -515,25 +516,25 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             if (provider != null && cfg != null) {
                 item {
                     Column {
-                        SectionHeader("模型能力", icon = Icons.Outlined.Extension)
+                        SectionHeader(L.models.capabilities, icon = Icons.Outlined.Extension)
                         ConfigCard {
                             ParamBlock(
-                                label = "模型支持识图",
-                                hint = "启用后，图片将直接发送给AI处理；关闭时仅发送一行省略占位",
+                                label = L.models.imageSupport,
+                                hint = L.models.imageSupportHint,
                                 enabled = cfg.imageDirectEnabled,
                                 onToggle = { updateConfig { it.copy(imageDirectEnabled = !it.imageDirectEnabled) } },
                             )
                             DividerLine()
                             ParamBlock(
-                                label = "模型支持音频解析",
-                                hint = "启用后，音频将直接发送给AI处理；关闭时仅发送一行省略占位",
+                                label = L.models.audioSupport,
+                                hint = L.models.audioSupportHint,
                                 enabled = cfg.audioDirectEnabled,
                                 onToggle = { updateConfig { it.copy(audioDirectEnabled = !it.audioDirectEnabled) } },
                             )
                             DividerLine()
                             ParamBlock(
-                                label = "模型支持视频解析",
-                                hint = "启用后，视频将直接发送给AI处理；关闭时仅发送一行省略占位",
+                                label = L.models.videoSupport,
+                                hint = L.models.videoSupportHint,
                                 enabled = cfg.videoDirectEnabled,
                                 onToggle = { updateConfig { it.copy(videoDirectEnabled = !it.videoDirectEnabled) } },
                             )
@@ -547,11 +548,11 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             if (provider != null && cfg != null) {
                 item {
                     Column {
-                        SectionHeader("上下文设置", icon = Icons.Outlined.MenuBook)
+                        SectionHeader(L.models.contextSettings, icon = Icons.Outlined.MenuBook)
                         ConfigCard {
                             // 3.1 上下文长度
-                            ConfigFieldLabel("上下文长度")
-                            FieldHint("单次会话可用的最大上下文窗口 · 过大可能超出服务商上限")
+                            ConfigFieldLabel(L.models.contextLength)
+                            FieldHint(L.models.contextLengthHint)
                             TokenInputField(
                                 value = cfg.ctxLenK,
                                 onValueChange = { v ->
@@ -561,8 +562,8 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                             )
                             DividerLine()
                             // 3.2 最大输出长度
-                            ConfigFieldLabel("最大输出长度")
-                            FieldHint("单次回复最多生成的 token 数")
+                            ConfigFieldLabel(L.models.maxOutputLength)
+                            FieldHint(L.models.maxOutputLengthHint)
                             TokenInputField(
                                 value = cfg.maxOutK,
                                 onValueChange = { v ->
@@ -579,7 +580,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             if (provider != null && cfg != null) {
                 item {
                     Column {
-                        SectionHeader("思考设置", icon = Icons.Outlined.Psychology)
+                        SectionHeader(L.models.thinkingSettings, icon = Icons.Outlined.Psychology)
                         ConfigCard {
                             Box {
                                 val effective = AiBackend.effectiveReasoningFormat(cfg)
@@ -592,17 +593,17 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 ) {
                                     Column(Modifier.weight(1f)) {
                                         Text(
-                                            "思考参数格式",
+                                            L.models.thinkingFormat,
                                             style = MaterialTheme.typography.bodyMedium,
                                         )
                                         Text(
                                             // 已知服务商：写明「服务商预设」，让用户知道这行不用自己填
                                             when {
                                                 cfg.reasoningFormat == ReasoningFormat.AUTO ->
-                                                    "自动识别 → 当前生效：${effective.label}（${effective.wire}）"
+                                                    L.models.thinkingAutoActive(effective.label, effective.wire)
                                                 provider.id != ProviderCatalog.CUSTOM_ID &&
                                                     cfg.reasoningFormat == provider.reasoningFormat ->
-                                                    "服务商预设：${cfg.reasoningFormat.wire}"
+                                                    L.models.thinkingProviderPreset(cfg.reasoningFormat.wire)
                                                 else -> cfg.reasoningFormat.wire
                                             },
                                             style = MaterialTheme.typography.bodySmall,
@@ -668,12 +669,12 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             if (provider != null && cfg != null) {
                 item {
                     Column {
-                        SectionHeader("模型参数设置", icon = Icons.Outlined.Tune)
+                        SectionHeader(L.models.paramSettings, icon = Icons.Outlined.Tune)
                         ConfigCard {
                             // 4.1 温度
                             ParamBlock(
-                                label = "温度（Temperature）",
-                                hint = "调节采样随机性 · 关闭时不传该参数",
+                                label = L.models.temperature,
+                                hint = L.models.temperatureHint,
                                 enabled = cfg.tempEnabled,
                                 onToggle = { updateConfig { it.copy(tempEnabled = !it.tempEnabled) } },
                             )
@@ -682,14 +683,14 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                     value = cfg.tempValue,
                                     onValueChange = { v -> updateConfig { it.copy(tempValue = v) } },
                                     placeholder = "1.0",
-                                    rangeHint = "取值范围 0.0~2.0",
+                                    rangeHint = L.models.temperatureRange,
                                 )
                             }
                             DividerLine()
                             // 4.2 Top-K 采样
                             ParamBlock(
-                                label = "Top-K 采样",
-                                hint = "只从概率最高的 K 个 token 中采样 · 关闭时不传该参数",
+                                label = L.models.topK,
+                                hint = L.models.topKHint,
                                 enabled = cfg.topKEnabled,
                                 onToggle = { updateConfig { it.copy(topKEnabled = !it.topKEnabled) } },
                             )
@@ -698,14 +699,14 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                     value = cfg.topKValue,
                                     onValueChange = { v -> updateConfig { it.copy(topKValue = v) } },
                                     placeholder = "0",
-                                    rangeHint = "取值范围 0~100（整数）",
+                                    rangeHint = L.models.topKRange,
                                 )
                             }
                             DividerLine()
                             // 4.3 核采样（Top-P 采样）
                             ParamBlock(
-                                label = "核采样（Top-P采样）",
-                                hint = "从累计概率达到 P 的最小 token 集合中采样 · 关闭时不传该参数",
+                                label = L.models.topP,
+                                hint = L.models.topPHint,
                                 enabled = cfg.topPEnabled,
                                 onToggle = { updateConfig { it.copy(topPEnabled = !it.topPEnabled) } },
                             )
@@ -714,7 +715,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                     value = cfg.topPValue,
                                     onValueChange = { v -> updateConfig { it.copy(topPValue = v) } },
                                     placeholder = "1.0",
-                                    rangeHint = "取值范围 0.0~1.0",
+                                    rangeHint = L.models.topPRange,
                                 )
                             } else {
                                 // 关闭态：无输入框，补底部间距（与开启态 ParamInputField 的 bottom 10dp 对齐）
@@ -732,18 +733,18 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             if (provider != null && cfg != null) {
                 item {
                     Column {
-                        SectionHeader("上下文压缩（全局）", icon = Icons.Outlined.Compress)
+                        SectionHeader(L.models.compactionTitle, icon = Icons.Outlined.Compress)
                         ConfigCard {
-                            FieldHint("pi 侧是全局设置（~/.pi/agent/settings.json 的 compaction）· 所有服务商共用 · 改完立即生效")
+                            FieldHint(L.models.compactionHint)
                             ParamBlock(
-                                label = "自动压缩上下文",
-                                hint = "上下文接近上限时由 pi 自动摘要旧内容（关闭后仍可在用量卡手动压缩）",
+                                label = L.models.compactionAuto,
+                                hint = L.models.compactionAutoHint,
                                 enabled = cfg.compactionEnabled,
                                 onToggle = { setCompaction(enabled = !cfg.compactionEnabled) },
                             )
                             if (cfg.compactionEnabled) {
-                                ConfigFieldLabel("为回复预留 Tokens")
-                                FieldHint("已用超过「上下文长度 − 预留」时触发压缩（pi 默认 16384）")
+                                ConfigFieldLabel(L.models.reserveTokens)
+                                FieldHint(L.models.reserveTokensHint)
                                 ContextNumberField(
                                     value = cfg.reserveTokens,
                                     onValueChange = { v ->
@@ -752,8 +753,8 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                     placeholder = "16384",
                                     suffix = "Tokens",
                                 )
-                                ConfigFieldLabel("保留最近 Tokens")
-                                FieldHint("压缩时最近这一段不摘要、原样保留（pi 默认 20000）")
+                                ConfigFieldLabel(L.models.keepRecentTokens)
+                                FieldHint(L.models.keepRecentTokensHint)
                                 ContextNumberField(
                                     value = cfg.keepRecentTokens,
                                     onValueChange = { v ->
@@ -763,12 +764,12 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                     suffix = "Tokens",
                                 )
                             }
-                            ConfigFieldLabel("压缩指令")
-                            FieldHint("用量卡点「压缩上下文」时交给 pi 的指令；留空 = pi 默认的 Goal / Progress / Next Steps 口径")
+                            ConfigFieldLabel(L.models.compactInstructions)
+                            FieldHint(L.models.compactInstructionsHint)
                             PientTextArea(
                                 value = cfg.compactInstructions,
                                 onValueChange = { v -> updateConfig { it.copy(compactInstructions = v) } },
-                                placeholder = "例如：重点保留文件路径与命令；忽略寒暄",
+                                placeholder = L.models.compactInstructionsPlaceholder,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
@@ -785,14 +786,14 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     // ── 弹窗：删除二次确认 ──
     if (confirmDeleteOpen) {
         PientDialog(
-            title = "删除服务商",
+            title = L.models.deleteProvider,
             onDismiss = { confirmDeleteOpen = false },
-            confirmText = "删除",
+            confirmText = L.common.delete,
             onConfirm = { deleteCurrent() },
             showClose = false, // 底部已有取消按钮，右上角 × 重复（见 skills-plugins-page-pitfalls）
         ) {
             Text(
-                "确定删除 ${provider?.name.orEmpty()} 吗？\n该服务商的 API 密钥与相关配置将一并移除。",
+                L.models.deleteProviderConfirm(provider?.name.orEmpty()),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -823,11 +824,11 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             }
         }
         SearchPickerPopup(
-            topBarTitle = "服务商选择列表",
+            topBarTitle = L.models.providerPickerTitle,
             topBarAction = {
                 FilterIconButton(onClick = { providerFilterOpen = true })
             },
-            searchPlaceholder = "搜索服务商",
+            searchPlaceholder = L.models.providerSearch,
             entries = filteredProviderEntries,
             showCancel = true,
             onDismiss = { providerPickerOpen = false },
@@ -836,11 +837,11 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
         // 筛选选项弹窗（全部 / 已添加 / 未添加）
         if (providerFilterOpen) {
             SearchPickerPopup(
-                title = "筛选",
+                title = L.models.filterTitle,
                 entries = listOf(
-                    PickerEntry(key = "all", title = "全部", selected = providerFilter == "all"),
-                    PickerEntry(key = "added", title = "已添加", selected = providerFilter == "added"),
-                    PickerEntry(key = "unadded", title = "未添加", selected = providerFilter == "unadded"),
+                    PickerEntry(key = "all", title = L.common.all, selected = providerFilter == "all"),
+                    PickerEntry(key = "added", title = L.models.filterAdded, selected = providerFilter == "added"),
+                    PickerEntry(key = "unadded", title = L.models.filterNotAdded, selected = providerFilter == "unadded"),
                 ),
                 onDismiss = { providerFilterOpen = false },
                 onSelect = { e ->
@@ -857,7 +858,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             PickerEntry(key = it, title = it, mono = true, selected = it == cfg?.endpoint)
         }
         SearchPickerPopup(
-            title = "API端点",
+            title = L.models.apiEndpoint,
             entries = endpointEntries,
             onDismiss = { endpointPickerOpen = false },
             onSelect = { e ->
@@ -873,14 +874,14 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             PickerEntry(key = it, title = it, mono = true, selected = it in (cfg?.modelList?.split(";") ?: emptyList()))
         }
         SearchPickerPopup(
-            topBarTitle = "模型选择列表",
+            topBarTitle = L.models.modelPickerTitle,
             topBarAction = {
                 RefreshIconButton(
                     loading = refreshing,
                     onClick = {
                         // 仅在已填入 API 密钥后才发起拉取；未配置则只弹提示、不进 loading 态
                         if (cfg?.apiKey.isNullOrBlank()) {
-                            toast("未配置 API 密钥，无法获取模型列表")
+                            toast(L.models.noApiKey)
                         } else {
                             refreshing = true
                             callModels(
@@ -889,7 +890,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                     refreshing = false // 失败/前置校验未通过：必须结束 loading，否则转圈卡死
                                 },
                             ) { models ->
-                                if (models.isEmpty()) toast("未获取到模型列表")
+                                if (models.isEmpty()) toast(L.models.noModelsReturned)
                                 else updateConfig { it.copy(modelList = models.joinToString(";")) }
                                 refreshing = false
                             }
@@ -897,7 +898,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                     },
                 )
             },
-            searchPlaceholder = "搜索模型",
+            searchPlaceholder = L.models.modelSearch,
             entries = modelEntries,
             multiSelect = true,
             onDismiss = { modelPickerOpen = false },
@@ -1135,7 +1136,7 @@ private fun EndpointField(
         )
         FieldIconButton(
             icon = { Icons.Outlined.KeyboardArrowDown },
-            contentDescription = "切换API端点",
+            contentDescription = L.models.switchEndpoint,
             onClick = onOpenPicker,
         )
     }
@@ -1158,13 +1159,13 @@ private fun ApiKeyField(
         PientInputBox(
             value = value,
             onValueChange = onValueChange,
-            placeholder = "输入 API Key…",
+            placeholder = L.models.apiKeyPlaceholder,
             password = !visible,
             modifier = Modifier.weight(1f),
         )
         FieldIconButton(
             icon = { if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility },
-            contentDescription = if (visible) "隐藏密钥" else "显示密钥",
+            contentDescription = if (visible) L.models.hideKey else L.models.showKey,
             onClick = onToggleVisible,
         )
     }
@@ -1186,12 +1187,12 @@ private fun ModelListField(
         PientInputBox(
             value = value,
             onValueChange = onValueChange,
-            placeholder = "model1;model2（英文分号分隔）",
+            placeholder = L.models.modelListPlaceholder,
             modifier = Modifier.weight(1f),
         )
         FieldIconButton(
             icon = { Icons.Outlined.Apps },
-            contentDescription = "选择模型",
+            contentDescription = L.models.selectModel,
             onClick = onOpenPicker,
         )
     }
@@ -1232,7 +1233,7 @@ private fun FilterIconButton(onClick: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            Icons.Outlined.FilterList, "筛选",
+            Icons.Outlined.FilterList, L.models.filterTitle,
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(18.dp),
         )
@@ -1256,7 +1257,7 @@ private fun RefreshIconButton(loading: Boolean, onClick: () -> Unit) {
             )
         } else {
             Icon(
-                Icons.Outlined.Refresh, "刷新",
+                Icons.Outlined.Refresh, L.common.refresh,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(18.dp),
             )
@@ -1344,7 +1345,7 @@ private fun SearchPickerPopup(
     title: String? = null,
     topBarTitle: String? = null,
     topBarAction: (@Composable () -> Unit)? = null,
-    showCancel: Boolean = false,                       // 底部"取消"（单选弹窗）
+    showCancel: Boolean = false,                       // 底部L.common.cancel（单选弹窗）
     multiSelect: Boolean = false,                      // 多选模式：底部"取消 + 确定"
     onSelect: (PickerEntry) -> Unit = {},              // 单选回调
     onConfirmMulti: (Set<String>) -> Unit = {},        // 多选确定回调
@@ -1445,14 +1446,14 @@ private fun SearchPickerPopup(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         PientButton(
-                            "取消",
+                            L.common.cancel,
                             onClick = onDismiss,
                             primary = false,
                             modifier = Modifier.weight(1f),
                         )
                         if (multiSelect) {
                             PientButton(
-                                "确定",
+                                L.common.confirm,
                                 onClick = { onConfirmMulti(selMap.filterValues { it }.keys) },
                                 modifier = Modifier.weight(1f),
                             )

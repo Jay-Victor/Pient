@@ -1,5 +1,6 @@
 package com.pient.app.data
 
+import com.pient.app.data.i18n.L
 import androidx.annotation.DrawableRes
 import com.pient.app.R
 
@@ -50,9 +51,11 @@ object ProviderCatalog {
     /** 自定义服务商 id（pi-web "custom" 卡片语义） */
     const val CUSTOM_ID = "custom"
 
-    val custom = ProviderInfo(
+    // 计算属性：object 里的 val 只求值一次，写 `L.…` 会冻结成首帧语言
+    val custom: ProviderInfo
+        get() = ProviderInfo(
         id = CUSTOM_ID,
-        name = "自定义（OpenAI / Anthropic 兼容）",
+        name = L.models.providerCustom,
         logoRes = 0,
         monoLogo = true,
         defaultEndpoint = "",
@@ -166,7 +169,7 @@ object ProviderCatalog {
         // Radius：pi 官方的**动态网关**（provider 级 `oauth: "radius"` + 用户自备 baseUrl，api = pi-messages）。
         // 补它是因为 pi-ai 的 provider 表里有这一家而 Pient 目录缺（2026-09-15 要求 3）。
         // 思考写法给 AUTO：网关后面挂什么模型都可能，按模型名推断、识别不出就不发参数。
-        p("radius", "Radius（pi 网关）", R.drawable.provider_radius, mono = true,
+        p("radius", L.models.providerRadius, R.drawable.provider_radius, mono = true,
             "", reasoningFormat = ReasoningFormat.AUTO),
     )
 

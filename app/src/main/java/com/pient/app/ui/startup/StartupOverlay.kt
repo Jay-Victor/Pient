@@ -1,5 +1,6 @@
 package com.pient.app.ui.startup
 
+import com.pient.app.data.i18n.L
 import android.animation.ValueAnimator
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -534,7 +535,7 @@ fun StartupOverlay(visible: Boolean, modifier: Modifier = Modifier) {
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
             ) {}
-            .semantics { contentDescription = "启动加载中" },
+            .semantics { contentDescription = L.onboarding.startupLoading },
         contentAlignment = Alignment.Center,
     ) {
         Column(

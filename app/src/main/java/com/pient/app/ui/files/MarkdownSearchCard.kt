@@ -1,5 +1,6 @@
 package com.pient.app.ui.files
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -201,7 +202,7 @@ internal fun MarkdownSearchCard(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(
-                    Icons.Outlined.Search, "搜索",
+                    Icons.Outlined.Search, L.common.search,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(20.dp),
                 )
@@ -216,7 +217,7 @@ internal fun MarkdownSearchCard(
                 ) {
                     if (options.query.isEmpty()) {
                         Text(
-                            "搜索…",
+                            L.files.searchHint,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.padding(horizontal = 12.dp),
@@ -242,7 +243,7 @@ internal fun MarkdownSearchCard(
                         modifier = Modifier.size(32.dp),
                     ) {
                         Icon(
-                            Icons.Outlined.Close, "清空搜索",
+                            Icons.Outlined.Close, L.common.clearSearch,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(16.dp),
                         )
@@ -262,20 +263,20 @@ internal fun MarkdownSearchCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                 ) {
-                    MdFilterChip("区分大小写", options.caseSensitive) {
+                    MdFilterChip(L.files.matchCase, options.caseSensitive) {
                         onOptionsChange(options.copy(caseSensitive = !options.caseSensitive))
                     }
-                    MdFilterChip("全词匹配", options.wholeWord) {
+                    MdFilterChip(L.files.wholeWord, options.wholeWord) {
                         onOptionsChange(options.copy(wholeWord = !options.wholeWord))
                     }
-                    MdFilterChip("正则表达式", options.regex) {
+                    MdFilterChip(L.files.regex, options.regex) {
                         onOptionsChange(options.copy(regex = !options.regex))
                     }
                 }
                 if (options.query.isNotEmpty()) {
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "$matchCount 个匹配",
+                        L.files.matchCount(matchCount),
                         style = MaterialTheme.typography.labelMedium,
                         fontSize = 12.sp,
                         color = if (matchCount > 0) MaterialTheme.colorScheme.onSurfaceVariant
@@ -304,7 +305,7 @@ internal fun MarkdownSearchCard(
                     ) {
                         if (options.replacement.isEmpty()) {
                             Text(
-                                "替换为…",
+                                L.files.replaceHint,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                 style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.padding(horizontal = 12.dp),
@@ -333,7 +334,7 @@ internal fun MarkdownSearchCard(
                         modifier = Modifier.height(32.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                     ) {
-                        Text("全部", fontSize = 12.sp)
+                        Text(L.common.all, fontSize = 12.sp)
                     }
                     Spacer(Modifier.width(6.dp))
                     OutlinedButton(
@@ -342,7 +343,7 @@ internal fun MarkdownSearchCard(
                         modifier = Modifier.height(32.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                     ) {
-                        Text("替换", fontSize = 12.sp)
+                        Text(L.files.replace, fontSize = 12.sp)
                     }
                 }
             }
@@ -353,7 +354,7 @@ internal fun MarkdownSearchCard(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                 if (matchedLines.isEmpty()) {
                     Text(
-                        "未找到匹配结果",
+                        L.files.noMatches,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                         modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
@@ -477,7 +478,7 @@ private fun MdSearchResultRow(
                 ) {
                     if (checked) {
                         Icon(
-                            Icons.Outlined.Check, "已选中",
+                            Icons.Outlined.Check, L.files.checked,
                             tint = MaterialTheme.colorScheme.onPrimary,
                             modifier = Modifier.size(12.dp),
                         )

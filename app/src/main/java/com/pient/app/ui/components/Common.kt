@@ -1,5 +1,6 @@
 package com.pient.app.ui.components
 
+import com.pient.app.data.i18n.L
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -417,7 +418,7 @@ fun SettingsSwitchRow(
 fun PientDialog(
     title: String,
     onDismiss: () -> Unit,
-    confirmText: String = "确定",
+    confirmText: String = L.common.confirm,
     confirmEnabled: Boolean = true,
     onConfirm: () -> Unit,
     showClose: Boolean = true,
@@ -459,7 +460,7 @@ fun PientDialog(
                 if (showClose) {
                     IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
                         Icon(
-                            Icons.Outlined.Close, "关闭",
+                            Icons.Outlined.Close, L.common.close,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp),
                         )
@@ -472,7 +473,7 @@ fun PientDialog(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (showCancel) {
-                    PientButton("取消", onClick = onDismiss, primary = false, modifier = Modifier.weight(1f))
+                    PientButton(L.common.cancel, onClick = onDismiss, primary = false, modifier = Modifier.weight(1f))
                 }
                 if (extraActionText != null && onExtraAction != null) {
                     PientButton(extraActionText, onClick = onExtraAction, primary = false, modifier = Modifier.weight(1f))

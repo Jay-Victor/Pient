@@ -1,5 +1,6 @@
 package com.pient.app.runtime
 
+import com.pient.app.data.i18n.L
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -122,7 +123,7 @@ class PiKeepAliveService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val text = intent?.getStringExtra(EXTRA_TEXT)?.takeIf { it.isNotBlank() } ?: "运行中"
+        val text = intent?.getStringExtra(EXTRA_TEXT)?.takeIf { it.isNotBlank() } ?: L.common.running
         // 点通知回到对应页面（2026-09-16）：终端会话 → 终端页；其余 → 只是把应用调到前台
         val panel = intent?.getStringExtra(EXTRA_PANEL).orEmpty()
         val open = Intent(this, MainActivity::class.java)
@@ -171,8 +172,8 @@ class PiKeepAliveService : Service() {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (nm.getNotificationChannel(CHANNEL_ID) == null) {
                 nm.createNotificationChannel(
-                    NotificationChannel(CHANNEL_ID, "Pient 运行状态", NotificationManager.IMPORTANCE_LOW).apply {
-                        description = "AI 回合 / 终端命令执行中的前台通知（避免进程被系统清掉）"
+                    NotificationChannel(CHANNEL_ID, L.runtime.keepAliveChannelName, NotificationManager.IMPORTANCE_LOW).apply {
+                        description = L.runtime.keepAliveChannelDesc
                         setShowBadge(false)
                     },
                 )

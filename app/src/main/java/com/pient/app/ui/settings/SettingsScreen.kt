@@ -1,5 +1,6 @@
 package com.pient.app.ui.settings
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -59,14 +60,14 @@ fun SettingsScreen(nav: NavController) {
                 .padding(horizontal = 8.dp, vertical = 10.dp),
         ) {
             Icon(
-                Icons.Outlined.ArrowBack, "返回",
+                Icons.Outlined.ArrowBack, L.common.back,
                 tint = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier
                     .size(24.dp)
                     .clickable(onClick = { nav.popBackStack() }),
             )
             Text(
-                "设置",
+                L.common.settings,
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(start = 12.dp),
             )
@@ -79,69 +80,69 @@ fun SettingsScreen(nav: NavController) {
                 .padding(bottom = 16.dp),
         ) {
             // ── 分组 1：个性化（Operit 同款 Person 图标） ──
-            SettingsGroup("个性化", Icons.Outlined.Person) {
+            SettingsGroup(L.settings.personalization, Icons.Outlined.Person) {
                 SettingsRow(
                     icon = Icons.Outlined.Palette,
-                    title = "主题与外观",
-                    subtitle = "深色 · 亮色 · 跟随系统",
+                    title = L.settings.theme,
+                    subtitle = L.settings.themeSubtitle,
                     onClick = { nav.navigate("theme_settings") },
                 )
                 DividerLine()
                 SettingsRow(
                     icon = Icons.Outlined.Language,
-                    title = "语言设置",
-                    subtitle = "界面语言",
+                    title = L.settings.languageTitle,
+                    subtitle = L.settings.languageSubtitle,
                     onClick = { nav.navigate("language_settings") },
                 )
                 DividerLine()
                 SettingsRow(
                     icon = Icons.Outlined.TouchApp,
-                    title = "行为设置",
-                    subtitle = "侧边栏展出方式",
+                    title = L.settings.behavior,
+                    subtitle = L.settings.behaviorSubtitle,
                     onClick = { nav.navigate("behavior_settings") },
                 )
             }
 
             // ── 分组 2：AI模型配置（Operit 同款 Settings 齿轮图标） ──
-            SettingsGroup("AI模型配置", Icons.Outlined.Settings) {
+            SettingsGroup(L.settings.groupModels, Icons.Outlined.Settings) {
                 SettingsRow(
                     icon = Icons.Outlined.SmartToy,
-                    title = "服务商与模型配置",
-                    subtitle = "服务商 · 模型 · 密钥",
+                    title = L.settings.modelConfig,
+                    subtitle = L.settings.modelConfigSubtitle,
                     onClick = { nav.navigate("model_config") },
                 )
             }
 
             // ── 分组 3：数据与权限（三行均为真实页面） ──
-            SettingsGroup("数据与权限", Icons.Outlined.Security) {
+            SettingsGroup(L.settings.groupData, Icons.Outlined.Security) {
                 SettingsRow(
                     icon = Icons.Outlined.AdminPanelSettings,
-                    title = "系统权限设置",
-                    subtitle = "标准 · 调试 · Root",
+                    title = L.settings.systemPermissions,
+                    subtitle = L.settings.systemPermissionsSubtitle,
                     onClick = { nav.navigate("system_permissions") },
                 )
                 DividerLine()
                 SettingsRow(
                     icon = Icons.Outlined.History,
-                    title = "项目管理设置",
-                    subtitle = "项目与会话记录",
+                    title = L.settings.projectManagement,
+                    subtitle = L.settings.projectManagementSubtitle,
                     onClick = { nav.navigate("project_management") },
                 )
                 DividerLine()
                 SettingsRow(
                     icon = Icons.Outlined.BarChart,
-                    title = "模型用量信息",
-                    subtitle = "Token 与成本统计",
+                    title = L.settings.usage,
+                    subtitle = L.settings.usageSubtitle,
                     onClick = { nav.navigate("usage") },
                 )
             }
 
             // ── 分组 4：关于Pient（标题 Description 文档图标，与行内 Info 区分） ──
-            SettingsGroup("关于Pient", Icons.Outlined.Description) {
+            SettingsGroup(L.settings.groupAbout, Icons.Outlined.Description) {
                 SettingsRow(
                     icon = Icons.Outlined.Info,
-                    title = "关于",
-                    subtitle = "版本与产品信息",
+                    title = L.settings.about,
+                    subtitle = L.settings.aboutSubtitle,
                     onClick = { nav.navigate("about") },
                 )
             }

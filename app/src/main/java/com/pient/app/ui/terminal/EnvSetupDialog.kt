@@ -1,5 +1,7 @@
 package com.pient.app.ui.terminal
 
+import com.pient.app.data.i18n.OptionLabels
+import com.pient.app.data.i18n.L
 import com.pient.app.data.UbuntuComponent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,9 +53,9 @@ fun EnvSetupDialog(onDone: () -> Unit, onInstall: (List<UbuntuComponent>) -> Uni
     fun toast(text: String) = Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
 
     PientDialog(
-        title = "环境安装",
+        title = L.terminal.envInstallTitle,
         onDismiss = onDone,
-        confirmText = if (toInstall.isEmpty()) "完成" else "安装所选（${toInstall.size}）",
+        confirmText = if (toInstall.isEmpty()) L.common.done else L.terminal.envInstallConfirm(toInstall.size),
         confirmEnabled = true,
         onConfirm = {
             // 勾选集同步给「环境内软件」段（同一份状态，两处一致）
@@ -61,7 +63,7 @@ fun EnvSetupDialog(onDone: () -> Unit, onInstall: (List<UbuntuComponent>) -> Uni
             if (toInstall.isNotEmpty()) onInstall(toInstall)
             onDone()
         },
-        extraActionText = "跳过",
+        extraActionText = L.terminal.skip,
         onExtraAction = onDone,
         showCancel = false,
     ) {
@@ -73,7 +75,7 @@ fun EnvSetupDialog(onDone: () -> Unit, onInstall: (List<UbuntuComponent>) -> Uni
                 .padding(top = 6.dp),
         ) {
             Text(
-                "这些工具链装进内置的 Ubuntu 环境；安装过程会在终端页实时显示。",
+                L.terminal.envInstallNote,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 10.dp),
@@ -82,7 +84,7 @@ fun EnvSetupDialog(onDone: () -> Unit, onInstall: (List<UbuntuComponent>) -> Uni
                 val list = UBUNTU_COMPONENTS.filter { it.group == group }
                 if (list.isEmpty()) return@forEach
                 Text(
-                    group,
+                    OptionLabels.envGroup(group),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),

@@ -1,10 +1,12 @@
 package com.pient.app.data
 
+import com.pient.app.data.i18n.L
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import com.pient.app.data.i18n.Languages
 
 // ─────────────────────────────────────────────────────────────
 // 全局设置（跨页面即时生效；UI 原型阶段以内存状态承载）
@@ -29,11 +31,22 @@ enum class DrawerMode { SLIDE, PERSPECTIVE, PUSH }
 enum class BackgroundMediaType { IMAGE, VIDEO }
 
 /** 视频背景画面裁剪模式（视频裁剪对话框：画面裁剪分段） */
-enum class VideoCropMode(val label: String) {
-    ORIGINAL("原始"),
-    SQUARE("1:1"),
-    RATIO_16_9("16:9"),
-    RATIO_9_16("9:16"),
+enum class VideoCropMode {
+    ORIGINAL,
+    SQUARE,
+    RATIO_16_9,
+    RATIO_9_16;
+
+    /**
+     * 显示名。**必须是计算属性**：枚举构造参数只在类加载时求值一次，
+     * 直接写 `L.…` 会把文案冻结成首帧语言（切语言不刷新）。
+     */
+    val label: String get() = when (this) {
+        ORIGINAL -> L.theme.cropOriginal
+        SQUARE -> "1:1"
+        RATIO_16_9 -> "16:9"
+        RATIO_9_16 -> "9:16"
+    }
 }
 
 /** 字体来源（字体设置标签：分段控制器两段） */
@@ -103,7 +116,9 @@ object SettingsStore {
     var lightScheme by mutableStateOf(LightSchemes[0])
     var density by mutableStateOf(DensityLevel.DEFAULT)
     var bubbleStyle by mutableStateOf(BubbleStyle.FLAT)
-    var language by mutableStateOf("zh-CN")
+    // ── 界面语言（2026-09-16，语言设置页）：保存值 = Languages.SYSTEM("system") 或语言包 id
+    //    （"zh-CN" / "en"）；文案本体见 data/i18n/，切换即时生效（重组，无需重启）──
+    var language by mutableStateOf(Languages.SYSTEM)
     var drawerMode by mutableStateOf(DrawerMode.SLIDE)
 
     // ── 权限档位（2026-09-12）：L0 标准 / L1 调试(Shizuku) / L2 Root ──
@@ -201,6 +216,8 @@ object SettingsStore {
         drawerMode = runCatching {
             DrawerMode.valueOf(p.getString("drawer_mode", "SLIDE") ?: "SLIDE")
         }.getOrDefault(DrawerMode.SLIDE)
+        // 语言：未写过的老配置 = 跟随系统（Languages.resolveId 兜底认不出的值）
+        language = p.getString("language", Languages.SYSTEM) ?: Languages.SYSTEM
         permissionTier = runCatching {
             PermissionTier.valueOf(p.getString("permission_tier", "STANDARD") ?: "STANDARD")
         }.getOrDefault(PermissionTier.STANDARD)
@@ -287,6 +304,14 @@ object SettingsStore {
         androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
             .edit()
             .putString("drawer_mode", drawerMode.name)
+            .apply()
+    }
+
+    /** 保存界面语言（语言设置页），重启后保持 */
+    fun saveLanguage(androidCtx: android.content.Context) {
+        androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString("language", language)
             .apply()
     }
 
@@ -486,10 +511,10 @@ fun relativeTimeLabel(updatedAt: Long, now: Long = System.currentTimeMillis()): 
     val t = if (updatedAt <= 0) now else updatedAt
     val diff = (now - t).coerceAtLeast(0)
     return when {
-        diff < MINUTE_MS -> "刚刚"
-        diff < HOUR_MS -> "${diff / MINUTE_MS}分"
-        diff < DAY_MS -> "${diff / HOUR_MS}时"
-        else -> "${diff / DAY_MS}天"
+        diff < MINUTE_MS -> L.theme.justNow
+        diff < HOUR_MS -> L.theme.minutesAgo(diff / MINUTE_MS)
+        diff < DAY_MS -> L.theme.hoursAgo(diff / HOUR_MS)
+        else -> L.theme.daysAgo(diff / DAY_MS)
     }
 }
 
@@ -554,24 +579,26 @@ fun sessionBucket(ms: Long, nowMs: Long, weekStartsOn: Int = 1): SessionBucket {
     else SessionBucket("my-$ym", SessionBucketKind.MONTH_YEAR, nominal)
 }
 
-private val MONTH_NAMES = arrayOf(
-    "一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"
-)
+private val MONTH_NAMES: Array<String>
+    get() = arrayOf(
+        L.theme.monthJan, L.theme.monthFeb, L.theme.monthMar, L.theme.monthApr, L.theme.monthMay, L.theme.monthJun,
+        L.theme.monthJul, L.theme.monthAug, L.theme.monthSep, L.theme.monthOct, L.theme.monthNov, L.theme.monthDec,
+    )
 
 /** 桶的本地化分组标签（Hermes sessionBucketLabel 同款；固定相对文案 + 中文月份名） */
 fun sessionBucketLabel(bucket: SessionBucket): String = when (bucket.kind) {
-    SessionBucketKind.TODAY -> "今天早些时候"
-    SessionBucketKind.YESTERDAY -> "昨天"
-    SessionBucketKind.THIS_WEEK -> "本周"
-    SessionBucketKind.LAST_WEEK -> "上周"
-    SessionBucketKind.THIS_MONTH -> "本月"
+    SessionBucketKind.TODAY -> L.theme.earlierToday
+    SessionBucketKind.YESTERDAY -> L.theme.yesterday
+    SessionBucketKind.THIS_WEEK -> L.theme.thisWeek
+    SessionBucketKind.LAST_WEEK -> L.theme.lastWeek
+    SessionBucketKind.THIS_MONTH -> L.theme.thisMonth
     SessionBucketKind.MONTH -> {
         val c = java.util.Calendar.getInstance().apply { timeInMillis = bucket.at }
         MONTH_NAMES[c.get(java.util.Calendar.MONTH)]
     }
     SessionBucketKind.MONTH_YEAR -> {
         val c = java.util.Calendar.getInstance().apply { timeInMillis = bucket.at }
-        "${c.get(java.util.Calendar.YEAR)}年${MONTH_NAMES[c.get(java.util.Calendar.MONTH)]}"
+        L.theme.yearMonth(c.get(java.util.Calendar.YEAR), MONTH_NAMES[c.get(java.util.Calendar.MONTH)])
     }
 }
 
@@ -617,7 +644,7 @@ private fun headRunCutoffMs(times: List<Long>, nowMs: Long): Long {
  * 日历标签（跨午夜 run 的最新会话归昨天时显示「昨天」，保证语义准确）。
  */
 fun sessionBucketHeadLabel(bucket: SessionBucket): String =
-    if (bucket.kind == SessionBucketKind.TODAY) "今天" else sessionBucketLabel(bucket)
+    if (bucket.kind == SessionBucketKind.TODAY) L.theme.today else sessionBucketLabel(bucket)
 
 /**
  * 侧栏时间分组：列表按最后活动降序；头部 run 簇贴其最新会话所属日历桶的标签
@@ -800,12 +827,21 @@ data class AiModel(
 )
 
 /** thinking 五档 ↔ pi thinking 级别（minimal…xhigh；max 不暴露，设计计划 3.4.1） */
-enum class ThinkingLevel(val piValue: String, val label: String) {
-    MINIMAL("minimal", "最低"),
-    LOW("low", "低"),
-    MEDIUM("medium", "中"),
-    HIGH("high", "高"),
-    XHIGH("xhigh", "最高");
+enum class ThinkingLevel(val piValue: String) {
+    MINIMAL("minimal"),
+    LOW("low"),
+    MEDIUM("medium"),
+    HIGH("high"),
+    XHIGH("xhigh");
+
+    /** 显示名（计算属性：枚举构造参数只求值一次，写 `L.…` 会冻结成首帧语言） */
+    val label: String get() = when (this) {
+        MINIMAL -> L.theme.thinkingMinimal
+        LOW -> L.theme.thinkingLow
+        MEDIUM -> L.theme.thinkingMedium
+        HIGH -> L.theme.thinkingHigh
+        XHIGH -> L.theme.thinkingMax
+    }
 
     companion object {
         fun fromPi(v: String): ThinkingLevel =
@@ -825,25 +861,54 @@ enum class ThinkingLevel(val piValue: String, val label: String) {
  * @param label 配置页展示名
  * @param wire 线上一句话说明（配置页 hint）
  */
-enum class ReasoningFormat(val label: String, val wire: String) {
+enum class ReasoningFormat {
     /** 按模型名推断（deepseek/glm/qwen 系列）；识别不出 = NONE（不发参数） */
-    AUTO("自动识别", "按模型名判断写法；识别不出则不发送思考参数"),
+    AUTO,
     /** 完全不发送思考参数（模型无法关闭思考时用，如 Gemini 3 系列） */
-    NONE("不发送", "不发任何思考参数（模型自带推理且关不掉时用）"),
+    NONE,
     /** OpenAI 官方：reasoning_effort 档位；关闭 = reasoning_effort=none */
-    OPENAI("OpenAI", "开：reasoning_effort=档位；关：reasoning_effort=none"),
+    OPENAI,
     /** DeepSeek / Kimi / 豆包：thinking.type + 档位 */
-    DEEPSEEK("DeepSeek / Kimi", "开：thinking.enabled + reasoning_effort；关：thinking.disabled"),
+    DEEPSEEK,
     /** 智谱 GLM：thinking.type（默认就开思考，必须显式禁用） */
-    ZAI("智谱 GLM", "开：thinking.enabled；关：thinking.disabled"),
+    ZAI,
     /** 通义千问 / 百炼 / 开源 Qwen3：enable_thinking 布尔 */
-    QWEN("通义千问", "开：enable_thinking=true；关：enable_thinking=false"),
+    QWEN,
     /** 硅基流动等：enable_thinking + thinking_budget */
-    SILICONFLOW("硅基流动", "开：enable_thinking=true + thinking_budget；关：enable_thinking=false"),
+    SILICONFLOW,
     /** Anthropic Messages 协议（官方 / MiniMax 等以 /anthropic 结尾的端点） */
-    ANTHROPIC("Anthropic", "开：thinking.enabled + budget_tokens；关：thinking.disabled"),
+    ANTHROPIC,
     /** OpenRouter：reasoning 对象（开：reasoning.effort；关：reasoning.enabled=false） */
-    OPENROUTER("OpenRouter", "开：reasoning.effort=档位；关：reasoning.enabled=false"),
+    OPENROUTER;
+
+    /**
+     * 配置页展示名。**必须是计算属性**：枚举构造参数只在类加载时求值一次，
+     * 直接写 `L.…` 会把文案冻结成首帧语言（切语言不刷新）。
+     */
+    val label: String get() = when (this) {
+        AUTO -> L.theme.reasoningAuto
+        NONE -> L.theme.reasoningNone
+        OPENAI -> "OpenAI"
+        DEEPSEEK -> "DeepSeek / Kimi"
+        ZAI -> L.theme.reasoningZhipu
+        QWEN -> L.theme.reasoningQwen
+        SILICONFLOW -> L.theme.reasoningSiliconflow
+        ANTHROPIC -> "Anthropic"
+        OPENROUTER -> "OpenRouter"
+    }
+
+    /** 线上一句话说明（配置页 hint；同样是计算属性） */
+    val wire: String get() = when (this) {
+        AUTO -> L.theme.reasoningAutoDesc
+        NONE -> L.theme.reasoningNoneDesc
+        OPENAI -> L.theme.reasoningOpenaiDesc
+        DEEPSEEK -> L.theme.reasoningDeepseekDesc
+        ZAI -> L.theme.reasoningZhipuDesc
+        QWEN -> L.theme.reasoningQwenDesc
+        SILICONFLOW -> L.theme.reasoningSiliconflowDesc
+        ANTHROPIC -> L.theme.reasoningAnthropicDesc
+        OPENROUTER -> L.theme.reasoningOpenrouterDesc
+    }
 }
 
 // ─────────────────────────────────────────────────────────────

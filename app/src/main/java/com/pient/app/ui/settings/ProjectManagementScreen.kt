@@ -1,5 +1,6 @@
 package com.pient.app.ui.settings
 
+import com.pient.app.data.i18n.L
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -144,14 +145,14 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                     .padding(horizontal = 8.dp, vertical = 6.dp),
             ) {
                 Icon(
-                    Icons.Outlined.ArrowBack, "返回",
+                    Icons.Outlined.ArrowBack, L.common.back,
                     tint = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier
                         .size(24.dp)
                         .clickable(onClick = { nav.popBackStack() }),
                 )
                 Text(
-                    "项目管理设置",
+                    L.settings.projectManagement,
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(start = 12.dp).weight(1f),
                 )
@@ -164,7 +165,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                     .padding(bottom = 16.dp),
             ) {
                 // ── 项目记录 ──
-                SectionHeader("项目记录", icon = Icons.Outlined.Folder)
+                SectionHeader(L.project.sectionProjects, icon = Icons.Outlined.Folder)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -176,7 +177,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                     RecordSearchField(
                         value = projectQuery,
                         onValueChange = { projectQuery = it },
-                        placeholder = "搜索项目名称",
+                        placeholder = L.project.searchProjects,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
                     )
                     // 项目列表（2026-09-03：搜索框下方分隔线已移除；
@@ -189,7 +190,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                     ) {
                         if (projects.isEmpty()) {
                             Text(
-                                "无匹配项目",
+                                L.project.noMatchingProjects,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
@@ -235,7 +236,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                 Spacer(Modifier.heightIn(min = 8.dp))
 
                 // ── 会话记录 ──
-                SectionHeader("会话记录", icon = Icons.Outlined.Chat)
+                SectionHeader(L.project.sectionSessions, icon = Icons.Outlined.Chat)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -247,7 +248,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                     RecordSearchField(
                         value = sessionQuery,
                         onValueChange = { sessionQuery = it },
-                        placeholder = "搜索会话标题",
+                        placeholder = L.session.searchSessions,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
                     )
                     // 「已选择 0/N 条」+ 全选 / 取消（取消仅在已选择后亮蓝，2026-09-03；
@@ -259,13 +260,13 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                             .padding(horizontal = 16.dp, vertical = 6.dp),
                     ) {
                         Text(
-                            "已选择 ${selectedSessions.size}/${sessions.size} 条",
+                            L.project.selectedSessionsCount(selectedSessions.size, sessions.size),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f),
                         )
                         Text(
-                            "全选",
+                            L.common.selectAll,
                             style = MaterialTheme.typography.bodySmall,
                             color = if (sessions.isNotEmpty()) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -278,7 +279,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                         )
                         Spacer(Modifier.width(14.dp))
                         Text(
-                            "取消",
+                            L.common.cancel,
                             style = MaterialTheme.typography.bodySmall,
                             color = if (selectedSessions.isNotEmpty()) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -299,7 +300,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                     ) {
                         if (sessions.isEmpty()) {
                             Text(
-                                "无匹配会话",
+                                L.session.noMatchingSessions,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
@@ -334,7 +335,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                     // 选中后底部出现操作按键
                     AnimatedVisibility(visible = selectedSessions.isNotEmpty()) {
                         PientButton(
-                            "操作已选会话（${selectedSessions.size}）",
+                            L.project.selectedSessionsAction(selectedSessions.size),
                             onClick = {
                                 actionChoice = null
                                 actionDialogOpen = true
@@ -349,7 +350,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                 Spacer(Modifier.heightIn(min = 8.dp))
 
                 // ── 已解绑项目（2026-09-03 新增：files/Projects/ 下已移出项目列表的目录） ──
-                SectionHeader("已解绑项目", icon = Icons.Outlined.LinkOff)
+                SectionHeader(L.project.sectionUnbound, icon = Icons.Outlined.LinkOff)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -361,7 +362,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                     RecordSearchField(
                         value = unbindQuery,
                         onValueChange = { unbindQuery = it },
-                        placeholder = "搜索已解绑项目",
+                        placeholder = L.project.searchUnbound,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
                     )
                     // 「已选择 0/N 条」+ 全选 / 取消（取消仅在已选择后亮蓝）
@@ -372,13 +373,13 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                             .padding(horizontal = 16.dp, vertical = 6.dp),
                     ) {
                         Text(
-                            "已选择 ${selectedUnbound.size}/${unboundDirs.size} 条",
+                            L.project.selectedUnboundCount(selectedUnbound.size, unboundDirs.size),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f),
                         )
                         Text(
-                            "全选",
+                            L.common.selectAll,
                             style = MaterialTheme.typography.bodySmall,
                             color = if (unboundDirs.isNotEmpty()) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -391,7 +392,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                         )
                         Spacer(Modifier.width(14.dp))
                         Text(
-                            "取消",
+                            L.common.cancel,
                             style = MaterialTheme.typography.bodySmall,
                             color = if (selectedUnbound.isNotEmpty()) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -411,7 +412,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                     ) {
                         if (unboundDirs.isEmpty()) {
                             Text(
-                                "无已解绑项目",
+                                L.project.noUnbound,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
@@ -433,9 +434,9 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                                     onRebind = {
                                         unboundMenuFor = null
                                         if (chatState.addProject(d.name, d.absolutePath)) {
-                                            Toast.makeText(context, "已重新绑定项目「${d.name}」", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, L.project.reboundToast(d.name), Toast.LENGTH_SHORT).show()
                                         } else {
-                                            Toast.makeText(context, "已存在同名项目", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, L.project.projectExists, Toast.LENGTH_SHORT).show()
                                         }
                                         selectedUnbound.remove(d.absolutePath)
                                         unbindTick++
@@ -456,7 +457,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                     // 选中后底部出现操作按键（2026-09-03 追加）
                     AnimatedVisibility(visible = selectedUnbound.isNotEmpty()) {
                         PientButton(
-                            "操作已选项目（${selectedUnbound.size}）",
+                            L.project.selectedProjectsAction(selectedUnbound.size),
                             onClick = {
                                 unboundActionChoice = null
                                 unboundActionDialogOpen = true
@@ -473,9 +474,9 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
         // ── 操作弹窗：导出 / 删除 选择项 + 取消 / 确定 ──
         if (actionDialogOpen) {
             PientDialog(
-                title = "操作已选会话",
+                title = L.project.selectedSessionsTitle,
                 onDismiss = { actionDialogOpen = false },
-                confirmText = "确定",
+                confirmText = L.common.confirm,
                 confirmEnabled = actionChoice != null,
                 showClose = false,
                 onConfirm = {
@@ -489,7 +490,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                             val count = picks.size
                             Thread {
                                 val md = com.pient.app.data.SessionExport.markdown(
-                                    chatState, picks, "Pient 会话导出",
+                                    chatState, picks, L.project.exportDocTitle,
                                 )
                                 val where = com.pient.app.data.SessionExport.writeToDownloads(
                                     appCtx, com.pient.app.data.SessionExport.fileName(count), md,
@@ -498,9 +499,9 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                                     Toast.makeText(
                                         appCtx,
                                         if (where != null) {
-                                            "已导出 $count 个会话 → $where"
+                                            L.project.exportDone(count, where)
                                         } else {
-                                            "导出失败：下拉目录不可写"
+                                            L.project.exportFailed
                                         },
                                         Toast.LENGTH_LONG,
                                     ).show()
@@ -512,7 +513,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                             selectedSessions.toList().forEach { chatState.deleteSessionById(it) }
                             Toast.makeText(
                                 context,
-                                "已删除 ${selectedSessions.size} 个会话",
+                                L.project.deletedSessionsToast(selectedSessions.size),
                                 Toast.LENGTH_SHORT,
                             ).show()
                             selectedSessions.clear()
@@ -527,13 +528,13 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                 ) {
                     ActionChoiceRow(
                         icon = Icons.Outlined.FileDownload,
-                        label = "导出会话",
+                        label = L.project.exportSessions,
                         selected = actionChoice == 0,
                         onClick = { actionChoice = 0 },
                     )
                     ActionChoiceRow(
                         icon = Icons.Outlined.Delete,
-                        label = "删除会话",
+                        label = L.session.deleteSession,
                         selected = actionChoice == 1,
                         danger = true,
                         onClick = { actionChoice = 1 },
@@ -552,7 +553,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
             LaunchedEffect(project.path, project.uri) { info = computeProjectInfo(context, project) }
             Box(Modifier.fillMaxSize()) {
                 PientDialog(
-                    title = "详细信息",
+                    title = L.common.details,
                     onDismiss = { projectDetailFor = null },
                     onConfirm = { projectDetailFor = null },
                     showClose = false,
@@ -562,9 +563,9 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                         modifier = Modifier.padding(top = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        DetailRow("位置", project.path)
-                        DetailRow("大小", info?.size ?: "统计中…")
-                        DetailRow("修改时间", info?.modified ?: "统计中…")
+                        DetailRow(L.common.location, project.path)
+                        DetailRow(L.common.size, info?.size ?: L.common.counting)
+                        DetailRow(L.common.modifiedAt, info?.modified ?: L.common.counting)
                     }
                 }
             }
@@ -575,9 +576,9 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
             var newName by remember(name) { mutableStateOf(name) }
             Box(Modifier.fillMaxSize()) {
                 PientDialog(
-                    title = "重命名项目",
+                    title = L.project.renameProject,
                     onDismiss = { projectRenameFor = null },
-                    confirmText = "保存",
+                    confirmText = L.common.save,
                     showClose = false,
                     confirmEnabled = newName.isNotBlank() &&
                         (newName.trim() == name || chatState.projects.none { it.name == newName.trim() }),
@@ -610,9 +611,9 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
         projectUnbindConfirmFor?.let { name ->
             Box(Modifier.fillMaxSize()) {
                 PientDialog(
-                    title = "解绑项目",
+                    title = L.project.unbindProject,
                     onDismiss = { projectUnbindConfirmFor = null },
-                    confirmText = "解绑",
+                    confirmText = L.common.unbind,
                     showClose = false,
                     onConfirm = {
                         chatState.removeProject(name)
@@ -621,7 +622,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                     },
                 ) {
                     Text(
-                        "确定要解绑项目「$name」吗？其下 ${chatState.sessionsFor(name).size} 个会话记录将一并删除，项目文件夹及其中文件不受影响。",
+                        L.project.unbindConfirm(name, chatState.sessionsFor(name).size),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
@@ -635,9 +636,9 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
             val project = chatState.projects.firstOrNull { it.name == name }
             Box(Modifier.fillMaxSize()) {
                 PientDialog(
-                    title = "删除项目",
+                    title = L.project.deleteProject,
                     onDismiss = { projectDeleteConfirmFor = null },
-                    confirmText = "删除",
+                    confirmText = L.common.delete,
                     showClose = false,
                     onConfirm = {
                         val folderRemoved = project == null || ProjectFiles.deleteProjectRoot(context, project)
@@ -646,13 +647,13 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                             projectDeleteConfirmFor = null
                             if (selectedProject == name) selectedProject = null
                         } else {
-                            Toast.makeText(context, "项目文件夹删除失败", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, L.project.folderDeleteFailed, Toast.LENGTH_SHORT).show()
                             projectDeleteConfirmFor = null
                         }
                     },
                 ) {
                     Text(
-                        "确定要删除项目「$name」吗？项目文件夹及其中所有文件、其下 ${chatState.sessionsFor(name).size} 个会话记录将一并删除。此操作不可撤销。",
+                        L.project.deleteConfirm(name, chatState.sessionsFor(name).size),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
@@ -667,9 +668,9 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
             var newName by remember(id) { mutableStateOf(session.title) }
             Box(Modifier.fillMaxSize()) {
                 PientDialog(
-                    title = "重命名会话",
+                    title = L.session.renameSession,
                     onDismiss = { sessionRenameFor = null },
-                    confirmText = "保存",
+                    confirmText = L.common.save,
                     showClose = false,
                     confirmEnabled = newName.isNotBlank(),
                     onConfirm = {
@@ -699,9 +700,9 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
             val session = allSessions.firstOrNull { it.id == id } ?: return@let
             Box(Modifier.fillMaxSize()) {
                 PientDialog(
-                    title = "删除会话",
+                    title = L.session.deleteSession,
                     onDismiss = { sessionDeleteConfirmFor = null },
-                    confirmText = "删除",
+                    confirmText = L.common.delete,
                     showClose = false,
                     onConfirm = {
                         chatState.deleteSessionById(id)
@@ -710,7 +711,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                     },
                 ) {
                     Text(
-                        "确定要删除会话「${session.title}」吗？此操作不可撤销。",
+                        L.session.deleteConfirm(session.title),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
@@ -722,9 +723,9 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
         // ── 已解绑项目批量操作弹窗（2026-09-03 追加）：重新绑定 / 删除 选择项 + 取消 / 确定 ──
         if (unboundActionDialogOpen) {
             PientDialog(
-                title = "操作已选项目",
+                title = L.project.selectedProjectsTitle,
                 onDismiss = { unboundActionDialogOpen = false },
-                confirmText = "确定",
+                confirmText = L.common.confirm,
                 confirmEnabled = unboundActionChoice != null,
                 showClose = false,
                 onConfirm = {
@@ -740,7 +741,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                             }
                             Toast.makeText(
                                 context,
-                                "已重新绑定 $ok/${targets.size} 个项目",
+                                L.project.reboundCountToast(ok, targets.size),
                                 Toast.LENGTH_SHORT,
                             ).show()
                         }
@@ -753,7 +754,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                             }
                             Toast.makeText(
                                 context,
-                                "已删除 $ok/${targets.size} 个项目",
+                                L.project.deletedCountToast(ok, targets.size),
                                 Toast.LENGTH_SHORT,
                             ).show()
                         }
@@ -769,13 +770,13 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                 ) {
                     ActionChoiceRow(
                         icon = Icons.Outlined.Link,
-                        label = "重新绑定",
+                        label = L.project.rebind,
                         selected = unboundActionChoice == 0,
                         onClick = { unboundActionChoice = 0 },
                     )
                     ActionChoiceRow(
                         icon = Icons.Outlined.Delete,
-                        label = "删除",
+                        label = L.common.delete,
                         selected = unboundActionChoice == 1,
                         danger = true,
                         onClick = { unboundActionChoice = 1 },
@@ -794,9 +795,9 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                 )
             Box(Modifier.fillMaxSize()) {
                 PientDialog(
-                    title = "重命名项目",
+                    title = L.project.renameProject,
                     onDismiss = { unboundRenameFor = null },
-                    confirmText = "保存",
+                    confirmText = L.common.save,
                     showClose = false,
                     confirmEnabled = newName.isNotBlank() && !newName.contains('/') && !nameTaken,
                     onConfirm = {
@@ -806,7 +807,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                             unboundRenameFor = null
                             unbindTick++
                         } else {
-                            Toast.makeText(context, "重命名失败", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, L.common.renameFailed, Toast.LENGTH_SHORT).show()
                             unboundRenameFor = null
                         }
                     },
@@ -833,9 +834,9 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
             val dir = File(path)
             Box(Modifier.fillMaxSize()) {
                 PientDialog(
-                    title = "删除项目",
+                    title = L.project.deleteProject,
                     onDismiss = { unboundDeleteConfirmFor = null },
-                    confirmText = "删除",
+                    confirmText = L.common.delete,
                     showClose = false,
                     onConfirm = {
                         if (!dir.exists() || dir.deleteRecursively()) {
@@ -843,13 +844,13 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                             unboundDeleteConfirmFor = null
                             unbindTick++
                         } else {
-                            Toast.makeText(context, "删除失败", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, L.common.deleteFailed, Toast.LENGTH_SHORT).show()
                             unboundDeleteConfirmFor = null
                         }
                     },
                 ) {
                     Text(
-                        "确定要删除项目「${dir.name}」吗？其文件夹及其中所有文件将被彻底删除。此操作不可撤销。",
+                        L.project.deleteDirConfirm(dir.name),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
@@ -870,7 +871,7 @@ private fun ProjectRowMenu(
     onDelete: () -> Unit,
 ) {
     DropdownMenuItem(
-        text = { Text("详细信息") },
+        text = { Text(L.common.details) },
         leadingIcon = {
             Icon(
                 Icons.Outlined.Info, null,
@@ -881,7 +882,7 @@ private fun ProjectRowMenu(
         onClick = onDetail,
     )
     DropdownMenuItem(
-        text = { Text("重命名") },
+        text = { Text(L.common.rename) },
         leadingIcon = {
             Icon(
                 Icons.Outlined.Edit, null,
@@ -892,7 +893,7 @@ private fun ProjectRowMenu(
         onClick = onRename,
     )
     DropdownMenuItem(
-        text = { Text("解绑") },
+        text = { Text(L.common.unbind) },
         leadingIcon = {
             Icon(
                 Icons.Outlined.LinkOff, null,
@@ -904,7 +905,7 @@ private fun ProjectRowMenu(
         onClick = onUnbind,
     )
     DropdownMenuItem(
-        text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+        text = { Text(L.common.delete, color = MaterialTheme.colorScheme.error) },
         leadingIcon = {
             Icon(
                 Icons.Outlined.Delete, null,
@@ -924,7 +925,7 @@ private fun SessionRowMenu(
     onDelete: () -> Unit,
 ) {
     DropdownMenuItem(
-        text = { Text("重命名") },
+        text = { Text(L.common.rename) },
         leadingIcon = {
             Icon(
                 Icons.Outlined.Edit, null,
@@ -935,7 +936,7 @@ private fun SessionRowMenu(
         onClick = onRename,
     )
     DropdownMenuItem(
-        text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+        text = { Text(L.common.delete, color = MaterialTheme.colorScheme.error) },
         leadingIcon = {
             Icon(
                 Icons.Outlined.Delete, null,
@@ -990,7 +991,7 @@ private fun RecordSearchField(
         )
         if (value.isNotEmpty()) {
             Icon(
-                Icons.Outlined.Close, "清空",
+                Icons.Outlined.Close, L.project.clearSearchField,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .size(16.dp)
@@ -1048,7 +1049,7 @@ private fun ProjectRecordRow(
                 .padding(start = 6.dp),
         ) {
             Icon(
-                Icons.Outlined.MoreVert, "项目操作",
+                Icons.Outlined.MoreVert, L.project.projectActions,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(16.dp),
             )
@@ -1134,7 +1135,7 @@ private fun SessionRecordRow(
                 .padding(start = 6.dp),
         ) {
             Icon(
-                Icons.Outlined.MoreVert, "会话操作",
+                Icons.Outlined.MoreVert, L.project.sessionActions,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(16.dp),
             )
@@ -1209,7 +1210,7 @@ private fun UnboundProjectRow(
                 .padding(start = 6.dp),
         ) {
             Icon(
-                Icons.Outlined.MoreVert, "项目操作",
+                Icons.Outlined.MoreVert, L.project.projectActions,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(16.dp),
             )
@@ -1218,7 +1219,7 @@ private fun UnboundProjectRow(
                 onDismissRequest = onMenuDismiss,
             ) {
                 DropdownMenuItem(
-                    text = { Text("重新绑定") },
+                    text = { Text(L.project.rebind) },
                     leadingIcon = {
                         Icon(
                             Icons.Outlined.Link, null,
@@ -1229,7 +1230,7 @@ private fun UnboundProjectRow(
                     onClick = onRebind,
                 )
                 DropdownMenuItem(
-                    text = { Text("重命名") },
+                    text = { Text(L.common.rename) },
                     leadingIcon = {
                         Icon(
                             Icons.Outlined.Edit, null,
@@ -1240,7 +1241,7 @@ private fun UnboundProjectRow(
                     onClick = onRename,
                 )
                 DropdownMenuItem(
-                    text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+                    text = { Text(L.common.delete, color = MaterialTheme.colorScheme.error) },
                     leadingIcon = {
                         Icon(
                             Icons.Outlined.Delete, null,

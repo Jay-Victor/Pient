@@ -1,5 +1,6 @@
 package com.pient.app.ui.files
 
+import com.pient.app.data.i18n.L
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -100,10 +101,17 @@ import java.util.Date
 import java.util.Locale
 
 /** 文件树排序模式 */
-private enum class FileSort(val label: String) {
-    NAME("按名称"),
-    SIZE("按大小"),
-    TIME("按修改时间"),
+private enum class FileSort {
+    NAME,
+    SIZE,
+    TIME;
+
+    /** 显示名（计算属性：枚举构造参数只求值一次，写 `L.…` 会冻结成首帧语言） */
+    val label: String get() = when (this) {
+        NAME -> L.files.sortByName
+        SIZE -> L.files.sortBySize
+        TIME -> L.files.sortByTime
+    }
 }
 
 /**
@@ -153,7 +161,7 @@ fun FileTreePanel(
         // 拷贝可能很大：IO 线程执行，避免卡住界面
         scope.launch {
             val ok = withContext(Dispatchers.IO) { ProjectFiles.importFiles(context, project, uris) }
-            Toast.makeText(context, "已导入 $ok/${uris.size} 个文件", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, L.files.importedCount(ok, uris.size), Toast.LENGTH_SHORT).show()
             if (ok > 0) chatState.refreshFileTree(context)
         }
     }
@@ -167,7 +175,7 @@ fun FileTreePanel(
             val ok = withContext(Dispatchers.IO) { ProjectFiles.importFolder(context, project, uri) }
             Toast.makeText(
                 context,
-                if (ok) "已导入文件夹" else "导入失败",
+                if (ok) L.files.importFolderDone else L.files.importFailed,
                 Toast.LENGTH_SHORT,
             ).show()
             if (ok) chatState.refreshFileTreeAsync(context)
@@ -196,7 +204,7 @@ fun FileTreePanel(
             }
             Toast.makeText(
                 context,
-                if (ok) "已导出到所选目录" else "导出失败",
+                if (ok) L.files.exportDone else L.files.exportFailed,
                 Toast.LENGTH_SHORT,
             ).show()
             if (ok) {
@@ -240,7 +248,7 @@ fun FileTreePanel(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         ) {
             Text(
-                root?.name ?: (chatState.currentProject ?: "未绑定项目"),
+                root?.name ?: (chatState.currentProject ?: L.files.noProject),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
@@ -258,7 +266,7 @@ fun FileTreePanel(
                     .padding(5.dp),
             ) {
                 Icon(
-                    Icons.Outlined.Search, "搜索",
+                    Icons.Outlined.Search, L.common.search,
                     tint = if (searchOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp),
                 )
@@ -271,7 +279,7 @@ fun FileTreePanel(
                     .padding(5.dp),
             ) {
                 Icon(
-                    Icons.Outlined.Sort, "排序",
+                    Icons.Outlined.Sort, L.files.sort,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp),
                 )
@@ -314,7 +322,7 @@ fun FileTreePanel(
                     .padding(5.dp),
             ) {
                 Icon(
-                    Icons.Outlined.FileDownload, "导入",
+                    Icons.Outlined.FileDownload, L.common.importText,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp),
                 )
@@ -323,14 +331,14 @@ fun FileTreePanel(
                     onDismissRequest = { importMenuOpen = false },
                 ) {
                     DropdownMenuItem(
-                        text = { Text("导入文件") },
+                        text = { Text(L.files.importFile) },
                         onClick = {
                             importMenuOpen = false
                             importFilesLauncher.launch(arrayOf("*/*"))
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("导入文件夹") },
+                        text = { Text(L.files.importFolder) },
                         onClick = {
                             importMenuOpen = false
                             importFolderLauncher.launch(null)
@@ -346,7 +354,7 @@ fun FileTreePanel(
                     .padding(5.dp),
             ) {
                 Icon(
-                    Icons.Outlined.FileUpload, "导出",
+                    Icons.Outlined.FileUpload, L.common.export,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp),
                 )
@@ -355,7 +363,7 @@ fun FileTreePanel(
                     onDismissRequest = { exportMenuOpen = false },
                 ) {
                     DropdownMenuItem(
-                        text = { Text("批量导出") },
+                        text = { Text(L.files.exportSelected) },
                         onClick = {
                             exportMenuOpen = false
                             // 进入批量选择模式：树行尾出现勾选，底部操作条确认导出
@@ -364,7 +372,7 @@ fun FileTreePanel(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("导出项目") },
+                        text = { Text(L.files.exportProject) },
                         onClick = {
                             exportMenuOpen = false
                             exportSelectMode = false
@@ -382,7 +390,7 @@ fun FileTreePanel(
                     .padding(5.dp),
             ) {
                 Icon(
-                    Icons.Outlined.Add, "新建",
+                    Icons.Outlined.Add, L.common.new,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp),
                 )
@@ -395,7 +403,7 @@ fun FileTreePanel(
                     .padding(5.dp),
             ) {
                 Icon(
-                    Icons.Outlined.Refresh, "刷新",
+                    Icons.Outlined.Refresh, L.common.refresh,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp),
                 )
@@ -408,7 +416,7 @@ fun FileTreePanel(
                     .padding(5.dp),
             ) {
                 Icon(
-                    Icons.Outlined.UnfoldLess, "折叠全部",
+                    Icons.Outlined.UnfoldLess, L.files.collapseAll,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp),
                 )
@@ -453,7 +461,7 @@ fun FileTreePanel(
                             .padding(4.dp),
                     ) {
                         Icon(
-                            Icons.Outlined.Close, "清空搜索",
+                            Icons.Outlined.Close, L.common.clearSearch,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(14.dp),
                         )
@@ -477,7 +485,7 @@ fun FileTreePanel(
                 if (matchedFiles.isEmpty()) {
                     item(key = "search-empty") {
                         Text(
-                            "未找到匹配文件",
+                            L.files.noSearchResults,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier
@@ -499,7 +507,7 @@ fun FileTreePanel(
                 // 首次扫描在后台进行时不显示「绑定项目后显示文件树」（避免误报无项目）
                 item(key = "no-root") {
                     Text(
-                        if (chatState.fileTreeLoading) "正在读取文件树…" else "绑定项目后显示文件树",
+                        if (chatState.fileTreeLoading) L.files.treeLoading else L.files.treeNoProject,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier
@@ -526,7 +534,7 @@ fun FileTreePanel(
                 if (chatState.fileTreeTruncated) {
                     item(key = "truncated-hint") {
                         Text(
-                            "文件过多，仅显示部分内容",
+                            L.files.treeTruncated,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier
@@ -548,7 +556,7 @@ fun FileTreePanel(
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             ) {
                 Text(
-                    "已选 ${exportSelectedSources.size} 项",
+                    L.files.selectedCount(exportSelectedSources.size),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
@@ -564,7 +572,7 @@ fun FileTreePanel(
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                 ) {
                     Text(
-                        "取消",
+                        L.common.cancel,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
@@ -584,7 +592,7 @@ fun FileTreePanel(
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                 ) {
                     Text(
-                        "导出",
+                        L.common.export,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
@@ -630,8 +638,8 @@ fun FileTreePanel(
                             ProjectFiles.createEntry(context, project, name.trim(), type == 0)
                         Toast.makeText(
                             context,
-                            if (ok) "已创建${if (type == 0) "文件" else "文件夹"} $name"
-                            else "创建失败（名称无效或目录不可写）",
+                            if (ok) L.files.created(if (type == 0) L.common.file else L.files.folder, name)
+                            else L.files.createFailed,
                             Toast.LENGTH_SHORT,
                         ).show()
                         if (ok) chatState.refreshFileTreeAsync(context)
@@ -649,7 +657,7 @@ fun FileTreePanel(
                 onDismissRequest = { menuFor = null },
             ) {
                 DropdownMenuItem(
-                    text = { Text("详细信息") },
+                    text = { Text(L.common.details) },
                     leadingIcon = {
                         Icon(
                             Icons.Outlined.Info, null,
@@ -663,7 +671,7 @@ fun FileTreePanel(
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text("重命名") },
+                    text = { Text(L.common.rename) },
                     leadingIcon = {
                         Icon(
                             Icons.Outlined.Edit, null,
@@ -677,7 +685,7 @@ fun FileTreePanel(
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+                    text = { Text(L.common.delete, color = MaterialTheme.colorScheme.error) },
                     leadingIcon = {
                         Icon(
                             Icons.Outlined.Delete, null,
@@ -691,10 +699,10 @@ fun FileTreePanel(
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text("@ 提及插入输入框") },
+                    text = { Text(L.files.mentionInsert) },
                     onClick = {
                         chatState.mentionInsertRequest = node.name
-                        Toast.makeText(context, "@${node.name} 已插入输入框", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, L.files.mentionInserted(node.name), Toast.LENGTH_SHORT).show()
                         menuFor = null
                     },
                 )
@@ -712,7 +720,7 @@ fun FileTreePanel(
         }
         Box(Modifier.fillMaxSize()) {
             PientDialog(
-                title = "详细信息",
+                title = L.common.details,
                 onDismiss = { detailTarget = null },
                 onConfirm = { detailTarget = null },
                 showClose = false,   // 2026-09-02 用户：右上角 × 多余（与聊天页侧边栏同款）
@@ -722,12 +730,12 @@ fun FileTreePanel(
                     modifier = Modifier.padding(top = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    DetailRow("位置", ProjectFiles.displayLocation(node))
-                    DetailRow("大小", stat?.let { formatSize(it.first) } ?: "读取中…")
+                    DetailRow(L.common.location, ProjectFiles.displayLocation(node))
+                    DetailRow(L.common.size, stat?.let { formatSize(it.first) } ?: L.common.reading)
                     DetailRow(
-                        "修改时间",
+                        L.common.modifiedAt,
                         when {
-                            stat == null -> "读取中…"
+                            stat == null -> L.common.reading
                             stat!!.second > 0 -> SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
                                 .format(Date(stat!!.second))
                             else -> "—"
@@ -743,9 +751,9 @@ fun FileTreePanel(
         var newName by remember(node.name) { mutableStateOf(node.name) }
         Box(Modifier.fillMaxSize()) {
             PientDialog(
-                title = "重命名",
+                title = L.common.rename,
                 onDismiss = { renameTarget = null },
-                confirmText = "保存",
+                confirmText = L.common.save,
                 showClose = false,
                 confirmEnabled = newName.isNotBlank() && newName != node.name &&
                     !newName.contains('/') && !newName.contains('\\'),
@@ -753,7 +761,7 @@ fun FileTreePanel(
                     val ok = ProjectFiles.renameEntry(context, node, newName.trim())
                     Toast.makeText(
                         context,
-                        if (ok) "已重命名" else "重命名失败",
+                        if (ok) L.files.renamed else L.common.renameFailed,
                         Toast.LENGTH_SHORT,
                     ).show()
                     renameTarget = null
@@ -781,9 +789,9 @@ fun FileTreePanel(
     deleteTarget?.let { node ->
         Box(Modifier.fillMaxSize()) {
             PientDialog(
-                title = "删除",
+                title = L.common.delete,
                 onDismiss = { deleteTarget = null },
-                confirmText = "删除",
+                confirmText = L.common.delete,
                 showClose = false,
                 onConfirm = {
                     deleteTarget = null
@@ -792,7 +800,7 @@ fun FileTreePanel(
                         val ok = withContext(Dispatchers.IO) { ProjectFiles.deleteEntry(context, node) }
                         Toast.makeText(
                             context,
-                            if (ok) "已删除 ${node.name}" else "删除失败",
+                            if (ok) L.files.deleted(node.name) else L.common.deleteFailed,
                             Toast.LENGTH_SHORT,
                         ).show()
                         if (ok) {
@@ -805,7 +813,7 @@ fun FileTreePanel(
                 },
             ) {
                 Text(
-                    "确定要删除「${node.name}」吗？${if (node.isDir) "其下所有内容将一并删除。" else ""}此操作不可撤销。",
+                    L.files.deleteConfirm(node.name, if (node.isDir) L.files.deleteDirWarn else ""),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 12.dp),
@@ -868,9 +876,10 @@ private fun SearchResultRow(
 }
 
 /** 文件类型选项（新建文件弹窗；null = 不指定，需手输完整文件名） */
-private val fileTypes = listOf(
-    null to "不指定（手动输入后缀）",
-    ".txt" to "文本文件 .txt",
+private val fileTypes: List<Pair<String?, String>>
+    get() = listOf(
+    null to L.files.typeUnspecified,
+    ".txt" to L.files.typeText,
     ".md" to "Markdown .md",
     ".json" to "JSON .json",
     ".xml" to "XML .xml",
@@ -878,12 +887,12 @@ private val fileTypes = listOf(
     ".java" to "Java .java",
     ".py" to "Python .py",
     ".html" to "HTML .html",
-    ".png" to "图片 .png",
-    ".jpg" to "图片 .jpg",
-    ".mp4" to "视频 .mp4",
-    ".mp3" to "音频 .mp3",
-    ".zip" to "压缩包 .zip",
-    ".apk" to "安装包 .apk",
+    ".png" to L.files.typePng,
+    ".jpg" to L.files.typeJpg,
+    ".mp4" to L.files.typeMp4,
+    ".mp3" to L.files.typeMp3,
+    ".zip" to L.files.typeZip,
+    ".apk" to L.files.typeApk,
 )
 
 /** 新建弹窗：分段（文件/文件夹）+ 文件类型选择器（仅文件）+ 名称输入 + 取消/创建 */
@@ -923,11 +932,11 @@ private fun CreateEntryDialog(
         ) {
             Column(Modifier.padding(20.dp)) {
                 Text(
-                    "新建",
+                    L.common.new,
                     style = MaterialTheme.typography.titleMedium,
                 )
                 PientSegmented(
-                    labels = listOf("文件", "文件夹"),
+                    labels = listOf(L.common.file, L.files.folder),
                     selected = type,
                     onSelect = { type = it },
                     modifier = Modifier.padding(top = 12.dp),
@@ -937,7 +946,7 @@ private fun CreateEntryDialog(
                 // 列表自绘内嵌（嵌套 Popup 中 DropdownMenu 定位会飘到屏幕顶部，实测）
                 if (type == 0) {
                     val typeLabel = fileTypes.firstOrNull { it.first == fileTypeExt }?.second
-                        ?: "不指定（手动输入后缀）"
+                        ?: L.files.typeUnspecified
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -954,7 +963,7 @@ private fun CreateEntryDialog(
                                 .padding(12.dp),
                         ) {
                             Text(
-                                "文件类型",
+                                L.files.fileType,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -1026,9 +1035,9 @@ private fun CreateEntryDialog(
                     decorationBox = { inner ->
                         if (name.isEmpty()) {
                             Text(
-                                if (type == 0 && fileTypeExt != null) "输入文件名（自动补 ${fileTypeExt}）"
-                                else if (type == 0) "输入文件名（含后缀）"
-                                else "输入文件夹名称",
+                                if (type == 0 && fileTypeExt != null) L.files.nameHintAutoExt(fileTypeExt)
+                                else if (type == 0) L.files.nameHint
+                                else L.files.folderNameHint,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                             )
@@ -1043,9 +1052,9 @@ private fun CreateEntryDialog(
                         .padding(12.dp),
                 )
                 Row(Modifier.fillMaxWidth().padding(top = 16.dp)) {
-                    PientButton("取消", onClick = onDismiss, primary = false, modifier = Modifier.weight(1f))
+                    PientButton(L.common.cancel, onClick = onDismiss, primary = false, modifier = Modifier.weight(1f))
                     PientButton(
-                        "创建",
+                        L.common.create,
                         onClick = {
                             // 已选类型且名称未带此后缀时自动补全（大小写不敏感）
                             val ext = fileTypeExt

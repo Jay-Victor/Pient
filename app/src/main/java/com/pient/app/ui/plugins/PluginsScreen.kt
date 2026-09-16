@@ -1,5 +1,6 @@
 package com.pient.app.ui.plugins
 
+import com.pient.app.data.i18n.L
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -85,27 +86,27 @@ fun PluginsScreen(nav: NavController) {
                     .padding(horizontal = 8.dp, vertical = 10.dp),
             ) {
                 Icon(
-                    Icons.Outlined.ArrowBack, "返回",
+                    Icons.Outlined.ArrowBack, L.common.back,
                     tint = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier
                         .size(24.dp)
                         .clickable(onClick = { nav.popBackStack() }),
                 )
                 Text(
-                    "插件管理",
+                    L.plugins.title,
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(start = 12.dp),
                 )
             }
 
             PientSegmented(
-                labels = listOf("全局", "项目"),
+                labels = listOf(L.common.global, L.common.project),
                 selected = segment,
                 onSelect = { segment = it },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             )
             Text(
-                if (segment == 0) "~/.pi/agent/settings.json" else "当前项目 .pi/settings.json（pi install -l）",
+                if (segment == 0) "~/.pi/agent/settings.json" else L.plugins.projectSettingsFile,
                 style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFont),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
@@ -126,10 +127,10 @@ fun PluginsScreen(nav: NavController) {
                     item {
                         Text(
                             when {
-                                loadError != null -> "读取失败：$loadError"
-                                !loadedOnce -> "正在读取 pi 的包列表…"
-                                segment == 0 -> "还没有配置任何插件。点右下 + 安装（npm: 包 / git: / 本地路径）。"
-                                else -> "当前项目没有插件（pi install -l 装到项目里）。"
+                                loadError != null -> L.plugins.loadFailed(loadError)
+                                !loadedOnce -> L.plugins.loadingPackages
+                                segment == 0 -> L.plugins.emptyGlobal
+                                else -> L.plugins.emptyProject
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -140,7 +141,7 @@ fun PluginsScreen(nav: NavController) {
                 if (PiPackages.running) {
                     item {
                         Text(
-                            "⏳ ${PiPackages.step}（终端页「${PiPackages.SESSION}」会话可看全过程）",
+                            L.plugins.installProgress(PiPackages.step, PiPackages.SESSION),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(top = 8.dp),
@@ -160,7 +161,7 @@ fun PluginsScreen(nav: NavController) {
                 .clickable(onClick = { installOpen = true }),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Outlined.Add, "安装插件", tint = MaterialTheme.colorScheme.onPrimary)
+            Icon(Icons.Outlined.Add, L.plugins.installPlugin, tint = MaterialTheme.colorScheme.onPrimary)
         }
     }
 
@@ -172,7 +173,7 @@ fun PluginsScreen(nav: NavController) {
                 // 真安装：pi install <source>（项目分段加 -l），跑完重拉 pi list
                 val name = parsePluginName(source)
                 PiPackages.install(context, source, local = segment == 1, onDone = { reload() })
-                toast(context, "已开始安装 $name —— 终端页「${PiPackages.SESSION}」可看进度")
+                toast(context, L.plugins.installStarted(name, PiPackages.SESSION))
                 installOpen = false
             },
         )
@@ -185,12 +186,12 @@ fun PluginsScreen(nav: NavController) {
             onDismiss = { detailFor = null },
             onDelete = {
                 PiPackages.remove(context, item.source, local = !item.global, onDone = { reload() })
-                toast(context, "已开始移除 ${item.name}")
+                toast(context, L.plugins.removeStarted(item.name))
                 detailFor = null
             },
             onUpdate = {
                 PiPackages.update(context, item.source, onDone = { reload() })
-                toast(context, "已开始更新 ${item.name}")
+                toast(context, L.plugins.updateStarted(item.name))
                 detailFor = null
             },
         )
@@ -237,7 +238,7 @@ private fun PluginRow(item: PluginItem, onClick: () -> Unit) {
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                "来源：${item.source}",
+                L.plugins.sourceLabel(item.source),
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFont),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp),
@@ -272,9 +273,9 @@ private fun InstallPluginDialog(
 
     Box(Modifier.fillMaxSize()) {
         PientDialog(
-            title = "添加插件",
+            title = L.plugins.addPlugin,
             onDismiss = onDismiss,
-            confirmText = "安装",
+            confirmText = L.common.install,
             confirmEnabled = valid && !installing,
             showClose = false,
             onConfirm = {
@@ -316,25 +317,25 @@ private fun InstallPluginDialog(
                     )
                 }
                 Text(
-                    "支持：npm: 包 / git: 仓库 / https 链接 / 本地路径（git 类需 Ubuntu 里已装 git）",
+                    L.plugins.installSupport,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),
                 )
                 Text(
-                    "pi.dev/packages 为官方插件市场",
+                    L.plugins.marketplaceNote,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    if (global) "装到全局：写 ~/.pi/agent/settings.json"
-                    else "装到项目：写 .pi/settings.json（等价 pi install -l）",
+                    if (global) L.plugins.installGlobalNote
+                    else L.plugins.installProjectNote,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp),
                 )
                 Text(
-                    "安装过程在终端页「${PiPackages.SESSION}」会话里可见",
+                    L.plugins.installVisibleInTerminal(PiPackages.SESSION),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -348,7 +349,7 @@ private fun InstallPluginDialog(
                             strokeWidth = 2.dp,
                         )
                         Text(
-                            "安装中…",
+                            L.plugins.installing,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(start = 8.dp),
