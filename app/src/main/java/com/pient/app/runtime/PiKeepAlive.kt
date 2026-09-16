@@ -65,9 +65,6 @@ object PiKeepAlive {
     /** **常驻档**的 key（行为设置「后台常驻通知」；见 [setResident]） */
     const val KEY_RESIDENT = "resident"
 
-    /** 常驻档「上一轮还活着」标记的 prefs 键（见 [consumeLostHint]） */
-    private const val KEY_GUARD = "resident_guard"
-
     /** 通知携带的「打开哪个面板」值（MainActivity 消费，见 [PiKeepAliveService.EXTRA_PANEL]） */
     const val PANEL_TERMINAL = "terminal"
 
@@ -153,10 +150,8 @@ object PiKeepAlive {
      */
     fun setResident(context: Context?, resident: Boolean) {
         if (resident) {
-            context?.applicationContext?.let { setGuard(it, true) }
             acquire(context, KEY_RESIDENT, L.runtime.residentRunning)
         } else {
-            context?.applicationContext?.let { setGuard(it, false) }
             release(context, KEY_RESIDENT)
         }
     }
@@ -165,26 +160,11 @@ object PiKeepAlive {
     fun isRunning(): Boolean = running
 
     /**
-     * 上一轮的**常驻保活是否被系统清掉**（2026-09-16）：读一次即清标记。
-     *
-     * 判据 = 标记还在 **且** 本进程里服务没在跑 —— 常驻档挂着时进程被清，来不及自己收尾，
-     * 标记就留下来了；同一进程内重开应用（服务还在跑）不会误报。
-     * 调用点 = MainActivity.onCreate（重挂常驻档之前），用它决定要不要提示用户。
-     */
-    fun consumeLostHint(context: Context?): Boolean {
-        val ctx = context?.applicationContext ?: return false
-        val flagged = runCatching { prefs(ctx).getBoolean(KEY_GUARD, false) }.getOrDefault(false)
-        setGuard(ctx, false)
-        return flagged && !running
-    }
-
-    /**
      * **保活被系统停掉时如实告知**（2026-09-16）：不假装还在保活。
      * 应用在前台 → Toast（用户正看着屏幕）；已退后台 → 发一条可点开的说明通知。
      */
     fun notifyInterrupted(context: Context?) {
         val ctx = context?.applicationContext ?: return
-        setGuard(ctx, false)
         if (PientRuntime.appVisible) {
             runCatching {
                 Toast.makeText(ctx, L.runtime.keepAliveInterruptedText, Toast.LENGTH_LONG).show()
@@ -216,16 +196,6 @@ object PiKeepAlive {
                     .build(),
             )
         }.onFailure { Log.w(TAG, "发送保活中断说明失败：${it.message}") }
-    }
-
-    // ── 常驻标记（跨进程存活，落 pient_prefs）──
-
-    private fun prefs(ctx: Context) =
-        ctx.getSharedPreferences("pient_prefs", Context.MODE_PRIVATE)
-
-    /** 常驻档的「上一轮还活着」标记：进程被系统清掉时来不及清它 → 下次启动就能如实告知 */
-    private fun setGuard(ctx: Context, on: Boolean) {
-        runCatching { prefs(ctx).edit().putBoolean(KEY_GUARD, on).apply() }
     }
 
     /** 通知渠道（幂等；IMPORTANCE_LOW = 不响不震，只在通知栏占一行）。服务与「保活中断说明」共用一份 */

@@ -1236,7 +1236,6 @@ object FrRuntime : RuntimeStrings {
     override val residentRunning: String = "Pient en arrière-plan"
     override val keepAliveInterruptedTitle: String = "Maintien en arrière-plan interrompu"
     override val keepAliveInterruptedText: String = "Le service au premier plan a atteint la limite système (Android 15+ plafonne les services dataSync à 6 heures d’exécution en arrière-plan par 24 heures) et s’est arrêté : le maintien en arrière-plan est interrompu ; rouvrez Pient pour le rétablir"
-    override val keepAliveLostHint: String = "Le maintien en arrière-plan précédent a été interrompu par le système (processus libéré) ; il a été rétabli"
     override fun keepAliveBigModelThinking(a0: Any?, a1: Any?): String = "Modèle : ${a0} · Réflexion : ${a1}"
     override fun keepAliveBigRuntime(a0: Any?, a1: Any?): String = "Sessions de terminal : ${a0} · Appels d’outils : ${a1}"
     override val piPackagesSession: String = "paquets pi"

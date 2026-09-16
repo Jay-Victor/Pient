@@ -1236,7 +1236,6 @@ object EsRuntime : RuntimeStrings {
     override val residentRunning: String = "Pient en segundo plano"
     override val keepAliveInterruptedTitle: String = "Se interrumpió el mantenimiento en segundo plano"
     override val keepAliveInterruptedText: String = "El servicio en primer plano alcanzó el límite del sistema (Android 15+ limita dataSync a 6 horas de ejecución en segundo plano por cada 24 horas) y se detuvo: el mantenimiento en segundo plano está interrumpido; vuelve a abrir Pient para restaurarlo"
-    override val keepAliveLostHint: String = "El sistema interrumpió el mantenimiento permanente anterior (se liberó el proceso); se ha vuelto a activar"
     override fun keepAliveBigModelThinking(a0: Any?, a1: Any?): String = "Modelo: ${a0} · Razonamiento: ${a1}"
     override fun keepAliveBigRuntime(a0: Any?, a1: Any?): String = "Sesiones de terminal: ${a0} · Llamadas a herramientas: ${a1}"
     override val piPackagesSession: String = "Paquetes de pi"

@@ -1236,7 +1236,6 @@ object JaRuntime : RuntimeStrings {
     override val residentRunning: String = "Pient はバックグラウンドで常駐中"
     override val keepAliveInterruptedTitle: String = "バックグラウンド維持が中断されました"
     override val keepAliveInterruptedText: String = "フォアグラウンドサービスがシステムの制限時間（Android 15 以降の dataSync は「バックグラウンドで 24 時間あたり計 6 時間」）に達して停止しました。バックグラウンド維持は中断されています。Pient を開き直すと復帰します"
-    override val keepAliveLostHint: String = "前回のバックグラウンド常駐はシステムに中断されました（プロセスが解放）。再び有効にしました"
     override fun keepAliveBigModelThinking(a0: Any?, a1: Any?): String = "モデル：${a0} · 思考：${a1}"
     override fun keepAliveBigRuntime(a0: Any?, a1: Any?): String = "ターミナル：${a0} · ツール呼び出し：${a1}"
     override val piPackagesSession: String = "pi パッケージ管理"

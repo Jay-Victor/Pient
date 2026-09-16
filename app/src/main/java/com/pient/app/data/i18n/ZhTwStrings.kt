@@ -1236,7 +1236,6 @@ object ZhTwRuntime : RuntimeStrings {
     override val residentRunning: String = "Pient 背景常駐中"
     override val keepAliveInterruptedTitle: String = "背景保活已中斷"
     override val keepAliveInterruptedText: String = "前景服務到達系統時限被停止（Android 15+ 對 dataSync 型別有「背景累計 6 小時 / 24 小時」上限），背景保活已中斷；重新開啟 Pient 即可恢復"
-    override val keepAliveLostHint: String = "上次的背景常駐保活被系統中斷（程序被清理），已重新掛上"
     override fun keepAliveBigModelThinking(a0: Any?, a1: Any?): String = "模型：${a0} · 思考：${a1}"
     override fun keepAliveBigRuntime(a0: Any?, a1: Any?): String = "終端工作階段：${a0} · 工具呼叫：${a1}"
     override val piPackagesSession: String = "pi 包管理"

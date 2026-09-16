@@ -1236,7 +1236,6 @@ object HiRuntime : RuntimeStrings {
     override val residentRunning: String = "Pient बैकग्राउंड में चालू है"
     override val keepAliveInterruptedTitle: String = "बैकग्राउंड बनाए रखना बंद हो गया"
     override val keepAliveInterruptedText: String = "फ़ोरग्राउंड सेवा सिस्टम की समय-सीमा (Android 15+ में dataSync के लिए 24 घंटे में कुल 6 घंटे बैकग्राउंड) तक पहुँचकर बंद हो गई: बैकग्राउंड बनाए रखना रुक गया है; Pient दोबारा खोलने पर यह फिर चालू हो जाएगा"
-    override val keepAliveLostHint: String = "पिछली बार का स्थायी बैकग्राउंड सिस्टम ने रोक दिया था (प्रोसेस हटा दिया गया था), अब यह फिर चालू कर दिया गया है"
     override fun keepAliveBigModelThinking(a0: Any?, a1: Any?): String = "मॉडल: ${a0} · सोच: ${a1}"
     override fun keepAliveBigRuntime(a0: Any?, a1: Any?): String = "टर्मिनल सत्र: ${a0} · टूल कॉल: ${a1}"
     override val piPackagesSession: String = "pi पैकेज"

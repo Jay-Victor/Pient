@@ -4,11 +4,9 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import com.pient.app.data.i18n.L
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ThemeMode
 import com.pient.app.runtime.PiKeepAlive
@@ -56,12 +54,7 @@ class MainActivity : ComponentActivity() {
         SettingsStore.load(this)
         // 后台常驻通知（行为设置，2026-09-16）：开着就在每次启动时把常驻档重新挂上
         //（进程被杀 / 换包后常驻通知要自己回来；关着则什么都不做，维持按需前台化）。
-        // 上一轮的常驻保活若是被系统清掉的（进程没了、来不及自己收尾），这里如实告知一次 —— 
-        // 判据见 PiKeepAlive.consumeLostHint（同一进程内重开应用不会误报）
         if (SettingsStore.residentNotification) {
-            if (PiKeepAlive.consumeLostHint(this)) {
-                Toast.makeText(this, L.runtime.keepAliveLostHint, Toast.LENGTH_LONG).show()
-            }
             PiKeepAlive.setResident(this, true)
         }
         // 终端环境（Ubuntu 24.04 rootfs，随包）**首启解包**：后台线程铺到 files/pient-rt/rootfs，
