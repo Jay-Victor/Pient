@@ -146,5 +146,45 @@ object HiStrings : Strings {
     override val runtime = HiRuntime
 }
 
+/** 新增语言包（Fr）文案包 */
+object FrStrings : Strings {
+    override val common = FrCommon
+    override val settings = FrSettings
+    override val chat = FrChat
+    override val canvas = FrCanvas
+    override val session = FrSession
+    override val files = FrFiles
+    override val terminal = FrTerminal
+    override val skills = FrSkills
+    override val plugins = FrPlugins
+    override val models = FrModels
+    override val perm = FrPerm
+    override val project = FrProject
+    override val env = FrEnv
+    override val onboarding = FrOnboarding
+    override val theme = FrTheme
+    override val runtime = FrRuntime
+}
+
+/** 新增语言包（Pt）文案包 */
+object PtStrings : Strings {
+    override val common = PtCommon
+    override val settings = PtSettings
+    override val chat = PtChat
+    override val canvas = PtCanvas
+    override val session = PtSession
+    override val files = PtFiles
+    override val terminal = PtTerminal
+    override val skills = PtSkills
+    override val plugins = PtPlugins
+    override val models = PtModels
+    override val perm = PtPerm
+    override val project = PtProject
+    override val env = PtEnv
+    override val onboarding = PtOnboarding
+    override val theme = PtTheme
+    override val runtime = PtRuntime
+}
+
 /** 当前语言包的文案（Compose 与非 Compose 通用；切换语言 = SettingsStore.language 变化 → 重组） */
 val L: Strings get() = Languages.current()

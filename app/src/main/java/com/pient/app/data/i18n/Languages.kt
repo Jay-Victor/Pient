@@ -24,6 +24,8 @@ object Languages {
         Pack("ja", "日本語", JaStrings),
         Pack("es", "Español", EsStrings),
         Pack("hi", "हिन्दी", HiStrings),
+        Pack("fr", "Français", FrStrings),
+        Pack("pt", "Português", PtStrings),
     )
 
     /** 语言设置页的选项：「跟随系统」置顶 + 各语言包（设计计划 6.3） */
@@ -48,6 +50,8 @@ object Languages {
             tag.startsWith("ja") -> "ja"
             tag.startsWith("es") -> "es"
             tag.startsWith("hi") -> "hi"
+            tag.startsWith("fr") -> "fr"
+            tag.startsWith("pt") -> "pt"
             else -> "en"
         }
     }
