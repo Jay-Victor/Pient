@@ -274,6 +274,10 @@ object EsChat : ChatStrings {
     override val runSummaryJoin: String = " · "
     override fun runSummaryTarget(a0: Any?, a1: Any?): String = "${a0} ${a1}"
     override fun runSummaryClause(a0: Any?, a1: Any?, a2: Any?, a3: Any?): String = "${a0} ${a1} ${a2}"
+    override val polish: String = "Pulir el prompt"
+    override val polishUndo: String = "Deshacer el pulido"
+    override val polishing: String = "Puliendo el prompt"
+    override fun polishFailed(a0: Any?): String = "No se pudo pulir el prompt: ${a0}"
 }
 
 object EsCanvas : CanvasStrings {

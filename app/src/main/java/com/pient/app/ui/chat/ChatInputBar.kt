@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.ExpandLess
@@ -33,6 +34,8 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.Send
+import androidx.compose.material.icons.outlined.Undo
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -55,6 +58,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
@@ -112,6 +117,10 @@ fun ChatInputBar(
 ) {
     var fullscreenOpen by rememberSaveable { mutableStateOf(false) }
     val streaming = chatState.isStreaming
+    // 润色提示词（2026-09-16，用户 spec）：润色期间输入框只读 —— 用户不得在润色进行中改动提示词，
+    // 直到结果回来（润色键此时转圈、发送键与全屏输入一并禁用）
+    val polishing = chatState.polishing
+    val polishRevertable = chatState.polishRevertTarget != null
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     LaunchedEffect(focusTick) {
@@ -220,6 +229,7 @@ fun ChatInputBar(
                 visualTransformation = mentionTransformation,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onBackground),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                readOnly = polishing,
                 minLines = 1,
                 maxLines = 6,
                 modifier = Modifier
@@ -236,9 +246,54 @@ fun ChatInputBar(
                     inner()
                 },
             )
+            // 润色提示词（2026-09-16，用户 spec）：
+            // 润色 → 结果回填、本键变回退键 → 用户一改（ChatScreen 清回退态）就变回润色键；
+            // 润色进行中：本键转圈、不可点，输入框只读。
+            // **常显**（2026-09-17 用户口径：空框也要在位，只是灰态、不可点）——
+            // 键位固定、不随打字闪烁；灰态取仓库既有的「禁用图标」写法 onSurfaceVariant 30%。
+            val canPolish = text.text.isNotBlank()
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .clickable(enabled = !polishing && (polishRevertable || canPolish)) {
+                        if (polishRevertable) chatState.revertPolish()
+                        else chatState.polishInput(text.text)
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                when {
+                    polishing -> Box(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .semantics { contentDescription = L.chat.polishing },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    polishRevertable -> Icon(
+                        Icons.Outlined.Undo, L.chat.polishUndo,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    else -> Icon(
+                        Icons.Outlined.AutoFixHigh, L.chat.polish,
+                        // 空框 = 无内容可润色：灰态（不可点）；有内容 = 与相邻全屏输入键同色
+                        tint = if (canPolish) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
             // 全屏输入入口（设计计划 3.4；点开 FullscreenInputDialog）
+            // 润色中禁用：那是同一份文本的另一个编辑器（润色期间不许改动提示词）
             IconButton(
                 onClick = { fullscreenOpen = true },
+                enabled = !polishing,
                 modifier = Modifier.size(36.dp),
             ) {
                 Icon(
@@ -322,7 +377,8 @@ fun ChatInputBar(
             }
 
             // 发送 / 停止（46dp 触控目标）
-            val canSend = text.text.isNotBlank() || chatState.attachments.isNotEmpty()
+            // 润色中不可发送：正文正在被改写，此刻发出去的只会是半成品
+            val canSend = (text.text.isNotBlank() || chatState.attachments.isNotEmpty()) && !polishing
             Box(
                 modifier = Modifier
                     .padding(start = 4.dp)

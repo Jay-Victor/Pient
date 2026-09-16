@@ -274,6 +274,10 @@ object JaChat : ChatStrings {
     override val runSummaryJoin: String = "、"
     override fun runSummaryTarget(a0: Any?, a1: Any?): String = "${a1} を${a0}"
     override fun runSummaryClause(a0: Any?, a1: Any?, a2: Any?, a3: Any?): String = "${a1} 件の${a2}を${a0}"
+    override val polish: String = "プロンプトを推敲"
+    override val polishUndo: String = "推敲を元に戻す"
+    override val polishing: String = "推敲中"
+    override fun polishFailed(a0: Any?): String = "推敲に失敗しました：${a0}"
 }
 
 object JaCanvas : CanvasStrings {

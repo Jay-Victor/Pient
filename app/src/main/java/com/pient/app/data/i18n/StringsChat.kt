@@ -180,6 +180,10 @@ interface ChatStrings {
     fun runSummaryTarget(a0: Any?, a1: Any?): String
     /** 计数分句：{0} = 动词（单数形），{1} = 条数，{2} = 名词，{3} = 动词（复数形） */
     fun runSummaryClause(a0: Any?, a1: Any?, a2: Any?, a3: Any?): String
+    val polish: String
+    val polishUndo: String
+    val polishing: String
+    fun polishFailed(a0: Any?): String
 }
 
 object ZhChat : ChatStrings {
@@ -347,6 +351,10 @@ object ZhChat : ChatStrings {
     override val runSummaryJoin: String = "、"
     override fun runSummaryTarget(a0: Any?, a1: Any?): String = "${a0} ${a1}"
     override fun runSummaryClause(a0: Any?, a1: Any?, a2: Any?, a3: Any?): String = "${a0} ${a1} 个${a2}"
+    override val polish: String = "润色提示词"
+    override val polishUndo: String = "撤销润色"
+    override val polishing: String = "正在润色提示词"
+    override fun polishFailed(a0: Any?): String = "润色失败：${a0}"
 }
 
 object EnChat : ChatStrings {
@@ -514,4 +522,8 @@ object EnChat : ChatStrings {
     override val runSummaryJoin: String = ", "
     override fun runSummaryTarget(a0: Any?, a1: Any?): String = "${a0} ${a1}"
     override fun runSummaryClause(a0: Any?, a1: Any?, a2: Any?, a3: Any?): String = "${a0} ${a1} ${a2}"
+    override val polish: String = "Polish prompt"
+    override val polishUndo: String = "Undo polish"
+    override val polishing: String = "Polishing prompt"
+    override fun polishFailed(a0: Any?): String = "Polish failed: ${a0}"
 }

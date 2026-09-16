@@ -182,6 +182,20 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
     LaunchedEffect(mentionQuery) {
         if (mentionQuery == null) mentionDismissedQuery = null
     }
+    // ★ 润色 / 回退回填是唯一例外：它的查询串在下面那条 effect 里**已经**记成已关闭，
+    //   这里判据只看 mentionQuery 是否为 null，不会把刚记下的关闭标记清掉。
+    // 润色结果 / 回退内容回填输入框（2026-09-16 输入栏润色；一次性信号，口径同 draftRestore）。
+    // 光标落到末尾 —— 回填后是接着看/接着改的。
+    LaunchedEffect(chatState.polishApply) {
+        val t = chatState.polishApply ?: return@LaunchedEffect
+        val v = TextFieldValue(t, TextRange(t.length))
+        // 回填是**程序写入**、不是用户正在敲 @ 引用：先把此刻的查询串记为「已关闭」再落文本，
+        // 否则刚润色完就弹一张「引用文件 / 无匹配文件」卡 —— findMentionQueryAt 只看
+        // 「以空白开头的 @ 到光标之间没有空白」，润色后的整句（`请阅读 @x.md，并…`）正好长这样。
+        mentionDismissedQuery = findMentionQueryAt(v)?.text
+        inputText = v
+        chatState.polishApply = null
+    }
     // @ 引用文件来源 = 当前项目真实文件树（未绑定项目/未加载时为空列表）
     val mentionFiles = remember(chatState.fileTreeRoot) {
         chatState.fileTreeRoot?.let { buildMentionFiles(it) } ?: emptyList()
@@ -195,6 +209,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
         chatState.mentionInsertRequest?.let { name ->
             inputText = TextFieldValue(inputText.text + "@$name ")
             chatState.mentionInsertRequest = null
+            // 插引用 = 用户改动了提示词 → 润色态作废（回退键变回润色键）
+            chatState.clearPolishRevert()
         }
     }
     // 模型按键上缘 y（root px）：弹窗底部锚定到按键上缘（按键随输入框行数/IME 移动）
@@ -499,6 +515,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                             // 一键删除整段 @ 引用：单字符退格 + 光标停在 token 末尾
                             // → 整个 "@路径 " 一起删掉（Operit normalizeMentionDeletion 同款）
                             inputText = normalizeMentionDeletion(inputText, it, mentionFiles)
+                            // 用户改动了润色结果 → 润色态作废（回退键变回润色键，2026-09-16 spec）
+                            chatState.clearPolishRevert()
                         },
                         mentionFiles = mentionFiles,
                         onOpenModelSelector = { modelSheetOpen = true },
@@ -756,6 +774,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                         val mention = "@$rel "
                         val newText = inputText.text.replaceRange(start, end, mention)
                         inputText = TextFieldValue(newText, selection = TextRange(start + mention.length))
+                        // 同上：插入引用也算用户改动了提示词 → 润色态作废
+                        chatState.clearPolishRevert()
                     },
                     bottomOffset = mentionBottomOffset,
                     modifier = Modifier.align(Alignment.BottomStart),

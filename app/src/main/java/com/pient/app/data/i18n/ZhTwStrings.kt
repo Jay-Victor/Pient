@@ -274,6 +274,10 @@ object ZhTwChat : ChatStrings {
     override val runSummaryJoin: String = "、"
     override fun runSummaryTarget(a0: Any?, a1: Any?): String = "${a0} ${a1}"
     override fun runSummaryClause(a0: Any?, a1: Any?, a2: Any?, a3: Any?): String = "${a0} ${a1} 個${a2}"
+    override val polish: String = "潤色提示詞"
+    override val polishUndo: String = "撤銷潤色"
+    override val polishing: String = "正在潤色提示詞"
+    override fun polishFailed(a0: Any?): String = "潤色失敗：${a0}"
 }
 
 object ZhTwCanvas : CanvasStrings {

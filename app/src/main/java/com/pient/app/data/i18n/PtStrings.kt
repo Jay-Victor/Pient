@@ -274,6 +274,10 @@ object PtChat : ChatStrings {
     override val runSummaryJoin: String = ", "
     override fun runSummaryTarget(a0: Any?, a1: Any?): String = "${a0} ${a1}"
     override fun runSummaryClause(a0: Any?, a1: Any?, a2: Any?, a3: Any?): String = "${a0} ${a1} ${a2}"
+    override val polish: String = "Polir o prompt"
+    override val polishUndo: String = "Desfazer o polimento"
+    override val polishing: String = "Polindo o prompt"
+    override fun polishFailed(a0: Any?): String = "Falha ao polir o prompt: ${a0}"
 }
 
 object PtCanvas : CanvasStrings {

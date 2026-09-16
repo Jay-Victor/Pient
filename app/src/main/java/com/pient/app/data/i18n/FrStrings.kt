@@ -274,6 +274,10 @@ object FrChat : ChatStrings {
     override val runSummaryJoin: String = ", "
     override fun runSummaryTarget(a0: Any?, a1: Any?): String = "${a0} ${a1}"
     override fun runSummaryClause(a0: Any?, a1: Any?, a2: Any?, a3: Any?): String = "${a0} ${a1} ${a2}"
+    override val polish: String = "Améliorer le prompt"
+    override val polishUndo: String = "Annuler l’amélioration"
+    override val polishing: String = "Amélioration du prompt…"
+    override fun polishFailed(a0: Any?): String = "Échec de l’amélioration du prompt  : ${a0}"
 }
 
 object FrCanvas : CanvasStrings {

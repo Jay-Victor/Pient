@@ -4,6 +4,7 @@ import com.pient.app.data.i18n.L
 import com.pient.app.AppCtx
 import com.pient.app.runtime.KeepAliveDetail
 import com.pient.app.runtime.PiKeepAlive
+import com.pient.app.runtime.PiPolish
 
 import android.content.Context
 import android.util.Log
@@ -828,6 +829,71 @@ class ChatState {
      * （输入栏在点击时已自行清空文本）—— 见 [streamReply] 开头「pi 还在处理上一轮」的拦截。
      */
     var draftRestore by mutableStateOf<String?>(null)
+
+    // ── 输入栏：润色提示词（2026-09-16，用户 spec）────────────────────────
+    // 交互：点润色键 → 输入框只读、键转圈 → 结果回填输入框、键变回退键 →
+    // 再点变回原文、键变回润色键；**一旦用户在润色结果上动过手，回退态即作废**
+    // （回退键变回润色键）。润色本身走 pi 的单次模式（见 [com.pient.app.runtime.PiPolish]）。
+
+    /** 正在润色：输入框转只读（润色期间不得改动提示词）、发送键与全屏输入一并禁用 */
+    var polishing by mutableStateOf(false)
+        private set
+
+    /**
+     * 润色前原文（非空 = 输入框当前内容来自润色 → 润色键显示为**回退键**）。
+     * 「用户在润色结果上修改」= 聊天页调 [clearPolishRevert]，回退态作废。
+     */
+    var polishRevertTarget by mutableStateOf<String?>(null)
+        private set
+
+    /** 润色结果 / 回退内容的一次性回填信号（ChatScreen 取走后置 null；口径同 [draftRestore]） */
+    var polishApply by mutableStateOf<String?>(null)
+
+    /** 用户改动了输入框内容 → 润色态作废（回退键变回润色键） */
+    fun clearPolishRevert() {
+        if (polishRevertTarget != null) polishRevertTarget = null
+    }
+
+    /**
+     * 润色输入框里的提示词。跑在**进程 scope** 上：这是一次真实模型调用，
+     * 不该随聊天页销毁被静默取消（与一轮对话同口径，见 [startTurn]）。
+     */
+    fun polishInput(text: String) {
+        if (polishing || polishRevertTarget != null) return   // 已在润色 / 当前是回退态：按键不是润色键
+        if (text.isBlank()) return
+        val target = piChannelTarget()
+        if (target == null) {
+            blockedNote = L.chat.polishFailed(L.runtime.noProviderOrModel)
+            return
+        }
+        val ctx = AppCtx.get()
+        if (ctx == null) {
+            blockedNote = L.chat.polishFailed(L.runtime.appContextNotReady)
+            return
+        }
+        polishing = true
+        bgScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) { PiPolish.polish(ctx, text, target.first, target.second) }
+            }
+            polishing = false
+            result
+                .onSuccess { polished ->
+                    polishRevertTarget = text   // 回退目标 = 润色前原文
+                    polishApply = polished
+                }
+                .onFailure { e ->
+                    blockedNote = L.chat.polishFailed(e.message ?: L.common.unknownError)
+                }
+        }
+    }
+
+    /** 回退到润色前的提示词（回退键的动作）；随后按键回到润色态 */
+    fun revertPolish() {
+        val original = polishRevertTarget ?: return
+        polishRevertTarget = null
+        polishApply = original
+    }
 
     /**
      * 直连内核只作**开发诊断通道**（debug 包）：release 包里 pi 起不来就是起不来，

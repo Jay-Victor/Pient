@@ -274,6 +274,10 @@ object HiChat : ChatStrings {
     override val runSummaryJoin: String = ", "
     override fun runSummaryTarget(a0: Any?, a1: Any?): String = "${a1} ${a0}"
     override fun runSummaryClause(a0: Any?, a1: Any?, a2: Any?, a3: Any?): String = "${a1} ${a2} ${a3}"
+    override val polish: String = "प्रॉम्प्ट को परिष्कृत करें"
+    override val polishUndo: String = "परिष्करण पूर्ववत करें"
+    override val polishing: String = "प्रॉम्प्ट का परिष्करण जारी है"
+    override fun polishFailed(a0: Any?): String = "प्रॉम्प्ट परिष्कृत नहीं किया जा सका: ${a0}"
 }
 
 object HiCanvas : CanvasStrings {
