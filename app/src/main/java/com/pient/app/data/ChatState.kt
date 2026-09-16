@@ -1039,20 +1039,20 @@ class ChatState {
         streamDraft = ""
         streamThinking = ""
         streamThinkingStartedAt = 0L
-        // 本轮思考条目一律插到目标回答**之前**：目标回答就在末位，按追加语义写会渲染到回答之后
+        // 本轮条目一律插到目标回答**之前**：目标回答就在末位，按追加语义写会渲染到回答之后
         runInsertAt = index
         markRunning(true)
         return try {
             val outcome = runChat(
                 cfg = cfg.copy(modelList = effectiveModel),
                 userTurnText = prevText,
-                onDelta = { draft ->
-                    val at = runInsertAt ?: index
-                    replaceMessageAt(at, Msg.Assistant(draft, null, effectiveModel))
-                },
+                // 流式正文只进「流式卡」，**不再往旧回答的槽位里写**（2026-09-16）：一个回合的正文现在
+                // 会分成多段（见 flushText），继续写在槽里会让每段正文在工具阶段留一份重复副本；旧回答
+                // 原样显示到回合结束，由下面那次原地替换一次换成新回答（流式表现与普通发送同一套）。
+                onDelta = { streamDraft = it },
                 onThinking = { noteThinkingDelta(it) },
             )
-            // 思考/工具行已由 flushThinking 插到目标回答之前（游标每插一条前进一位），这里原位替换回答
+            // 思考/正文/工具行已按阶段插到目标回答之前（游标每插一条前进一位），这里原位替换回答
             replaceMessageAt(runInsertAt ?: index, Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
             // 重新生成同样计入用量台账（一次真实请求 = 一笔用量）
             UsageStore.record(cfg.providerId, effectiveModel, outcome.usage)
@@ -1504,7 +1504,8 @@ class ChatState {
      * usage：事件顶层的累积值（provider 不上报时为 0，回合结束以 `message_end` 为准不动）；
      * 回合结束判据：**`agent_settled`**（pi 口径：重试、压缩重试、排队续写都settled了才算完）。
      *
-     * 工具调用（`tool_execution_start/update/end`）本切片只记日志，工具行 UI 是下一步。
+     * 条目按 pi 的内容块顺序**按阶段落库**（2026-09-16）：pi 的一次模型调用 = `{thinking, text, toolCall[]}`，
+     * 工具调用与回合收尾前各 flush 一次（[flushThinking] / [flushText]），最后一段正文 = 本回合最终回答。
      */
     private suspend fun runChatViaPi(
         cfg: ProviderConfig,
@@ -1527,7 +1528,8 @@ class ChatState {
         val promptText = if (skippedMedia > 0) {
             "$userText\n\n[附件未直发] 另有 $skippedMedia 个非图片附件（pi 通道只直发图片）"
         } else userText
-        val text = StringBuilder()
+        val text = StringBuilder()           // 本轮全部正文（通道存活/错误判定用；条目按阶段落库，见 flushText）
+        val textPhase = StringBuilder()      // **当前助手消息**的正文：工具调用前落成一条 Msg.Assistant
         val think = StringBuilder()          // 本轮全部思考（ChatOutcome 用；条目按阶段落库，见 flushThinking）
         val thinkPhase = StringBuilder()     // **当前阶段**的思考：工具调用/回合收尾时落成一条 Msg.Thinking
         var usage: Usage? = null
@@ -1560,6 +1562,27 @@ class ChatState {
             streamThinkingStartedAt = 0L
         }
 
+        /**
+         * 把**当前助手消息**的正文落成一条 [Msg.Assistant]（2026-09-16 起与思考同样按阶段落库）。
+         *
+         * 为什么按阶段：pi 的一条 assistant 消息 = `{thinking, text, toolCall[]}` —— 正文排在它自己的
+         * 工具调用**之前**。旧实现把整轮（一个回合可能跨 4~5 次模型调用）的正文累加进同一个
+         * StringBuilder、直到回合末尾才落库 → 聊天页里那唯一一条回答把几段正文**粘成一坨**（连分隔符
+         * 都没有）摆到回合末尾，观感就是"工具前的旁白被搬到了工具下面"；画布「节点详情」按 pi 的内容块
+         * 顺序渲染，两处自然对不上（用户实报：正文要跟它那次工具调用在一起，与节点详情同序）。
+         *
+         * 落库位置沿用 [appendEntry]：普通发送 = 追加到末尾；重新生成 = 插到目标回答**之前**（游标处）。
+         * 无正文不落条目（pi 里也只有真产出正文的消息才有 text 块）；不带模型标签与 usage —— 那两样
+         * 只挂在回合末尾那条最终回答上（保持"一轮一个标签 + 一行用量"的观感）。
+         */
+        fun flushText() {
+            val t = textPhase.toString().trim()
+            textPhase.setLength(0)
+            streamDraft = ""
+            if (t.isEmpty()) return
+            appendEntry(Msg.Assistant(t, null, null))
+        }
+
         val collector = launch {
             PiRpc.events.collect { ev ->
                 val evType = ev.optString("type")
@@ -1571,8 +1594,12 @@ class ChatState {
                         val d = ev.optJSONObject("assistantMessageEvent") ?: return@collect
                         when (d.optString("type")) {
                             "text_delta" -> {
-                                text.append(d.optString("delta"))
-                                onDelta(text.toString())
+                                val delta = d.optString("delta")
+                                text.append(delta)
+                                // 上屏给的是**当前这条助手消息**的正文（不是整轮累加值）：一次工具调用
+                                // 到来就把这段正文落成自己的条目，下一段正文从零开始（见 flushText）
+                                textPhase.append(delta)
+                                onDelta(textPhase.toString())
                             }
                             "thinking_delta" -> if (thinkingEnabled) {
                                 val delta = d.optString("delta")
@@ -1583,8 +1610,10 @@ class ChatState {
                         }
                     }
                     "tool_execution_start" -> {
-                        // 这段思考发生在这次工具调用**之前** → 先落库，条目顺序才是 思考 → 工具
+                        // 这段思考与正文都发生在这次工具调用**之前** → 先落库，
+                        // 条目顺序才是 思考 → 正文 → 工具（pi 的一条 assistant 消息就是这个形状）
                         flushThinking()
+                        flushText()
                         val callId = ev.optString("toolCallId")
                         val name = ev.optString("toolName")
                         val msgs = currentMessages
@@ -1664,7 +1693,8 @@ class ChatState {
         }
         val ok = withTimeoutOrNull(600_000) { settled.await() } != null
         collector.cancel()
-        // 收尾：最后一段思考落在回答之前（没有工具时就是「思考 → 回答」这一条链）
+        // 收尾：最后一段思考落在回答之前（没有工具时就是「思考 → 回答」这一条链）。
+        // 最后一段**正文**不在这里落库 —— 它就是本回合的最终回答，由调用方带 usage/模型标签落。
         flushThinking()
         // 通道中途断开（channel_closed）且本轮没拿到任何文本 → 如实报错，
         // 别落一条空回答让用户以为"AI 回了但看不到内容"（2026-09-15 实测：pi 秒退时就这样）
@@ -1681,7 +1711,8 @@ class ChatState {
             if (text.isEmpty()) throw AiException(err)
         }
         usage?.let { updateContextPercent(it, cfg) }
-        val out = text.toString().trim()
+        // 最终回答 = 最后一条助手消息的正文（pi 同口径）；此前各阶段的正文已各自落成条目
+        val out = textPhase.toString().trim()
         if (out.isNotEmpty()) onDelta(out)
         // 期望位置跟随后端（§4.3）：本轮追加后 pi 的叶就是新的"当前所在"（不跟则下次绑定会拉回旧位置）
         runCatching { refreshPiTree(follow = true) }
