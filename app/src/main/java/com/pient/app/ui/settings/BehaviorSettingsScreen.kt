@@ -1,5 +1,11 @@
 package com.pient.app.ui.settings
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.pient.app.data.i18n.L
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,6 +27,7 @@ import androidx.compose.material.icons.outlined.Animation
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Compress
+import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.ViewInAr
 import androidx.compose.material3.Icon
@@ -32,10 +39,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
 import com.pient.app.data.DrawerMode
 import com.pient.app.data.SettingsStore
+import com.pient.app.runtime.PiKeepAlive
 import com.pient.app.ui.components.DividerLine
 import com.pient.app.ui.components.SectionHeader
 import com.pient.app.ui.components.isTabletLayout
@@ -49,6 +59,27 @@ import com.pient.app.ui.components.isTabletLayout
 @Composable
 fun BehaviorSettingsScreen(nav: NavController) {
     val isTablet = isTabletLayout()
+    val context = LocalContext.current
+    // 通知权限（Android 13+）：常驻通知要真显示，得在开档时申请一次（没有它服务照跑、通知不显示）
+    val notifPermission =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (!granted) {
+                Toast.makeText(context, L.settings.residentNotificationNoPermission, Toast.LENGTH_LONG).show()
+            }
+        }
+
+    /** 开/关「后台常驻通知」：改状态（落盘见 PientApp 的持久化 effect）+ 当场挂/撤常驻档 */
+    fun applyResidentNotification(enabled: Boolean) {
+        SettingsStore.residentNotification = enabled
+        PiKeepAlive.setResident(context, enabled)
+        if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -140,6 +171,24 @@ fun BehaviorSettingsScreen(nav: NavController) {
                         desc = L.theme.startupAnimationDesc,
                         checked = SettingsStore.startupAnimation,
                         onCheckedChange = { SettingsStore.startupAnimation = it },
+                    )
+                }
+            }
+            item { SectionHeader(L.settings.backgroundKeepAlive) }
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(16.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
+                ) {
+                    SettingToggleRow(
+                        icon = Icons.Outlined.NotificationsActive,
+                        title = L.settings.residentNotification,
+                        desc = L.settings.residentNotificationDesc,
+                        checked = SettingsStore.residentNotification,
+                        onCheckedChange = { applyResidentNotification(it) },
                     )
                 }
             }

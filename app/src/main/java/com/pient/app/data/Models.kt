@@ -150,6 +150,11 @@ object SettingsStore {
     // ── 文件预览页设置（2026-09-10）：带行号的文件长行不折行，改为向右延展 + 横向滚动 ──
     var filePreviewNoWrap by mutableStateOf(false)
 
+    // ── 后台保活（2026-09-16，行为设置）：后台常驻通知 ──
+    //   开 = 前台服务一直挂着（常驻档，走 specialUse 类型，绕开 dataSync 的「后台 6 小时 / 24 小时」
+    //   上限），通知栏常驻一条；关 = 按需（AI 回合 / 终端会话有活时才挂）。见 runtime/PiKeepAlive.kt
+    var residentNotification by mutableStateOf(false)
+
     // ── 自定义主题色（2026-09-01）：开关 + 色相（0..360）；开启时覆盖 12 预设色作为 accent ──
     var customAccentEnabled by mutableStateOf(false)
     var customAccentHue by mutableStateOf(215f)   // 默认蓝 hue ≈ 215
@@ -229,6 +234,7 @@ object SettingsStore {
         branchSummarize = p.getBoolean("branch_summarize", false)
         startupAnimation = p.getBoolean("startup_animation", true)
         filePreviewNoWrap = p.getBoolean("file_preview_no_wrap", false)
+        residentNotification = p.getBoolean("resident_notification", false)
         customAccentEnabled = p.getBoolean("custom_accent_enabled", false)
         customAccentHue = p.getFloat("custom_accent_hue", 215f).coerceIn(0f, 360f)
         backgroundMediaType = runCatching {
@@ -347,6 +353,14 @@ object SettingsStore {
         androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
             .edit()
             .putBoolean("startup_animation", startupAnimation)
+            .apply()
+    }
+
+    /** 保存「后台常驻通知」（行为设置），重启后保持；应用启动时按它重挂常驻前台服务 */
+    fun saveResidentNotification(androidCtx: android.content.Context) {
+        androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("resident_notification", residentNotification)
             .apply()
     }
 

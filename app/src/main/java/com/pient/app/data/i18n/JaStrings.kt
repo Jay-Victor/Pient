@@ -96,6 +96,10 @@ object JaSettings : SettingsStrings {
     override fun versionLabel(a0: Any?): String = "バージョン ${a0}"
     override fun upToDateLabel(a0: Any?): String = "${a0} は最新バージョンです"
     override val languageApplied: String = "切り替え後すぐに反映されます（再起動は不要）"
+    override val backgroundKeepAlive: String = "バックグラウンド維持"
+    override val residentNotification: String = "バックグラウンド常駐通知"
+    override val residentNotificationDesc: String = "オンにすると通知バーに Pient の通知が常駐します：プロセスがシステムに終了されにくくなり、AI ターンとターミナルセッションはバックグラウンドや画面オフでも動き続けます"
+    override val residentNotificationNoPermission: String = "通知権限がありません：常駐通知は表示されません（システム設定で有効にできます）"
 }
 
 object JaChat : ChatStrings {
@@ -225,11 +229,11 @@ object JaChat : ChatStrings {
     override val toolSearching: String = "検索中"
     override val toolFinding: String = "検索中"
     override val toolListing: String = "一覧表示中"
-    override val toolSearched: String = "検索しました"
-    override val toolFound: String = "検索しました"
-    override val toolListed: String = "一覧表示しました"
+    override val toolSearched: String = "検索済み"
+    override val toolFound: String = "検出済み"
+    override val toolListed: String = "一覧表示済み"
     override fun toolSearchingQuery(a0: Any?): String = "「${a0}」を検索中"
-    override fun toolSearchedQuery(a0: Any?): String = "「${a0}」を検索しました"
+    override fun toolSearchedQuery(a0: Any?): String = "「${a0}」を検索済み"
     override fun matchCount(a0: Any?): String = "${a0} 件一致"
     override fun fileCountLabel(a0: Any?): String = "${a0} 個のファイル"
     override fun entryCountLabel(a0: Any?): String = "${a0} 項目"
@@ -261,7 +265,7 @@ object JaChat : ChatStrings {
     override val toolUsingPlural: String = "使用中"
     override val nounFile: String = "ファイル"
     override val runSummaryJoin: String = "、"
-    override fun runSummaryTarget(a0: Any?, a1: Any?): String = "${a1}を${a0}"
+    override fun runSummaryTarget(a0: Any?, a1: Any?): String = "${a1} を${a0}"
     override fun runSummaryClause(a0: Any?, a1: Any?, a2: Any?, a3: Any?): String = "${a1} 件の${a2}を${a0}"
 }
 
@@ -1229,6 +1233,12 @@ object JaRuntime : RuntimeStrings {
     override val scriptRunning: String = "ターミナルコマンドを実行中…"
     override val keepAliveChannelName: String = "Pient の実行状態"
     override val keepAliveChannelDesc: String = "AI ターン / ターミナルコマンド実行中のフォアグラウンド通知（プロセスがシステムに停止されないようにします）"
+    override val residentRunning: String = "Pient はバックグラウンドで常駐中"
+    override val keepAliveInterruptedTitle: String = "バックグラウンド維持が中断されました"
+    override val keepAliveInterruptedText: String = "フォアグラウンドサービスがシステムの制限時間（Android 15 以降の dataSync は「バックグラウンドで 24 時間あたり計 6 時間」）に達して停止しました。バックグラウンド維持は中断されています。Pient を開き直すと復帰します"
+    override val keepAliveLostHint: String = "前回のバックグラウンド常駐はシステムに中断されました（プロセスが解放）。再び有効にしました"
+    override fun keepAliveBigModelThinking(a0: Any?, a1: Any?): String = "モデル：${a0} · 思考：${a1}"
+    override fun keepAliveBigRuntime(a0: Any?, a1: Any?): String = "ターミナル：${a0} · ツール呼び出し：${a1}"
     override val piPackagesSession: String = "pi パッケージ管理"
     override val ubuntuNotReady: String = "Ubuntu はまだ準備できていません（pient-shell がありません）"
     override fun piListFailed(a0: Any?): String = "pi list に失敗しました（終了コード ${a0}）"

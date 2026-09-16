@@ -77,6 +77,12 @@ interface RuntimeStrings {
     val scriptRunning: String
     val keepAliveChannelName: String
     val keepAliveChannelDesc: String
+    val residentRunning: String
+    val keepAliveInterruptedTitle: String
+    val keepAliveInterruptedText: String
+    val keepAliveLostHint: String
+    fun keepAliveBigModelThinking(a0: Any?, a1: Any?): String
+    fun keepAliveBigRuntime(a0: Any?, a1: Any?): String
     val piPackagesSession: String
     val ubuntuNotReady: String
     fun piListFailed(a0: Any?): String
@@ -214,6 +220,12 @@ object ZhRuntime : RuntimeStrings {
     override val scriptRunning: String = "终端命令执行中…"
     override val keepAliveChannelName: String = "Pient 运行状态"
     override val keepAliveChannelDesc: String = "AI 回合 / 终端命令执行中的前台通知（避免进程被系统清掉）"
+    override val residentRunning: String = "Pient 后台常驻中"
+    override val keepAliveInterruptedTitle: String = "后台保活已中断"
+    override val keepAliveInterruptedText: String = "前台服务到达系统时限被停止（Android 15+ 对 dataSync 类型有「后台累计 6 小时 / 24 小时」上限），后台保活已中断；重新打开 Pient 即可恢复"
+    override val keepAliveLostHint: String = "上次的后台常驻保活被系统中断（进程被清理），已重新挂上"
+    override fun keepAliveBigModelThinking(a0: Any?, a1: Any?): String = "模型：${a0} · 思考：${a1}"
+    override fun keepAliveBigRuntime(a0: Any?, a1: Any?): String = "终端会话：${a0} · 工具调用：${a1}"
     override val piPackagesSession: String = "pi 包管理"
     override val ubuntuNotReady: String = "Ubuntu 还没就绪（缺 pient-shell）"
     override fun piListFailed(a0: Any?): String = "pi list 失败（退出码 ${a0}）"
@@ -351,6 +363,12 @@ object EnRuntime : RuntimeStrings {
     override val scriptRunning: String = "Terminal command running…"
     override val keepAliveChannelName: String = "Pient status"
     override val keepAliveChannelDesc: String = "Foreground notification while an AI turn / terminal command runs (keeps the process from being killed by the system)"
+    override val residentRunning: String = "Pient is running in the background"
+    override val keepAliveInterruptedTitle: String = "Background keep-alive stopped"
+    override val keepAliveInterruptedText: String = "The foreground service hit the system time limit (Android 15+ caps dataSync services at 6 hours of background runtime per 24 hours), so keep-alive has stopped; reopen Pient to restore it"
+    override val keepAliveLostHint: String = "The resident keep-alive was interrupted by the system (the process was cleaned up); it has been restored"
+    override fun keepAliveBigModelThinking(a0: Any?, a1: Any?): String = "Model: ${a0} · Thinking: ${a1}"
+    override fun keepAliveBigRuntime(a0: Any?, a1: Any?): String = "Terminal sessions: ${a0} · Tool calls: ${a1}"
     override val piPackagesSession: String = "pi packages"
     override val ubuntuNotReady: String = "Ubuntu is not ready yet (pient-shell is missing)"
     override fun piListFailed(a0: Any?): String = "pi list failed (exit code ${a0})"

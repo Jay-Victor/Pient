@@ -96,6 +96,10 @@ object FrSettings : SettingsStrings {
     override fun versionLabel(a0: Any?): String = "Version ${a0}"
     override fun upToDateLabel(a0: Any?): String = "Version la plus récente (${a0})"
     override val languageApplied: String = "Prise en compte immédiate — aucun redémarrage nécessaire"
+    override val backgroundKeepAlive: String = "Maintien en arrière-plan"
+    override val residentNotification: String = "Notification permanente en arrière-plan"
+    override val residentNotificationDesc: String = "Épingle une notification Pient dans le panneau : le processus n’est plus fermé par le système et les tours IA comme les sessions de terminal continuent en arrière-plan ou écran éteint"
+    override val residentNotificationNoPermission: String = "Permission de notification non accordée : la notification permanente reste masquée (activez-la dans les réglages système)"
 }
 
 object FrChat : ChatStrings {
@@ -1229,6 +1233,12 @@ object FrRuntime : RuntimeStrings {
     override val scriptRunning: String = "Commande terminal en cours d’exécution…"
     override val keepAliveChannelName: String = "État de Pient"
     override val keepAliveChannelDesc: String = "Notification au premier plan pendant un tour IA / une commande terminal (évite que le processus soit tué par le système)"
+    override val residentRunning: String = "Pient en arrière-plan"
+    override val keepAliveInterruptedTitle: String = "Maintien en arrière-plan interrompu"
+    override val keepAliveInterruptedText: String = "Le service au premier plan a atteint la limite système (Android 15+ plafonne les services dataSync à 6 heures d’exécution en arrière-plan par 24 heures) et s’est arrêté : le maintien en arrière-plan est interrompu ; rouvrez Pient pour le rétablir"
+    override val keepAliveLostHint: String = "Le maintien en arrière-plan précédent a été interrompu par le système (processus libéré) ; il a été rétabli"
+    override fun keepAliveBigModelThinking(a0: Any?, a1: Any?): String = "Modèle : ${a0} · Réflexion : ${a1}"
+    override fun keepAliveBigRuntime(a0: Any?, a1: Any?): String = "Sessions de terminal : ${a0} · Appels d’outils : ${a1}"
     override val piPackagesSession: String = "paquets pi"
     override val ubuntuNotReady: String = "Ubuntu n’est pas encore prêt (pient-shell manquant)"
     override fun piListFailed(a0: Any?): String = "Échec de pi list (code de sortie ${a0})"

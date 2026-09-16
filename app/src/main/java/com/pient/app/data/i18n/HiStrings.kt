@@ -96,6 +96,10 @@ object HiSettings : SettingsStrings {
     override fun versionLabel(a0: Any?): String = "संस्करण ${a0}"
     override fun upToDateLabel(a0: Any?): String = "आप नवीनतम संस्करण ${a0} पर हैं"
     override val languageApplied: String = "बदलने पर तुरंत लागू होता है — रीस्टार्ट की ज़रूरत नहीं"
+    override val backgroundKeepAlive: String = "बैकग्राउंड में चालू रखें"
+    override val residentNotification: String = "बैकग्राउंड में स्थायी सूचना"
+    override val residentNotificationDesc: String = "चालू करने पर सूचना शेड में Pient की सूचना हमेशा रहती है: सिस्टम प्रोसेस को बंद नहीं करता और AI टर्न व टर्मिनल सत्र बैकग्राउंड में या स्क्रीन बंद होने पर भी चलते रहते हैं"
+    override val residentNotificationNoPermission: String = "सूचना की अनुमति नहीं है: स्थायी सूचना दिखाई नहीं देगी (सिस्टम सेटिंग्स में चालू कर सकते हैं)"
 }
 
 object HiChat : ChatStrings {
@@ -1229,6 +1233,12 @@ object HiRuntime : RuntimeStrings {
     override val scriptRunning: String = "टर्मिनल कमांड चल रहा है…"
     override val keepAliveChannelName: String = "Pient स्थिति"
     override val keepAliveChannelDesc: String = "AI टर्न / टर्मिनल कमांड चलने के दौरान फ़ोरग्राउंड सूचना (ताकि सिस्टम प्रोसेस को बंद न कर दे)"
+    override val residentRunning: String = "Pient बैकग्राउंड में चालू है"
+    override val keepAliveInterruptedTitle: String = "बैकग्राउंड बनाए रखना बंद हो गया"
+    override val keepAliveInterruptedText: String = "फ़ोरग्राउंड सेवा सिस्टम की समय-सीमा (Android 15+ में dataSync के लिए 24 घंटे में कुल 6 घंटे बैकग्राउंड) तक पहुँचकर बंद हो गई: बैकग्राउंड बनाए रखना रुक गया है; Pient दोबारा खोलने पर यह फिर चालू हो जाएगा"
+    override val keepAliveLostHint: String = "पिछली बार का स्थायी बैकग्राउंड सिस्टम ने रोक दिया था (प्रोसेस हटा दिया गया था), अब यह फिर चालू कर दिया गया है"
+    override fun keepAliveBigModelThinking(a0: Any?, a1: Any?): String = "मॉडल: ${a0} · सोच: ${a1}"
+    override fun keepAliveBigRuntime(a0: Any?, a1: Any?): String = "टर्मिनल सत्र: ${a0} · टूल कॉल: ${a1}"
     override val piPackagesSession: String = "pi पैकेज"
     override val ubuntuNotReady: String = "Ubuntu अभी तैयार नहीं (pient-shell अनुपलब्ध है)"
     override fun piListFailed(a0: Any?): String = "pi list विफल (एग्ज़िट कोड ${a0})"

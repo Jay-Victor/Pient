@@ -2,6 +2,7 @@ package com.pient.app.data
 
 import com.pient.app.data.i18n.L
 import com.pient.app.AppCtx
+import com.pient.app.runtime.KeepAliveDetail
 import com.pient.app.runtime.PiKeepAlive
 
 import android.content.Context
@@ -103,6 +104,27 @@ class ChatState {
     private companion object {
         /** 日志 tag（上下文压缩等取证日志，便于 logcat 一条命令过滤） */
         const val TAG = "Pient"
+    }
+
+    /**
+     * 本轮工具调用数（2026-09-16）：只服务前台保活通知卡片上的「工具调用：N」。
+     * 回合开始归零（[markRunning]），每来一条 `tool_execution_start` 加一。
+     */
+    var toolCallsThisTurn by mutableStateOf(0)
+
+    init {
+        // 通知卡片明细（2026-09-16）：runtime 层不反向依赖 data 层，这里把数据源注册进去 ——
+        // 模型名 / 思考等级 / 终端会话数（不含「AI 执行」镜像）/ 本轮工具调用数。
+        PiKeepAlive.detailProvider = {
+            KeepAliveDetail(
+                model = selectedModel?.name,
+                thinking = if (thinkingEnabled) thinkingLevel.label else "off",
+                sessions = runCatching {
+                    com.pient.app.runtime.TerminalSessions.sessions.count { !it.aiMirror }
+                }.getOrDefault(0),
+                toolCalls = toolCallsThisTurn,
+            )
+        }
     }
 
     // ── 会话 ──────────────────────────────────────────────
@@ -1574,6 +1596,9 @@ class ChatState {
                         )
                         toolResAt[callId] = msgs.size
                         appendEntry(Msg.ToolResult(toolName = name, preview = ""))
+                        // 通知卡片明细（2026-09-16）：工具调用数 +1，顺手刷一次卡片
+                        toolCallsThisTurn += 1
+                        PiKeepAlive.detailChanged(AppCtx.get())
                         Log.i(TAG_CHAT, "pi 工具开始：$name")
                         // 终端镜像（2026-09-16）：与 Operit 的观感对齐 —— AI 在 Ubuntu 里跑什么，终端页看得见
                         AppCtx.get()?.let {
@@ -1831,8 +1856,11 @@ class ChatState {
         // pi 子进程与它的管道不会被系统清掉（清掉 = 本轮直接消失）。
         // 挂在 markRunning 上是因为它是「本轮是否在跑」的唯一收口点：
         // 开始 / 正常结束 / 中止 / 出错 / 「重新生成」都经过它。
-        if (running) PiKeepAlive.acquire(AppCtx.get(), "chat", L.runtime.aiReplying)
-        else {
+        if (running) {
+            // 新一轮：工具计数归零（通知卡片上的「工具调用：N」）
+            toolCallsThisTurn = 0
+            PiKeepAlive.acquire(AppCtx.get(), "chat", L.runtime.aiReplying)
+        } else {
             PiKeepAlive.release(AppCtx.get(), "chat")
             // 回合收尾时刷新上下文用量真值（get_session_stats.contextUsage；2026-09-16）
             bgScope.launch { runCatching { refreshContextUsage() } }

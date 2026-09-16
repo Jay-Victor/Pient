@@ -40,6 +40,10 @@ interface SettingsStrings {
     fun versionLabel(a0: Any?): String
     fun upToDateLabel(a0: Any?): String
     val languageApplied: String
+    val backgroundKeepAlive: String
+    val residentNotification: String
+    val residentNotificationDesc: String
+    val residentNotificationNoPermission: String
 }
 
 object ZhSettings : SettingsStrings {
@@ -81,6 +85,10 @@ object ZhSettings : SettingsStrings {
     override fun versionLabel(a0: Any?): String = "版本 ${a0}"
     override fun upToDateLabel(a0: Any?): String = "当前已是最新版本 ${a0}"
     override val languageApplied: String = "切换后即时生效（无需重启）"
+    override val backgroundKeepAlive: String = "后台保活"
+    override val residentNotification: String = "后台常驻通知"
+    override val residentNotificationDesc: String = "打开后通知栏常驻一条 Pient 通知：进程不被系统清理，AI 回合与终端会话退到后台、熄屏后也能继续跑"
+    override val residentNotificationNoPermission: String = "未授予通知权限：常驻通知不会显示（可在系统设置里开启）"
 }
 
 object EnSettings : SettingsStrings {
@@ -122,4 +130,8 @@ object EnSettings : SettingsStrings {
     override fun versionLabel(a0: Any?): String = "Version ${a0}"
     override fun upToDateLabel(a0: Any?): String = "Up to date (${a0})"
     override val languageApplied: String = "Applies immediately — no restart needed"
+    override val backgroundKeepAlive: String = "Background keep-alive"
+    override val residentNotification: String = "Resident notification"
+    override val residentNotificationDesc: String = "Pins a Pient notification in the shade so the system does not clean up the process: AI turns and terminal sessions keep running in the background or with the screen off"
+    override val residentNotificationNoPermission: String = "Notification permission not granted: the resident notification stays hidden (you can enable it in system settings)"
 }

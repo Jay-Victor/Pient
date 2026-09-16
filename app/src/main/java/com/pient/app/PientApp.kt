@@ -191,6 +191,12 @@ fun PientApp() {
             .collect { SettingsStore.saveStartupAnimation(context) }
     }
 
+    // 后台保活设置持久化（行为设置：后台常驻通知 —— 应用启动时按它重挂常驻前台服务），重启后保持
+    LaunchedEffect(Unit) {
+        snapshotFlow { SettingsStore.residentNotification }
+            .collect { SettingsStore.saveResidentNotification(context) }
+    }
+
     // 输入框设置持久化（样式 + 材质 + 透明度/纹理强度），重启后保持
     LaunchedEffect(Unit) {
         snapshotFlow {
@@ -386,6 +392,13 @@ internal object PientRuntime {
      * 都没变），普通变量不会让消费用的 LaunchedEffect 重跑 —— 面板就切不过去（实测踩到）。
      */
     var pendingPanel by androidx.compose.runtime.mutableStateOf<String?>(null)
+
+    /**
+     * 应用是否在前台可见（2026-09-16）：MainActivity 的 onStart/onStop 维护。
+     * 用途 =「保活被系统停掉」这类说明挑渠道：前台用 Toast（用户正看着屏幕），后台发通知。
+     */
+    @Volatile
+    var appVisible = false
 
     /** 读盘闸门（2026-09-15）：并发/重复组合只允许一次读盘，其余 await 同一份结果 */
     private val lock = Any()
