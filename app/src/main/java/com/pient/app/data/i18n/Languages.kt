@@ -22,6 +22,8 @@ object Languages {
         Pack("zh-TW", "繁體中文", ZhTwStrings),
         Pack("en", "English", EnStrings),
         Pack("ja", "日本語", JaStrings),
+        Pack("es", "Español", EsStrings),
+        Pack("hi", "हिन्दी", HiStrings),
     )
 
     /** 语言设置页的选项：「跟随系统」置顶 + 各语言包（设计计划 6.3） */
@@ -36,7 +38,7 @@ object Languages {
         return systemId()
     }
 
-    /** 系统语言 → 我们的语言包：zh-Hant/zh-TW/zh-HK/zh-MO → 繁中，zh* → 简中，ja* → 日语，其余 → 英文 */
+    /** 系统语言 → 我们的语言包：zh-Hant/zh-TW/zh-HK/zh-MO → 繁中，zh* → 简中，ja* → 日语，es* → 西语，hi* → 印地语，其余 → 英文 */
     private fun systemId(): String {
         val tag = Locale.getDefault().toLanguageTag().lowercase(Locale.ROOT)
         return when {
@@ -44,6 +46,8 @@ object Languages {
                 tag.contains("hk") || tag.contains("mo")) -> "zh-TW"
             tag.startsWith("zh") -> "zh-CN"
             tag.startsWith("ja") -> "ja"
+            tag.startsWith("es") -> "es"
+            tag.startsWith("hi") -> "hi"
             else -> "en"
         }
     }

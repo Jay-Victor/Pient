@@ -106,5 +106,45 @@ object JaStrings : Strings {
     override val runtime = JaRuntime
 }
 
+/** Español（西班牙语）文案包 */
+object EsStrings : Strings {
+    override val common = EsCommon
+    override val settings = EsSettings
+    override val chat = EsChat
+    override val canvas = EsCanvas
+    override val session = EsSession
+    override val files = EsFiles
+    override val terminal = EsTerminal
+    override val skills = EsSkills
+    override val plugins = EsPlugins
+    override val models = EsModels
+    override val perm = EsPerm
+    override val project = EsProject
+    override val env = EsEnv
+    override val onboarding = EsOnboarding
+    override val theme = EsTheme
+    override val runtime = EsRuntime
+}
+
+/** हिन्दी（印地语）文案包 */
+object HiStrings : Strings {
+    override val common = HiCommon
+    override val settings = HiSettings
+    override val chat = HiChat
+    override val canvas = HiCanvas
+    override val session = HiSession
+    override val files = HiFiles
+    override val terminal = HiTerminal
+    override val skills = HiSkills
+    override val plugins = HiPlugins
+    override val models = HiModels
+    override val perm = HiPerm
+    override val project = HiProject
+    override val env = HiEnv
+    override val onboarding = HiOnboarding
+    override val theme = HiTheme
+    override val runtime = HiRuntime
+}
+
 /** 当前语言包的文案（Compose 与非 Compose 通用；切换语言 = SettingsStore.language 变化 → 重组） */
 val L: Strings get() = Languages.current()
