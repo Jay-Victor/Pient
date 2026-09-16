@@ -434,18 +434,23 @@ class PiKeepAliveService : Service() {
     }
 
     /**
-     * 前台服务类型：**常驻档 = `specialUse`**，按需档沿用 `dataSync`。
+     * 前台服务类型：**API 34+ 一律 `specialUse`**（2026-09-16 真机实测后的收口）。
      *
-     * 为什么常驻档必须换类型（Android 15 起，targetSdk ≥ 35）：`dataSync` 前台服务在后台
-     * **累计 6 小时 / 24 小时**就被系统强制收尾 —— 到点回调 [onTimeout]，几秒内不自停就抛
-     * `RemoteServiceException` 崩应用；额度用满后连再启动都会被 `ForegroundServiceStartNotAllowedException`
-     * 拒（除非用户把应用切到前台重置计时器）。做「真常驻」只能走 `specialUse`（没有时限），
-     * 两者都已写进 manifest 的 `foregroundServiceType`（`dataSync|specialUse`）。
+     * 为什么不用 `dataSync`（按需档原来用它）：Android 15 起 dataSync 前台服务在后台
+     * **累计 6 小时 / 24 小时**就被系统收尾，且**到点那一下在真机上必崩** —— 即使实现了
+     * `onTimeout` 并当场 `stopForeground` + `stopSelf()`，系统仍抛
+     * `RemoteServiceException$ForegroundServiceDidNotStopInTimeException` 杀掉应用
+     * （两次实测：旧写法 `stopSelf(startId)` 一次、改无条件 `stopSelf()` 后又一次，都是回调后
+     * 十几毫秒就被杀）。官方文档给的第一条建议就是「改用替代 API 而不是 dataSync」——我们这个
+     * 用途（保住用户自己要跑的 pi 回合 / 终端会话）本来就属于「不匹配现有类型」的长期运行场景，
+     * 与 Operit 的 `AIForegroundService`（`dataSync|microphone|specialUse`）同一口径。
+     * `specialUse` 没有时限，于是那条崩溃路径从根上消失；[onTimeout] 只作兜底留着。
      */
     private fun foregroundType(resident: Boolean): Int =
-        if (resident && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         } else {
+            // API 29~33：类型只是申报，取 dataSync（这两档没有 specialUse）
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         }
 
