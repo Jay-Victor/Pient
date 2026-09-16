@@ -73,7 +73,16 @@ object PiKeepAlive {
         if (active.isEmpty() && running) {
             running = false
             runCatching {
-                ctx.stopService(Intent(ctx, PiKeepAliveService::class.java))
+                // **不能用 stopService()**（2026-09-16 真机崩溃实测）：
+                // acquire 的 `startForegroundService()` 还挂着、服务还没跑进 onStartCommand 时被 stopService 撤单，
+                // Android 判定「startForegroundService() 没有随后调用 startForeground()」→
+                // `RemoteServiceException: ForegroundServiceDidNotStartInTimeException` **直接杀掉应用**。
+                // 触发面很小但很真实：**一轮在 ~100ms 内就结束**（被 pi 拒绝 / 立刻中止 / 生成失败）——
+                // markRunning(true)→(false) 挨得太近。改成给服务送一条「停」指令，让它自己走完
+                // `startForeground()` 契约再自停（服务未起时也只是一次极短的建-停，不违反契约）。
+                ctx.startService(
+                    Intent(ctx, PiKeepAliveService::class.java).setAction(PiKeepAliveService.ACTION_STOP),
+                )
                 Log.i(TAG, "前台保活已关闭（没有在跑的活了）")
             }
         }
@@ -92,6 +101,16 @@ class PiKeepAliveService : Service() {
 
     companion object {
         const val EXTRA_TEXT = "text"
+
+        /**
+         * 「只做收尾，不保活」的指令（[PiKeepAlive.release] 用）。
+         *
+         * 为什么不是 stopService()：`startForegroundService()` 之后必须由服务自己调用
+         * `startForeground()`，否则系统抛 `ForegroundServiceDidNotStartInTimeException` 杀进程
+         * （2026-09-16 真机崩溃实测：一轮在 ~100ms 内结束就会撞上）。走一条普通 startService 送
+         * 「停」指令 = 服务一定先拿到 onStartCommand 走完契约，再自己停。
+         */
+        const val ACTION_STOP = "com.pient.app.action.KEEPALIVE_STOP"
 
         /** 「点通知回哪个面板」的 extra（值 = [PiKeepAlive.PANEL_TERMINAL]） */
         const val EXTRA_PANEL = "pient_panel"
@@ -135,6 +154,12 @@ class PiKeepAliveService : Service() {
         }.onFailure {
             // 通知权限被拒 / 类型不允许：如实记一条，别让保活静默失效
             Log.w(TAG, "startForeground 失败（保活未生效）：${it.message}")
+        }
+        // 「停」指令：**先走完 startForeground 契约再自停**（见 [ACTION_STOP] 的注释 ——
+        // 直接 stopService 撤单会让系统抛 ForegroundServiceDidNotStartInTimeException 杀掉应用）
+        if (intent?.action == ACTION_STOP) {
+            runCatching { @Suppress("DEPRECATION") stopForeground(true) }
+            stopSelf()
         }
         return START_NOT_STICKY
     }
