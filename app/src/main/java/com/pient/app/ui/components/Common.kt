@@ -311,6 +311,10 @@ fun PientSegmented(
                         label,
                         style = MaterialTheme.typography.labelMedium,
                         color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        // 分段标签一律单行：行高固定 34dp，长标签（如西语「Código fuente de Markdown」）
+                        // 折行会溢出分段底盒（3 行 ≈ 144px > 102px）→ 省略号截断更稳。
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
