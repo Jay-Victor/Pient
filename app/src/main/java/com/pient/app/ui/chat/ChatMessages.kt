@@ -328,11 +328,10 @@ fun ChatMessages(
                 }
                 val idx = item.key
                 val msg = messages[idx]
-                // 思考块并入 AI 回答块（其后存在助手回答、且两者之间没隔着会渲染的条目时才跳过独立渲染，
-                // 由助手卡内折叠行承载）；与回答之间隔着工具卡时在自己的位置就地成块——视觉顺序对齐 pi：
-                // 思考 → 工具 → 回答（流式时思考本就先于工具卡出现，落库后不该改序）
-                val standaloneThinking = msg is Msg.Thinking && thinkingSeparatedByTool(messages, idx)
-                if (msg is Msg.Thinking && !standaloneThinking && followedByAssistant(messages, idx)) return@items
+                // 每条条目**就地渲染**（2026-09-16 按「节点详情卡」同款口径改写）：思考有自己的条目与
+                // 位置，不再并进紧随其后的回答卡 —— 并入会把思考摆到工具行**下方**（落库顺序里思考在
+                // 工具之后），而真实发生顺序是 思考 → 工具 → … → 回答，观感上就是流程错位。
+                // 与画布「节点详情」（TreeCanvasPanel）逐条同序：两处不再各排一套。
                 // 长按 fork 入口：仅 User/Assistant 气泡响应（2026-09-02 分支功能设计 §4.1）
                 val longPressable = msg is Msg.User || msg is Msg.Assistant
                 Box(
@@ -366,16 +365,12 @@ fun ChatMessages(
                             } else Modifier,
                         ),
                 ) {
-                    val thinkingIdx = if (msg is Msg.Assistant) precedingThinkingIndex(messages, idx) else -1
                     MessageCard(
                         msg,
                         toolResult = if (msg is Msg.ToolCall && idx + 1 < messages.size)
                             messages[idx + 1] as? Msg.ToolResult else null,
-                        thinking = thinkingIdx.takeIf { it >= 0 }?.let { messages[it] as? Msg.Thinking },
                         // 展开初值：刚流式完的思考块（本运行内的 live preview）保持展开，历史载入的收起
-                        thinkingExpandedDefault = (thinkingIdx >= 0 && thinkingIdx == liveThinkingIndex) ||
-                            (msg is Msg.Thinking && idx == liveThinkingIndex),
-                        standaloneThinking = standaloneThinking,
+                        thinkingExpandedDefault = msg is Msg.Thinking && idx == liveThinkingIndex,
                     )
                 }
             }
@@ -758,15 +753,12 @@ fun MessageLocatorDialog(
 private fun MessageCard(
     msg: Msg,
     toolResult: Msg.ToolResult? = null,
-    thinking: Msg.Thinking? = null,
     thinkingExpandedDefault: Boolean = false,
-    /** 思考块与回答之间隔着工具卡：就地渲染（无卡片外框，与流式期间同一形态） */
-    standaloneThinking: Boolean = false,
 ) {
     when (msg) {
         is Msg.User -> UserBubble(msg)
-        is Msg.Assistant -> AssistantCard(msg, thinking, thinkingExpandedDefault)
-        is Msg.Thinking -> ThinkingCard(msg, thinkingExpandedDefault, boxed = !standaloneThinking)
+        is Msg.Assistant -> AssistantCard(msg)
+        is Msg.Thinking -> ThinkingCard(msg, thinkingExpandedDefault)
         is Msg.ToolCall -> ToolRow(msg, toolResult)
         // 未成对的结果（理论上不该出现）：合成一行同款工具行，不再另设结果卡
         is Msg.ToolResult -> ToolRow(
@@ -778,50 +770,6 @@ private fun MessageCard(
 }
 
 // ───────────────────────────── 思考并入回答块的判定 ─────────────────────────────
-
-/** idx 之后是否存在助手回答（跨工具卡/结果/压缩条目扫描；遇用户消息或另一思考块即止） */
-private fun followedByAssistant(messages: List<Msg>, idx: Int): Boolean {
-    var i = idx + 1
-    while (i < messages.size) {
-        when (messages[i]) {
-            is Msg.Assistant -> return true
-            is Msg.User, is Msg.Thinking -> return false
-            else -> i++
-        }
-    }
-    return false
-}
-
-/** idx 之前最近的思考块**下标**（跨工具结果/压缩条目扫描；遇工具卡或用户/助手消息即止，无则 -1） */
-private fun precedingThinkingIndex(messages: List<Msg>, idx: Int): Int {
-    var i = idx - 1
-    while (i >= 0) {
-        when (messages[i]) {
-            is Msg.Thinking -> return i
-            // 隔着会渲染的工具卡 → 该思考块已在自己的位置成块，不再并入本条回答
-            //（与 thinkingSeparatedByTool 对称；不对称会把同一块渲染两次）
-            is Msg.ToolCall, is Msg.User, is Msg.Assistant -> return -1
-            else -> i--
-        }
-    }
-    return -1
-}
-
-/**
- * 思考块与紧随其后的回答之间是否隔着会渲染的条目（工具卡）。
- * 隔着 → 思考块就地成块，视觉顺序保持 pi 的流式顺序：思考 → 工具（卡）→ 回答。
- */
-private fun thinkingSeparatedByTool(messages: List<Msg>, idx: Int): Boolean {
-    var i = idx + 1
-    while (i < messages.size) {
-        when (messages[i]) {
-            is Msg.ToolCall -> return true
-            is Msg.User, is Msg.Thinking, is Msg.Assistant -> return false
-            else -> i++
-        }
-    }
-    return false
-}
 
 // ───────────────────────────── 长按消息菜单（分支 + 复制 + 重新生成） ─────────────────────────────
 
@@ -1191,8 +1139,6 @@ private fun UserBubble(msg: Msg.User) {
 @Composable
 private fun AssistantCard(
     msg: Msg.Assistant,
-    thinking: Msg.Thinking? = null,
-    thinkingExpandedDefault: Boolean = false,
 ) {
     Column(Modifier.fillMaxWidth()) {
         if (!msg.model.isNullOrBlank()) {
@@ -1201,13 +1147,6 @@ private fun AssistantCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 4.dp),
-            )
-        }
-        if (thinking != null) {
-            ThinkingDisclosure(
-                text = thinking.text,
-                durationMs = thinking.durationMs,
-                expandedDefault = thinkingExpandedDefault,
             )
         }
         MarkdownText(msg.markdown, modifier = Modifier.padding(top = 2.dp))
@@ -1374,19 +1313,9 @@ private fun ThinkingLabel(label: String, live: Boolean) {
  * ThinkingDisclosure）视觉连续——同一块思考不该因为中间插了工具卡就换一副壳。
  */
 @Composable
-private fun ThinkingCard(msg: Msg.Thinking, expandedDefault: Boolean = false, boxed: Boolean = true) {
-    val frame = if (boxed) {
-        Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
-            .padding(horizontal = 10.dp)
-    } else {
-        Modifier.fillMaxWidth()
-    }
-    Column(
-        modifier = frame,
-    ) {
+private fun ThinkingCard(msg: Msg.Thinking, expandedDefault: Boolean = false) {
+    // 统一无外框（2026-09-16）：与流式期间的思考预览、以及画布「节点详情」里的思考同一形态
+    Column(Modifier.fillMaxWidth()) {
         ThinkingDisclosure(
             text = msg.text,
             durationMs = msg.durationMs,

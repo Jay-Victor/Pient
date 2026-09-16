@@ -960,8 +960,7 @@ class ChatState {
                 onThinking = { noteThinkingDelta(it) },
                 media = inline.parts,
             )
-            // 思考先于回答落库：条目顺序 = [思考, 回答]，列表层把思考并入紧随其后的回答卡
-            appendThinkingEntry(outcome)
+            // 思考已按阶段落库（runChatViaPi 的 flushThinking），这里只落回答
             appendEntry(Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
             // 用量台账（用量页数据源）：完成即记一笔（usage 为空 = 服务商未返回用量，不记）
             UsageStore.record(cfg.providerId, effectiveModel, outcome.usage)
@@ -1027,9 +1026,8 @@ class ChatState {
                 },
                 onThinking = { noteThinkingDelta(it) },
             )
-            // 思考条目与回答同位替换（游标 = 目标回答当前位置）：前面已有思考 → 原位替换；没有则插入
-            val target = upsertThinkingBefore(runInsertAt ?: index, outcome)
-            replaceMessageAt(target, Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
+            // 思考/工具行已由 flushThinking 插到目标回答之前（游标每插一条前进一位），这里原位替换回答
+            replaceMessageAt(runInsertAt ?: index, Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
             // 重新生成同样计入用量台账（一次真实请求 = 一笔用量）
             UsageStore.record(cfg.providerId, effectiveModel, outcome.usage)
             null
@@ -1258,39 +1256,10 @@ class ChatState {
         val rebuilt = ArrayList<Msg>(arr.length())
         for (i in 0 until arr.length()) {
             val m = arr.optJSONObject(i) ?: continue
-            when (m.optString("role")) {
-                "user" -> {
-                    val text = piText(m).trim()
-                    if (text.isNotEmpty()) rebuilt += Msg.User(text)
-                }
-                "assistant" -> {
-                    val text = piText(m).trim()
-                    if (text.isNotEmpty()) rebuilt += Msg.Assistant(text, null)
-                    // 助手消息里带的**工具调用块**（pi 的 content 里 type="toolCall"）→ 还原成工具行。
-                    // 不做这一步，每轮开头的重建就会把工具行冲掉（实测踩过：第二轮进来看不到上一轮的工具卡）。
-                    val content = m.opt("content")
-                    if (content is JSONArray) {
-                        for (j in 0 until content.length()) {
-                            val b = content.optJSONObject(j) ?: continue
-                            if (b.optString("type") != "toolCall") continue
-                            rebuilt += Msg.ToolCall(
-                                name = b.optString("name"),
-                                // params 存原样 JSON 串（ToolRows 按 JSON 解析出 command/path/…）
-                                params = b.opt("arguments")?.toString().orEmpty(),
-                                status = ToolStatus.DONE,
-                            )
-                        }
-                    }
-                }
-                "toolResult" -> {
-                    val text = piText(m).trim()
-                    rebuilt += Msg.ToolResult(
-                        toolName = m.optString("toolName"),
-                        preview = piPreview(text),
-                        full = text.takeIf { it.isNotBlank() },
-                    )
-                }
-            }
+            // 还原口径 = **按内容块顺序**（thinking / text / toolCall 各自在原位置），与画布「节点详情」
+            // 用的 pushPiMessage 同一实现（2026-09-16）：旧写法固定「正文 → 再工具行」且整块丢掉思考，
+            // 每轮回读后聊天页的顺序就和节点详情卡对不上。
+            pushPiMessage(m, rebuilt)
         }
         if (rebuilt.isEmpty()) return
         val list = messagesBySession.getOrPut(id) { mutableStateListOf() }
@@ -1531,13 +1500,38 @@ class ChatState {
             "$userText\n\n[附件未直发] 另有 $skippedMedia 个非图片附件（pi 通道只直发图片）"
         } else userText
         val text = StringBuilder()
-        val think = StringBuilder()
+        val think = StringBuilder()          // 本轮全部思考（ChatOutcome 用；条目按阶段落库，见 flushThinking）
+        val thinkPhase = StringBuilder()     // **当前阶段**的思考：工具调用/回合收尾时落成一条 Msg.Thinking
         var usage: Usage? = null
         val settled = CompletableDeferred<Unit>()
         lastPiError = null
         // pi 的工具事件 → 消息区（这两类消息的 UI 一直都在：ToolRows 渲染 ToolCall + 紧跟的 ToolResult）
         val toolCallAt = HashMap<String, Int>()   // toolCallId → ToolCall 消息下标
         val toolResAt = HashMap<String, Int>()    // toolCallId → ToolResult 消息下标
+        /**
+         * 把**当前阶段**的思考落成一条 [Msg.Thinking]（2026-09-16 起按阶段落库）。
+         *
+         * 为什么按阶段：一次模型调用 = 一段思考 + 它随后的工具调用（pi 的条目顺序也正是
+         * `assistant{thinking,toolCall}` → `toolResult` → `assistant{thinking,…}`）。旧实现把整轮思考
+         * 攒到回合末尾才落库，条目顺序就变成「工具行… → 思考 → 回答」；节点详情卡按 pi 的顺序渲染，
+         * 聊天页又把它并进回答卡 → 两处观感都对不上真实流程。
+         */
+        fun flushThinking() {
+            val t = thinkPhase.toString().trim()
+            thinkPhase.setLength(0)
+            streamThinking = ""
+            if (t.isEmpty()) {
+                streamThinkingStartedAt = 0L
+                return
+            }
+            val started = streamThinkingStartedAt
+            val duration = if (started > 0L) System.currentTimeMillis() - started else null
+            val level = if (thinkingEnabled) thinkingLevel.piValue else "off"
+            // 上屏下标 = live preview latch：刚落下的这块保持展开，历史载入的一律收起
+            liveThinkingIndex = appendEntry(Msg.Thinking(level, t, duration))
+            streamThinkingStartedAt = 0L
+        }
+
         val collector = launch {
             PiRpc.events.collect { ev ->
                 val evType = ev.optString("type")
@@ -1553,12 +1547,16 @@ class ChatState {
                                 onDelta(text.toString())
                             }
                             "thinking_delta" -> if (thinkingEnabled) {
-                                think.append(d.optString("delta"))
-                                onThinking(think.toString())
+                                val delta = d.optString("delta")
+                                think.append(delta)
+                                thinkPhase.append(delta)
+                                onThinking(thinkPhase.toString())
                             }
                         }
                     }
                     "tool_execution_start" -> {
+                        // 这段思考发生在这次工具调用**之前** → 先落库，条目顺序才是 思考 → 工具
+                        flushThinking()
                         val callId = ev.optString("toolCallId")
                         val name = ev.optString("toolName")
                         val msgs = currentMessages
@@ -1635,6 +1633,8 @@ class ChatState {
         }
         val ok = withTimeoutOrNull(600_000) { settled.await() } != null
         collector.cancel()
+        // 收尾：最后一段思考落在回答之前（没有工具时就是「思考 → 回答」这一条链）
+        flushThinking()
         // 通道中途断开（channel_closed）且本轮没拿到任何文本 → 如实报错，
         // 别落一条空回答让用户以为"AI 回了但看不到内容"（2026-09-15 实测：pi 秒退时就这样）
         if (!PiRpc.processAlive() && text.isBlank() && think.isBlank()) {
@@ -1786,45 +1786,6 @@ class ChatState {
     private fun noteThinkingDelta(text: String) {
         if (streamThinkingStartedAt == 0L) streamThinkingStartedAt = System.currentTimeMillis()
         streamThinking = text
-    }
-
-    /** 本轮思考落库为 [Msg.Thinking]（无思考内容时不落条目）；返回落下的条目 */
-    private fun appendThinkingEntry(outcome: ChatOutcome): Msg.Thinking? {
-        val msg = thinkingMsgOf(outcome) ?: return null
-        // 记下它的上屏下标：回答落地后该块保持展开（Hermes live preview 的 latch）
-        liveThinkingIndex = appendEntry(msg)
-        return msg
-    }
-
-    /**
-     * 思考条目构造（思考模式关闭 / 服务商未回思考内容 → null，不落条目也不渲染折叠行）。
-     * level 取 pi 思考级别字面量（minimal…xhigh，与 pi 会话条目同口径）。
-     */
-    private fun thinkingMsgOf(outcome: ChatOutcome): Msg.Thinking? {
-        val text = outcome.thinking.trim()
-        if (text.isEmpty()) return null
-        val level = if (thinkingEnabled) thinkingLevel.piValue else "off"
-        val started = streamThinkingStartedAt
-        val duration = if (started > 0L) System.currentTimeMillis() - started else null
-        return Msg.Thinking(level, text, duration)
-    }
-
-    /**
-     * 重新生成时同步思考条目：该条助手消息前面已有思考条目 → 原位替换；否则**插入**一条
-     * （消息流插到下一位，条目树里插成 前一条目 → 新思考条目 → 该助手条目 的一段链）。
-     *
-     * @return 助手消息在思考条目落位后的最新下标（插入时 = index + 1）
-     */
-    private fun upsertThinkingBefore(index: Int, outcome: ChatOutcome): Int {
-        val msg = thinkingMsgOf(outcome) ?: return index
-        val sid = currentSessionId ?: return index
-        val list = messagesBySession[sid] ?: return index
-        if (list.getOrNull(index - 1) is Msg.Thinking) {
-            replaceMessageAt(index - 1, msg)
-            return index
-        }
-        insertEntryAt(index, msg)
-        return index + 1
     }
 
     /** 当前会话 root→leaf 的条目路径（条目树遍历的唯一实现，消息流下标 = 路径下标） */
