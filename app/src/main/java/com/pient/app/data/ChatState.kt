@@ -42,6 +42,12 @@ private const val TAG_CHAT = "PientChat"
  */
 private const val SYS_PROMPT_FILE = ".pient-sysprompt.txt"
 
+/**
+ * pi 侧「引用标记」的 customType（`custom` 条目：不进 LLM 上下文、不进画布）。
+ * 必须与 `assets/pient-pi-extension.ts` 的 QUOTE_TYPE 保持一致 —— 发送前写标记、重建时按它挂回引用卡。
+ */
+private const val PI_QUOTE_TYPE = "pient_quote"
+
 /** 顶栏右下方区域内容（消息区 / 文件内容预览区 / 终端页 / 分支画布 四态切换） */
 enum class Panel { MESSAGES, FILES, TERMINAL, TREE }
 
@@ -1012,6 +1018,7 @@ class ChatState {
             val outcome = runChat(
                 cfg = cfg.copy(modelList = effectiveModel),
                 userTurnText = promptText,
+                quote = quote,
                 onDelta = { draft -> streamDraft = draft },
                 onThinking = { noteThinkingDelta(it) },
                 media = inline.parts,
@@ -1053,6 +1060,8 @@ class ChatState {
         onThinking: (String) -> Unit = {},
         /** 本回合要直发的附件部件（媒体能力开关；只作用于最新一条用户消息） */
         media: List<WirePart> = emptyList(),
+        /** 本轮的引用块（写进 pi 会话的 `pient_quote` 标记；见 [writeQuoteMarker]） */
+        quote: Quote? = null,
     ): ChatOutcome {
         val target = piChannelTarget()
         if (target != null && PiRpc.usable() && PiRpc.start(target.first, target.second)) {
@@ -1061,7 +1070,7 @@ class ChatState {
                 piReadiness = PiReadiness.Ready
                 piUnreadyReason = ""
             }
-            return runChatViaPi(cfg, userTurnText, media, onDelta, onThinking)
+            return runChatViaPi(cfg, userTurnText, media, onDelta, onThinking, quote)
         }
         // ── pi 起不来：**不换路**（2026-09-15 拍板 B + 收口）────────────────────────
         // 直连没有任何工具能力，落回去会让用户以为自己在用 agent；§8.3 作废后本地也不存在
@@ -1254,6 +1263,20 @@ class ChatState {
             // 每轮回读后聊天页的顺序就和节点详情卡对不上。
             pushPiMessage(m, rebuilt)
         }
+        // 引用卡挂回（2026-09-17）：pi 侧带 `pient_quote` 标记的用户条目 → 正文剥掉 "> " 块、
+        // 引用回填 quote 字段。不修的话「开画布 / 切分支 / fork / 中止 / 压缩」之后气泡里
+        // 会直接冒出 "> …" 字面行、卡片再也回不来（用户实报的缺口）。
+        val quoted = piQuotedUserMsgs()
+        if (quoted.isNotEmpty()) {
+            var restored = 0
+            for (i in rebuilt.indices) {
+                val u = rebuilt[i] as? Msg.User ?: continue
+                val q = quoted[u.text.trim()] ?: continue
+                rebuilt[i] = q
+                restored++
+            }
+            if (restored > 0) Log.i(TAG_CHAT, "按 pi 重建后挂回引用卡：$restored 条")
+        }
         if (rebuilt.isEmpty()) return
         val list = messagesBySession.getOrPut(id) { mutableStateListOf() }
         // 兜底：本地尾部若是一条 pi 还不认识的用户消息（刚发出、pi 未落盘），重建后补回去 ——
@@ -1317,7 +1340,12 @@ class ChatState {
         // 有文本块且无 toolResult 块，避免助手/工具结果被当成节点（实测踩过：画布 28 个节点）。
         fun isUserTurn(id: String): Boolean = isPiUserNode(entryById[id])
         val userIds = order.filter { isUserTurn(it) }
-        fun textOf(id: String) = piText(entryById[id]?.optJSONObject("message"))
+        fun textOf(id: String): String {
+            val raw = piText(entryById[id]?.optJSONObject("message"))
+            if (!isUserTurn(id)) return raw
+            // 带引用的用户消息：节点预览显示**用户原话**（引用块由节点详情卡单独呈现，2026-09-17）
+            return piQuotedUserMsg(id, raw, entryById, parentOf)?.text ?: raw
+        }
         val idxOf = HashMap<String, Int>().apply { userIds.forEachIndexed { i, u -> put(u, i) } }
         // 每个用户消息的 exchange = **它自己这一回合**里的助手文本：从它往下走，遇到下一个用户消息就停。
         // 早先按拍平顺序（order）切段，分叉后会串味（另一条支的助手文本被算给上一个用户消息、
@@ -1542,6 +1570,83 @@ class ChatState {
         return x == y || x.contains(y) || y.contains(x)
     }
 
+    // ── 引用标记（pi `custom` 条目，2026-09-17）────────────────────────────────
+    // 引用卡不能只活在本地镜像里：pi 的会话文件里只留得下注入后的文本（"> …" + 空行 + 正文），
+    // 任何一次「按 pi 重建上屏流」都会把卡片抹成气泡里的字面行。所以发送前先往 pi 会话写一条
+    // `pient_quote` custom 条目（`session-format.md` 明写不进 LLM 上下文、不进画布），
+    // 重建时按「这条 user 条目的 parent 是不是它」把卡片挂回去。
+
+    /**
+     * 把引用写进 pi 会话（扩展命令 `/pient-quote <base64(JSON)>` → `pi.appendEntry`）。
+     * 为什么走扩展命令：pi 的 RPC 没有「追加自定义条目」这条命令，官方扩展 API 有
+     * （锚点标记 `pient_anchor` 走的就是同一条路）。**必须在 prompt 之前发** ——
+     * 标记写在当前叶之下，随后追加的用户消息才成为它的子条目。
+     */
+    private suspend fun writeQuoteMarker(quote: Quote) {
+        val payload = JSONObject().put("text", quote.text).put("role", quote.role).toString()
+        val b64 = android.util.Base64.encodeToString(
+            payload.toByteArray(Charsets.UTF_8),
+            android.util.Base64.NO_WRAP,
+        )
+        val res = runCatching { PiRpc.prompt("/pient-quote $b64") }.getOrNull()
+        if (res == null || !res.optBoolean("success", true)) {
+            Log.w(TAG_CHAT, "引用标记未写入 pi（本轮照发）：${res?.optString("error").orEmpty()}")
+        } else {
+            Log.i(TAG_CHAT, "引用标记已写入 pi 会话（${quote.role} · ${quote.text.length} 字）")
+        }
+    }
+
+    /**
+     * pi 条目 → 它挂着的引用标记（parent 是 `custom/pient_quote` 时取它的 data；没有返回 null）。
+     *
+     * `entries` / `parents` 默认取实例上那份（`refreshPiTree` 后的全局状态）；**画布建树时必须显式传
+     * `piParseTree` 自己的局部表** —— 那一刻实例字段还是上一棵树（首次刷新时是空的），
+     * 用它会让画布节点预览退回 "> …" 原文（2026-09-17 实测踩过）。
+     */
+    private fun quoteMarkerOf(
+        entryId: String,
+        entries: Map<String, JSONObject> = piEntryById,
+        parents: Map<String, String?> = piParentOf,
+    ): Quote? {
+        val pid = parents[entryId] ?: return null
+        val parent = entries[pid] ?: return null
+        if (parent.optString("type") != "custom" || parent.optString("customType") != PI_QUOTE_TYPE) return null
+        val d = parent.optJSONObject("data") ?: return null
+        val text = d.optString("text").trim()
+        if (text.isEmpty()) return null
+        return Quote(text, if (d.optString("role") == "assistant") "assistant" else "user")
+    }
+
+    /**
+     * pi 用户条目 + 引用标记 → 上屏用的 [Msg.User]（正文剥掉引用块、引用回填 quote 字段）。
+     * **文本形态必须与标记对得上**：标记有可能成了孤儿（写了标记但本轮没发出去 → 后一条消息
+     * 会挂在它下面），对不上宁可不认 —— 最坏只是回到「正文里有 `> …` 行」的旧样子，
+     * 不会把别的消息错标成引用。
+     */
+    private fun piQuotedUserMsg(
+        entryId: String,
+        rawText: String,
+        entries: Map<String, JSONObject> = piEntryById,
+        parents: Map<String, String?> = piParentOf,
+    ): Msg.User? {
+        val marker = quoteMarkerOf(entryId, entries, parents) ?: return null
+        val (quoted, body) = Quote.splitInjected(rawText.trim()) ?: return null
+        if (quoted != marker.text.trim()) return null
+        return Msg.User(body, emptyList(), marker)
+    }
+
+    /** 重建上屏流时按「pi 条目文本」对位挂回引用卡（`get_messages` 不带条目 id，只能按文本认） */
+    private fun piQuotedUserMsgs(): Map<String, Msg.User> {
+        val out = HashMap<String, Msg.User>()
+        for ((id, e) in piEntryById) {
+            if (!isPiUserNode(e)) continue
+            val raw = piText(e.optJSONObject("message")).trim()
+            if (raw.isEmpty()) continue
+            piQuotedUserMsg(id, raw)?.let { out[raw] = it }
+        }
+        return out
+    }
+
 
     /**
      * **走 pi 通道跑一轮**（2026-09-14）：只送最后一条用户消息 —— pi 在同一条 RPC 会话里
@@ -1560,6 +1665,7 @@ class ChatState {
         media: List<WirePart>,
         onDelta: (String) -> Unit,
         onThinking: (String) -> Unit,
+        quote: Quote? = null,
     ): ChatOutcome = coroutineScope {
         val userText = userTurnText
         // 附件直发：pi 的 `prompt` 支持 images（ImageContent = {type,data,mimeType}，见 pi docs/rpc.md）。
@@ -1733,6 +1839,10 @@ class ChatState {
                 }
             }
         }
+        // 引用元数据先写进 pi 会话（`pient_quote` custom 条目，parent = 当前叶 → 紧随其后的用户消息
+        // 成为它的子条目）：按 pi 重建上屏流时靠它把引用卡挂回去（2026-09-17）。
+        // 失败只记一行日志 —— 正文里那份 "> …" 注入本来就是模型侧的兜底，标记只服务 UI 还原。
+        if (quote != null) writeQuoteMarker(quote)
         val res = PiRpc.prompt(promptText, piImages)
         if (res != null && !res.optBoolean("success", true)) {
             collector.cancel()
@@ -2073,7 +2183,10 @@ class ChatState {
         val sid = currentSessionId ?: return emptyList()
         if (piTreeSessionId == sid && piEntryById.containsKey(nodeId)) {
             val out = ArrayList<Msg>()
-            pushPiMessage(piEntryById[nodeId]?.optJSONObject("message"), out)   // 节点自身（用户消息）
+            val nodeMsg = piEntryById[nodeId]?.optJSONObject("message")
+            // 节点自身（用户消息）：带引用标记时剥掉 "> " 块、挂回 quote —— 与聊天页气泡同口径
+            val quotedSelf = if (nodeMsg != null) piQuotedUserMsg(nodeId, piText(nodeMsg)) else null
+            if (quotedSelf != null) out += quotedSelf else pushPiMessage(nodeMsg, out)
             // 子表按条目顺序建（get_tree 的解析顺序 = 会话顺序）
             val kids = HashMap<String, MutableList<String>>()
             piEntryById.keys.forEach { id -> piParentOf[id]?.let { p -> kids.getOrPut(p) { mutableListOf() } += id } }

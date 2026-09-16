@@ -1,10 +1,11 @@
 /**
  * Pient ↔ pi 的桥接扩展（随 APK 预置，安装到 guest 的 `~/.pi/agent/extensions/pient.ts`）。
  *
- * 这里一共三样东西：
+ * 这里一共四样东西：
  *  1. `/pient-nav <entryId>` —— 会话内分支跳转（补 RPC 缺的那条能力）；
  *  2. `/pient-sysprompt` —— 把 pi 真实生效的系统提示词回流给 App 的只读面板；
- *  3. `android_shell` **工具** —— 让 AI 能在 **Android 系统**里执行命令（Ubuntu 做不到的那些：
+ *  3. `/pient-quote <base64(JSON)>` —— 把「引用某条消息」的元数据写进会话（`pient_quote` custom 条目）；
+ *  4. `android_shell` **工具** —— 让 AI 能在 **Android 系统**里执行命令（Ubuntu 做不到的那些：
  *     `pm`/`am`/`cmd`/`dumpsys` 等系统命令、装应用、改系统设置、读别的 app 私有数据、操作硬件）。
  *
  * ── 为什么 `/pient-nav` 要自己写 ─────────────────────────────────────────────
@@ -51,9 +52,17 @@ import { Type } from "typebox";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { Buffer } from "node:buffer";
 
 /** 锚点标记的 customType（Pient 与 pi 都视其为元数据） */
 const ANCHOR_TYPE = "pient_anchor";
+
+/**
+ * 引用标记的 customType（App 侧常量 `ChatState.PI_QUOTE_TYPE` 必须与它一致）。
+ * `custom` 条目 = extension state persistence，pi 明写「不进 LLM 上下文」——
+ * 引用内容本身仍走用户消息正文（"> …" 块引用），这条标记只负责让 App 重建上屏流时把引用卡挂回去。
+ */
+const QUOTE_TYPE = "pient_quote";
 
 /** 系统提示词回流文件（Pient 的「系统提示词」面板读它；App 侧不再持有提示词） */
 const SYSPROMPT_FILE = ".pient-sysprompt.txt";
@@ -153,6 +162,53 @@ export default function (pi: ExtensionAPI) {
       } catch (e) {
         ctx.ui.notify(`pient-sysprompt 写文件失败：${e instanceof Error ? e.message : String(e)}`, "error");
       }
+    },
+  });
+
+  // ── 引用标记（2026-09-17）────────────────────────────────────────────────────
+  // Pient 的「长按消息 → 引用追问」把被引内容以 markdown 块引用拼进用户消息正文。问题在于**只有文本**：
+  // 一旦 App 按 pi 重建上屏流（开画布 / 切分支 / fork / 中止 / 压缩），引用卡就退化成正文里的
+  // "> …" 字面行 —— pi 的会话文件里只留得下那段文本。这条命令把同一份引用**另存一条结构化元数据**：
+  //
+  //   /pient-quote <base64(JSON)>   →   pi.appendEntry("pient_quote", { v, text, role, at })
+  //
+  // 追加在当前叶之下，**紧随其后 prompt 追加的用户消息就是它的子条目**；App 侧按
+  // 「user 条目的 parent 是不是 pient_quote」把引用卡挂回去（并按文本形态校验，防错挂）。
+  // custom 条目不进 LLM 上下文、也不进 Pient 画布（画布只认 type=message）。
+  // 参数走 base64：引用原文可能多行、含引号，而命令参数 = 「第一个空格之后的整段」——
+  // 单行 base64 是唯一不会踩到解析的形态。
+  pi.registerCommand("pient-quote", {
+    description: "Pient: 给紧随其后的用户消息挂一条引用元数据（自定义条目，不进 LLM 上下文）",
+    handler: async (args, ctx) => {
+      const raw = (args || "").trim();
+      if (!raw) {
+        ctx.ui.notify("用法：/pient-quote <base64(JSON {text, role})>", "error");
+        return;
+      }
+      let payload: { text?: string; role?: string };
+      try {
+        payload = JSON.parse(Buffer.from(raw, "base64").toString("utf8")) as { text?: string; role?: string };
+      } catch (e) {
+        ctx.ui.notify(`pient-quote: 参数解析失败（${e instanceof Error ? e.message : String(e)}）`, "error");
+        return;
+      }
+      const text = (payload.text ?? "").trim();
+      if (!text) {
+        ctx.ui.notify("pient-quote: text 为空，未写标记", "warning");
+        return;
+      }
+      if (!ctx.isIdle()) {
+        // 标记必须落在「本轮用户消息」之前（appendEntry 写在当前叶之下）；流式中写会挪动活跃叶 ——
+        // 宁可不写：App 侧认不出标记就当普通文本处理，不会有副作用
+        ctx.ui.notify("pient-quote: agent 正在运行，本次不写引用标记", "warning");
+        return;
+      }
+      pi.appendEntry(QUOTE_TYPE, {
+        v: 1,
+        text,
+        role: payload.role === "assistant" ? "assistant" : "user",
+        at: Date.now(),
+      });
     },
   });
 

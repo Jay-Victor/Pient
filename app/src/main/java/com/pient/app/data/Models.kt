@@ -786,12 +786,37 @@ data class Quote(
     val role: String,
 ) {
     /**
-     * 注入模型上下文的形态（markdown 块引用）：被引用内容逐行加 "> " 前缀 + 空行 + 用户正文。
+     * 引用块的文本形态：被引内容逐行加 "> " 前缀（原空行写成 ">"）。
+     * 注入模型上下文用它，pi 侧那份引用标记也用它（两处同源，见 [splitInjected]）。
+     */
+    fun blockText(): String =
+        text.trim().lines().joinToString("\n") { if (it.isEmpty()) ">" else "> $it" }
+
+    /**
+     * 注入模型上下文的形态（markdown 块引用）：引用块 + 空行 + 用户正文。
      * 与 pi/pi-web 无冲突——pi 的会话条目本就是文本消息，块引用是最通用的「引用+追问」表达。
      */
-    fun toPrompt(userText: String): String =
-        text.trim().lines().joinToString("\n") { if (it.isEmpty()) ">" else "> $it" } +
-            "\n\n" + userText
+    fun toPrompt(userText: String): String = blockText() + "\n\n" + userText
+
+    companion object {
+        /**
+         * [toPrompt] 的逆运算（2026-09-17）：把「引用块 + 空行 + 正文」拆回 (引用原文, 正文)。
+         * 判据 = 整段以块引用行开头、且块后紧跟一个空行；不成形态（或拆出空的一侧）返回 null。
+         *
+         * 为什么需要：pi 的会话文件里只留得下注入后的**文本**，按 pi 重建上屏流时若不拆回来，
+         * 气泡就会直接显示 "> …" 字面行（引用卡的正文形态本该是用户原话）。
+         */
+        fun splitInjected(text: String): Pair<String, String>? {
+            val lines = text.split("\n")
+            var i = 0
+            while (i < lines.size && (lines[i] == ">" || lines[i].startsWith("> "))) i++
+            if (i == 0 || i >= lines.size || lines[i].isNotBlank()) return null
+            val quoted = lines.take(i).joinToString("\n") { if (it == ">") "" else it.removePrefix("> ") }
+            val body = lines.drop(i + 1).joinToString("\n")
+            if (quoted.isBlank() || body.isBlank()) return null
+            return quoted.trim() to body
+        }
+    }
 }
 
 /**

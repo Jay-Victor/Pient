@@ -404,6 +404,10 @@ fun TreeCanvasPanel(chatState: ChatState) {
                         )
                     }
                     if (userMsg != null) {
+                        // 引用卡（2026-09-17）：节点自身那条消息带引用时，与聊天页气泡同口径地摆在正文上方
+                        userMsg.quote?.let { q ->
+                            QuoteCard(q, modifier = Modifier.padding(top = 12.dp))
+                        }
                         Text(
                             userMsg.text,
                             style = MaterialTheme.typography.bodyMedium,
