@@ -62,10 +62,6 @@ interface PermStrings {
     val denied: String
     val notVerified: String
     val standardHint: String
-    val activeNow: String
-    val available: String
-    val notSupported: String
-    val authorize: String
     val notInstalled: String
     val notRunning: String
     val shizukuNote: String
@@ -146,10 +142,6 @@ object ZhPerm : PermStrings {
     override val denied: String = "已拒绝"
     override val notVerified: String = "未验证"
     override val standardHint: String = "标准权限开箱即用：无需安装任何额外组件，四项基础权限齐备即可使用日常 Agent 能力。"
-    override val activeNow: String = "  当前生效"
-    override val available: String = "可用 ✓"
-    override val notSupported: String = "设备不支持"
-    override val authorize: String = "去授权"
     override val notInstalled: String = "未安装"
     override val notRunning: String = "未运行"
     override val shizukuNote: String = "Shizuku 以 ADB 权限运行，无需解锁 Bootloader；设备重启后服务需要重新激活（无线调试配对或一次 ADB 授权），授权本身不会丢失。"
@@ -230,10 +222,6 @@ object EnPerm : PermStrings {
     override val denied: String = "Denied"
     override val notVerified: String = "Not verified"
     override val standardHint: String = "Standard works out of the box: no extra components to install — with all four basic permissions in place you can use everyday Agent capabilities."
-    override val activeNow: String = "  Active now"
-    override val available: String = "Available ✓"
-    override val notSupported: String = "Not supported"
-    override val authorize: String = "Authorize"
     override val notInstalled: String = "Not installed"
     override val notRunning: String = "Not running"
     override val shizukuNote: String = "Shizuku runs with ADB permissions, so no Bootloader unlock is needed; after a reboot the service must be reactivated (wireless debugging pairing or one ADB authorization) — the authorization itself is not lost."
