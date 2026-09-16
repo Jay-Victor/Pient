@@ -79,7 +79,8 @@ import kotlinx.coroutines.withContext
  * 页面三段（自上而下）：
  * 1. **执行环境** —— Pient 特有：命令跑在哪个环境里（Ubuntu PRoot / Ubuntu chroot）。未就绪不可选
  *    （chroot 需要设备已 Root）；改完写 `exec_env`，下一条命令即生效。
- * 2. **apt 镜像源** —— 写进 rootfs 的 deb822 `ubuntu.sources`（国内镜像同时承载 noble-security）。
+ * 2. **apt 镜像源** —— 写进 rootfs 的 deb822 `ubuntu.sources`（国内镜像同时承载 noble-security）；
+ *    **路径按本机架构选**：arm64 走 `…/ubuntu-ports/`、x86_64 走 `…/ubuntu/`（写错档位 apt 整轮 404）。
  * 3. **环境内软件** —— 照 Operit：**分类卡**（标题 + 「n/m 已装」 + 全选 + 展开箭头），展开后逐包
  *    一行（勾选框 + 名称 + 已安装绿标 + 描述），右下角底部「安装所选」。
  *
@@ -106,8 +107,10 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
     val scope = rememberCoroutineScope()
 
 
-    // rootfs 就绪与否（决定整页可用性：未解包时所有检测都无意义）
+    /** rootfs 就绪与否（决定整页可用性：未解包时所有检测都无意义） */
     var rootfsReady by remember { mutableStateOf(PiRuntime.rootfsReady(context)) }
+    /** 本机 ELF 架构：决定 apt 镜像走主档还是 ports 路径（组合期只读一次） */
+    val hostMachine = remember { PiRuntime.hostMachine() }
     /** 未就绪的具体原因（在 refresh 里算：rootfsIssue 要读 ELF 头，不能放在组合期） */
     var rootfsIssueText by remember { mutableStateOf("") }
     val rooted = remember { RootGateway.deviceRooted(context) }
@@ -349,7 +352,12 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
             }
 
             // ── 2. apt 镜像源 ──
-            item { GroupTitle("apt 镜像源", "写进 Ubuntu 的 /etc/apt/sources.list.d/ubuntu.sources") }
+            item {
+                GroupTitle(
+                    "apt 镜像源",
+                    "写进 Ubuntu 的 /etc/apt/sources.list.d/ubuntu.sources；下面列出的是本机（$hostMachine）实际会写入的地址",
+                )
+            }
             item {
                 SetupCard {
                     APT_MIRRORS.forEachIndexed { i, mirror ->
@@ -376,7 +384,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                             Column(Modifier.weight(1f)) {
                                 Text(mirror.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                                 Text(
-                                    mirror.uri,
+                                    mirror.uriFor(hostMachine),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontFamily = MonoFont,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,

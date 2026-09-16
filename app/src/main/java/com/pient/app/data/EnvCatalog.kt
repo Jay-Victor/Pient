@@ -50,23 +50,42 @@ enum class ExecEnv(
 // 环境内软件（Ubuntu）：apt 镜像源 + 常用组件（纯数据，首启弹窗展示用）
 // ─────────────────────────────────────────────────────────────
 
-/** apt 镜像源（展示名 + 源地址） */
-data class AptMirror(val name: String, val uri: String)
+/**
+ * apt 镜像源：**每个镜像存两条路径**（主档 + ports），按本机架构二选一。
+ *
+ * **为什么必须有两条（2026-09-16 真机「安装环境总是失败」的根因）**：Ubuntu 把架构分两档 ——
+ * `amd64/i386` 发布在**主档**（`/ubuntu/`），`arm64/armhf` 发布在 **ports**（`/ubuntu-ports/`，
+ * 官方源是 `ports.ubuntu.com`）。两边互不包含：往主档请求 `dists/noble/main/binary-arm64/Packages`
+ * 会 **404 Not Found**（apt 报 `E: Failed to fetch … 404`、退出码 100）。
+ * 清单原来只写了主档 URI —— x86_64 模拟器上一直是对的，一到 arm64 真机整轮失败
+ * （实测：`mirrors.tuna.tsinghua.edu.cn/ubuntu/dists/noble/main/binary-arm64/Packages` = 404，
+ * 同镜像 `/ubuntu-ports/…` = 200）。所以两个路径都存，由 [uriFor] 按 [PiRuntime.hostMachine] 选。
+ */
+data class AptMirror(val name: String, val uri: String, val portsUri: String) {
+    /** 本机架构对应的真实 URI（arm64 / armhf → ports 路径，其余 → 主档） */
+    fun uriFor(hostMachine: String): String =
+        if (hostMachine == "aarch64" || hostMachine == "armhf") portsUri else uri
+}
 
 /**
- * 默认 apt 镜像源（2026-09-14 实测结论）：**国内网络下 archive.ubuntu.com 拉包会
+ * 默认 apt 镜像源（2026-09-14 实测结论）：**国内网络下官方源拉包会
  * `E: Failed to fetch` → apt 退出码 100**，而清华 TUNA 同一步骤通过。
  * 所以新增/首启的默认值取 TUNA（用户可在页面里改；已选过的不受影响）。
  */
 const val DEFAULT_APT_MIRROR = "清华 TUNA"
 
+/** 五个镜像的主档与 ports 路径**都实测过**（2026-09-16：主档 200 只含 amd64，ports 200 含 arm64 + noble-security） */
 val APT_MIRRORS = listOf(
-    AptMirror("Ubuntu 官方", "http://archive.ubuntu.com/ubuntu/"),
-    AptMirror("清华 TUNA", "http://mirrors.tuna.tsinghua.edu.cn/ubuntu/"),
-    AptMirror("阿里云", "http://mirrors.aliyun.com/ubuntu/"),
-    AptMirror("中科大 USTC", "http://mirrors.ustc.edu.cn/ubuntu/"),
-    AptMirror("网易 163", "http://mirrors.163.com/ubuntu/"),
+    AptMirror("Ubuntu 官方", "http://archive.ubuntu.com/ubuntu/", "http://ports.ubuntu.com/ubuntu-ports/"),
+    AptMirror("清华 TUNA", "http://mirrors.tuna.tsinghua.edu.cn/ubuntu/", "http://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/"),
+    AptMirror("阿里云", "http://mirrors.aliyun.com/ubuntu/", "http://mirrors.aliyun.com/ubuntu-ports/"),
+    AptMirror("中科大 USTC", "http://mirrors.ustc.edu.cn/ubuntu/", "http://mirrors.ustc.edu.cn/ubuntu-ports/"),
+    AptMirror("网易 163", "http://mirrors.163.com/ubuntu/", "http://mirrors.163.com/ubuntu-ports/"),
 )
+
+/** 按名字取镜像（找不到 / 名字为空 → 默认镜像）—— 安装前自愈要拿 settings 里选的那一项 */
+fun aptMirrorByName(name: String?): AptMirror =
+    APT_MIRRORS.firstOrNull { it.name == name } ?: APT_MIRRORS.first { it.name == DEFAULT_APT_MIRROR }
 
 /**
  * 环境内软件的分类（Pient 口径：**按「装它来干什么」分**，不按语言/仓库分区）。

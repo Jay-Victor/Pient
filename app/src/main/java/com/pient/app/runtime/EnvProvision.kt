@@ -6,7 +6,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.pient.app.data.AptMirror
+import com.pient.app.data.SettingsStore
 import com.pient.app.data.UbuntuComponent
+import com.pient.app.data.aptMirrorByName
 import java.io.File
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -85,32 +87,45 @@ object EnvProvision {
      * 把 apt 镜像源写进 rootfs：`/etc/apt/sources.list.d/ubuntu.sources`（**deb822 格式**——
      * Ubuntu 24.04 起 sources.list 只剩一句「已迁移」的注释，真正生效的是这个文件）。
      * 两块都指向同一个镜像（国内镜像同时承载 noble-security）。
+     *
+     * **写进去的是按本机架构选中的那条路径**（[AptMirror.uriFor]）：arm64 走 `…/ubuntu-ports/`，
+     * x86_64 走 `…/ubuntu/` —— 写错档位 apt 会整轮 404（见 `AptMirror` 的注释）。
      */
     fun applyMirror(context: Context, mirror: AptMirror): Boolean = runCatching {
+        val uri = mirror.uriFor(PiRuntime.hostMachine())
         val dir = File(PiRuntime.rootfsDir(context), "etc/apt/sources.list.d")
         dir.mkdirs()
         File(dir, "ubuntu.sources").writeText(
             """
             |Types: deb
-            |URIs: ${mirror.uri}
+            |URIs: $uri
             |Suites: noble noble-updates noble-backports
             |Components: main universe restricted multiverse
             |Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
             |
             |Types: deb
-            |URIs: ${mirror.uri}
+            |URIs: $uri
             |Suites: noble-security
             |Components: main universe restricted multiverse
             |Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
             |
             """.trimMargin(),
         )
-        Log.i(TAG, "apt 镜像源已写入：${mirror.name} → ${mirror.uri}")
+        Log.i(TAG, "apt 镜像源已写入：${mirror.name} → $uri（本机架构 ${PiRuntime.hostMachine()}）")
         true
     }.getOrElse {
         Log.w(TAG, "apt 镜像源写入失败：${it.message}")
         false
     }
+
+    /**
+     * **安装前自愈**：把「设置里选中的镜像源」按本机架构重写一遍。
+     *
+     * 为什么每次安装都写：apt 的 URI 是设备侧持久文件，一旦写错档位（或 roots 换 ABI 后沿用旧值），
+     * `apt-get update` 会整轮 404 而用户看不出原因 —— 安装流程自己保证「索引刷新前源是对的」。
+     */
+    fun ensureSelectedMirror(context: Context): Boolean =
+        applyMirror(context, aptMirrorByName(SettingsStore.aptMirror))
 
     /** 当前 rootfs 里生效的镜像源 URI（读 ubuntu.sources；读不到返回空串） */
     fun currentMirrorUri(context: Context): String = runCatching {
@@ -174,6 +189,8 @@ object EnvProvision {
         // 会话固定 Ubuntu（不受用户给终端页选的执行环境影响；见 GuestScripts）
         val session = GuestScripts.sessionFor(context, TerminalSessions.CONFIG_SESSION)
         if (components.isEmpty() || running) return session
+        // 索引刷新前先把镜像源写对（架构档位错 = apt 整轮 404；见 ensureSelectedMirror）
+        ensureSelectedMirror(context)
         running = true
         step = "安装 ${components.size} 个组件"
         lastExitCode = null
