@@ -11,6 +11,10 @@ Refences/Operit-1.12.1/
 Refences/Mdcito-1.2.0/
 # 注意：Refences/Logo/ 为项目自有图标源文件，需入库
 
+# i18n 工作目录（界面文案的消息表 + 六门语言译文源 + 流水线脚本 + 翻译规范；本地材料、非代码，不入库）：
+# 仓库里只有生成物 app/src/main/java/com/pient/app/data/i18n/*Strings.kt
+Refences/pient_i18n/
+
 # ===== Gradle / Kotlin 构建缓存与产物 =====
 .gradle/
 .kotlin/
