@@ -272,7 +272,12 @@ private fun readLineLabel(call: Msg.ToolCall, output: String?): String {
     return if (limit > 1) L.chat.lineCountLabel(limit) else ""
 }
 
-/** 行标题：优先「动作 + 目标」（Hermes `dynamicTitle` → `actionTarget` / `actionCommand` / `actionQuoted`）。 */
+/**
+ * 行标题：优先「动作 + 目标」（Hermes `dynamicTitle` → `actionTarget` / `actionCommand` / `actionQuoted`）。
+ *
+ * 动词与语序全部取自语言包（[ChatStrings.runSummaryTarget]）：中文「已读取 wiring.tsx」、
+ * 西语「Leyó wiring.tsx」、印地语「wiring.tsx पढ़ा गया」——UI 层不再出现任何中文字面量。
+ */
 internal fun toolRowTitle(call: Msg.ToolCall): String {
     val pending = call.status == ToolStatus.RUNNING
     val verb = { past: String, present: String -> if (pending) present else past }
@@ -280,19 +285,26 @@ internal fun toolRowTitle(call: Msg.ToolCall): String {
         "bash", "terminal" -> {
             val cmd = firstArg(call.params, "command")
             if (cmd.isEmpty()) baseTitle(call.name, pending)
-            else "${verb("已运行", "正在运行")} ${compact(summarizeCommand(cmd), 160)}"
+            else L.chat.runSummaryTarget(
+                verb(L.chat.toolRan, L.chat.toolRunning),
+                compact(summarizeCommand(cmd), 160),
+            )
         }
         "grep" -> {
             val q = firstArg(call.params, "pattern", "query")
             if (q.isEmpty()) baseTitle(call.name, pending)
-            else "${verb("已搜索", "正在搜索")}“${compact(q)}”"
+            else if (pending) L.chat.toolSearchingQuery(compact(q))
+            else L.chat.toolSearchedQuery(compact(q))
         }
         "read" -> {
             val p = firstArg(call.params, "path", "file")
             if (p.isEmpty()) baseTitle(call.name, pending)
             else {
                 val label = readLineLabel(call, call.detail)
-                "${verb("已读取", "正在读取")} ${basename(p)}${if (label.isEmpty()) "" else " $label"}"
+                L.chat.runSummaryTarget(
+                    verb(L.chat.toolRead, L.chat.toolReading),
+                    "${basename(p)}${if (label.isEmpty()) "" else " $label"}",
+                )
             }
         }
         "write" -> {
@@ -308,17 +320,26 @@ internal fun toolRowTitle(call: Msg.ToolCall): String {
         "ls" -> {
             val p = firstArg(call.params, "path", "dir")
             if (p.isEmpty()) baseTitle(call.name, pending)
-            else "${verb("已列出", "正在列出")} ${basename(p)}"
+            else L.chat.runSummaryTarget(
+                verb(L.chat.toolListed, L.chat.toolListing),
+                basename(p),
+            )
         }
         "find" -> {
             val p = firstArg(call.params, "pattern", "path", "name")
             if (p.isEmpty()) baseTitle(call.name, pending)
-            else "${verb("已查找", "正在查找")} ${compact(p)}"
+            else L.chat.runSummaryTarget(
+                verb(L.chat.toolFound, L.chat.toolFinding),
+                compact(p),
+            )
         }
         else -> {
             val target = firstArg(call.params, "path", "query", "command")
             if (target.isEmpty()) baseTitle(call.name, pending)
-            else "${verb("已运行", "正在运行")} ${compact(target)}"
+            else L.chat.runSummaryTarget(
+                verb(L.chat.toolRan, L.chat.toolRunning),
+                compact(target),
+            )
         }
     }
 }
@@ -990,15 +1011,33 @@ private fun payloadText(call: Msg.ToolCall, result: Msg.ToolResult?): String {
 
 // ───────────────────────── 运行摘要 ─────────────────────────
 
-private data class CatCopy(val noun: String, val past: String, val present: String)
+private data class CatCopy(
+    val noun: String,
+    val past: String,
+    val present: String,
+    val pastPlural: String,
+    val presentPlural: String,
+)
 
 /** 工具行分句文案（计算属性/函数：顶层 val 只求值一次，写 `L.…` 会冻结成首帧语言） */
 private val CatCopyOf: Map<ToolKind, CatCopy>
     get() = mapOf(
-        ToolKind.EDIT to CatCopy(L.common.file, L.chat.toolEdited, L.chat.toolEditing),
-        ToolKind.EXPLORE to CatCopy(L.common.file, L.chat.toolRead, L.chat.toolReading),
-        ToolKind.RUN to CatCopy(L.chat.nounCommand, L.chat.toolRan, L.chat.toolRunning),
-        ToolKind.OTHER to CatCopy(L.chat.nounTool, L.chat.toolUsed, L.chat.toolUsing),
+        ToolKind.EDIT to CatCopy(
+            L.chat.nounFile, L.chat.toolEdited, L.chat.toolEditing,
+            L.chat.toolEditedPlural, L.chat.toolEditingPlural,
+        ),
+        ToolKind.EXPLORE to CatCopy(
+            L.chat.nounFile, L.chat.toolRead, L.chat.toolReading,
+            L.chat.toolReadPlural, L.chat.toolReadingPlural,
+        ),
+        ToolKind.RUN to CatCopy(
+            L.chat.nounCommand, L.chat.toolRan, L.chat.toolRunning,
+            L.chat.toolRanPlural, L.chat.toolRunningPlural,
+        ),
+        ToolKind.OTHER to CatCopy(
+            L.chat.nounTool, L.chat.toolUsed, L.chat.toolUsing,
+            L.chat.toolUsedPlural, L.chat.toolUsingPlural,
+        ),
     )
 
 /** 分句顺序固定（Hermes `CATEGORY_ORDER`）：编辑 → 读取 → 运行 → 其他。 */
@@ -1014,7 +1053,7 @@ private fun runTarget(call: Msg.ToolCall): String = when (toolKindOf(call.name))
 
 /**
  * 一行摘要（Hermes `summarizeToolRun`）：单条带目标写目标（"已读取 wiring.tsx"），
- * 否则写计数（"已运行 5 条命令"）；运行中的那一类改用进行时。分句以「、」相连。
+ * 否则写计数（"已运行 5 条命令"）；运行中的那一类改用进行时。分句顺序与连接符归语言包（[ChatStrings.runSummaryJoin]），计数分句还要一个复数形动词（西语用陈述式第三人称、印地语要与名词性别数一致）。
  */
 internal fun summarizeToolRun(calls: List<Msg.ToolCall>, live: Boolean): String {
     val narrating = if (live) calls.firstOrNull { it.status == ToolStatus.RUNNING } ?: calls.lastOrNull() else null
@@ -1025,12 +1064,13 @@ internal fun summarizeToolRun(calls: List<Msg.ToolCall>, live: Boolean): String 
         val group = byKind[kind] ?: return@mapNotNull null
         val copy = CatCopyOf.getValue(kind)
         val verb = if (kind == liveKind) copy.present else copy.past
+        val verbPlural = if (kind == liveKind) copy.presentPlural else copy.pastPlural
         val target = if (group.size == 1) runTarget(group[0]) else ""
         // 一条「已结束」的命令不写命令行（Hermes：命令行只在正等着它的时候占位置）
-        if (target.isNotEmpty() && (kind == liveKind || kind != ToolKind.RUN)) "$verb $target"
-        else L.chat.runSummaryClause(verb, group.size, copy.noun)
+        if (target.isNotEmpty() && (kind == liveKind || kind != ToolKind.RUN)) L.chat.runSummaryTarget(verb, target)
+        else L.chat.runSummaryClause(verb, group.size, copy.noun, verbPlural)
     }
-    return clauses.joinToString("、")
+    return clauses.joinToString(L.chat.runSummaryJoin)
 }
 
 /**

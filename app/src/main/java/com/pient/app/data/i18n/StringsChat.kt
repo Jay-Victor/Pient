@@ -128,6 +128,13 @@ interface ChatStrings {
     val toolSearching: String
     val toolFinding: String
     val toolListing: String
+    /** 逐工具行标题的过去式动词（grep / find / ls；此前硬编码在 UI 层） */
+    val toolSearched: String
+    val toolFound: String
+    val toolListed: String
+    /** 带查询词的标题分句（引号属语言标点）：{0} = 查询词 */
+    fun toolSearchingQuery(a0: Any?): String
+    fun toolSearchedQuery(a0: Any?): String
     fun matchCount(a0: Any?): String
     fun fileCountLabel(a0: Any?): String
     fun entryCountLabel(a0: Any?): String
@@ -149,7 +156,30 @@ interface ChatStrings {
     val nounTool: String
     val toolUsed: String
     val toolUsing: String
-    fun runSummaryClause(a0: Any?, a1: Any?, a2: Any?): String
+    /** 复数形（计数分句用；无复数概念的语言与单数同值）：已编辑 */
+    val toolEditedPlural: String
+    /** 复数形（计数分句用；无复数概念的语言与单数同值）：已读取 */
+    val toolReadPlural: String
+    /** 复数形（计数分句用；无复数概念的语言与单数同值）：已运行 */
+    val toolRanPlural: String
+    /** 复数形（计数分句用；无复数概念的语言与单数同值）：已使用 */
+    val toolUsedPlural: String
+    /** 复数形（计数分句用；无复数概念的语言与单数同值）：正在编辑 */
+    val toolEditingPlural: String
+    /** 复数形（计数分句用；无复数概念的语言与单数同值）：正在读取 */
+    val toolReadingPlural: String
+    /** 复数形（计数分句用；无复数概念的语言与单数同值）：正在运行 */
+    val toolRunningPlural: String
+    /** 复数形（计数分句用；无复数概念的语言与单数同值）：正在使用 */
+    val toolUsingPlural: String
+    /** 计数分句的文件名词（EDIT/EXPLORE 类；需要复数形式的语言写复数） */
+    val nounFile: String
+    /** 分句连接符（中文「、」不能硬编码进 UI 层：英/西 ', ' 或 ' · '） */
+    val runSummaryJoin: String
+    /** 单条带目标的分句：{0} = 动词，{1} = 目标（语序归语言） */
+    fun runSummaryTarget(a0: Any?, a1: Any?): String
+    /** 计数分句：{0} = 动词（单数形），{1} = 条数，{2} = 名词，{3} = 动词（复数形） */
+    fun runSummaryClause(a0: Any?, a1: Any?, a2: Any?, a3: Any?): String
 }
 
 object ZhChat : ChatStrings {
@@ -279,6 +309,11 @@ object ZhChat : ChatStrings {
     override val toolSearching: String = "正在搜索"
     override val toolFinding: String = "正在查找"
     override val toolListing: String = "正在列出"
+    override val toolSearched: String = "已搜索"
+    override val toolFound: String = "已查找"
+    override val toolListed: String = "已列出"
+    override fun toolSearchingQuery(a0: Any?): String = "正在搜索“${a0}”"
+    override fun toolSearchedQuery(a0: Any?): String = "已搜索“${a0}”"
     override fun matchCount(a0: Any?): String = "${a0} 处匹配"
     override fun fileCountLabel(a0: Any?): String = "${a0} 个文件"
     override fun entryCountLabel(a0: Any?): String = "${a0} 项"
@@ -300,7 +335,18 @@ object ZhChat : ChatStrings {
     override val nounTool: String = "工具"
     override val toolUsed: String = "已使用"
     override val toolUsing: String = "正在使用"
-    override fun runSummaryClause(a0: Any?, a1: Any?, a2: Any?): String = "${a0} ${a1} 个${a2}"
+    override val toolEditedPlural: String = "已编辑"
+    override val toolReadPlural: String = "已读取"
+    override val toolRanPlural: String = "已运行"
+    override val toolUsedPlural: String = "已使用"
+    override val toolEditingPlural: String = "正在编辑"
+    override val toolReadingPlural: String = "正在读取"
+    override val toolRunningPlural: String = "正在运行"
+    override val toolUsingPlural: String = "正在使用"
+    override val nounFile: String = "文件"
+    override val runSummaryJoin: String = "、"
+    override fun runSummaryTarget(a0: Any?, a1: Any?): String = "${a0} ${a1}"
+    override fun runSummaryClause(a0: Any?, a1: Any?, a2: Any?, a3: Any?): String = "${a0} ${a1} 个${a2}"
 }
 
 object EnChat : ChatStrings {
@@ -430,6 +476,11 @@ object EnChat : ChatStrings {
     override val toolSearching: String = "Searching"
     override val toolFinding: String = "Finding"
     override val toolListing: String = "Listing"
+    override val toolSearched: String = "Searched"
+    override val toolFound: String = "Found"
+    override val toolListed: String = "Listed"
+    override fun toolSearchingQuery(a0: Any?): String = "Searching \"${a0}\""
+    override fun toolSearchedQuery(a0: Any?): String = "Searched \"${a0}\""
     override fun matchCount(a0: Any?): String = "${a0} matches"
     override fun fileCountLabel(a0: Any?): String = "${a0} files"
     override fun entryCountLabel(a0: Any?): String = "${a0} items"
@@ -451,5 +502,16 @@ object EnChat : ChatStrings {
     override val nounTool: String = "tools"
     override val toolUsed: String = "Used"
     override val toolUsing: String = "Using"
-    override fun runSummaryClause(a0: Any?, a1: Any?, a2: Any?): String = "${a0} ${a1} ${a2}"
+    override val toolEditedPlural: String = "Edited"
+    override val toolReadPlural: String = "Read"
+    override val toolRanPlural: String = "Ran"
+    override val toolUsedPlural: String = "Used"
+    override val toolEditingPlural: String = "Editing"
+    override val toolReadingPlural: String = "Reading"
+    override val toolRunningPlural: String = "Running"
+    override val toolUsingPlural: String = "Using"
+    override val nounFile: String = "files"
+    override val runSummaryJoin: String = ", "
+    override fun runSummaryTarget(a0: Any?, a1: Any?): String = "${a0} ${a1}"
+    override fun runSummaryClause(a0: Any?, a1: Any?, a2: Any?, a3: Any?): String = "${a0} ${a1} ${a2}"
 }
