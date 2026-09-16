@@ -261,6 +261,7 @@ class ChatState {
     fun setProject(name: String) {
         currentProject = name
         currentSessionId = sessionsFor(name).firstOrNull()?.id
+        onSessionChanged()   // 换项目＝换会话：环归位并按新会话的 pi 文件读回
         // 项目切换：清空文件预览标签与树展开状态（标签/展开路径属于原项目的文件树，
         // 2026-09-02 修复：切项目后标签栏仍显示上一项目文件）
         openTabs.clear()
@@ -272,6 +273,7 @@ class ChatState {
         currentSessionId = id
         activePanel = Panel.MESSAGES
         liveThinkingIndex = -1   // 换会话：上一次的流式思考块不再享受展开（Hermes 历史态收起）
+        onSessionChanged()       // 环跟手切到该会话的用量（先归位，真值随后按它的 pi 文件读回）
     }
 
     fun newSession(): String {
@@ -285,6 +287,7 @@ class ChatState {
         leafBySession[id] = null
         liveThinkingIndex = -1
         activePanel = Panel.MESSAGES
+        onSessionChanged()   // 新会话还没有 pi 文件 → 用量判未知、环立刻归零（不沿用上一个会话的数字）
         return id
     }
 
@@ -341,7 +344,10 @@ class ChatState {
         messagesBySession.remove(id)
         entriesBySession.remove(id)
         leafBySession.remove(id)
-        if (currentSessionId == id) currentSessionId = sessionsFor(proj).firstOrNull()?.id
+        if (currentSessionId == id) {
+            currentSessionId = sessionsFor(proj).firstOrNull()?.id
+            onSessionChanged()   // 当前会话被删：环不能继续显示它的数字
+        }
         piDesiredLeaf.remove(id)
         if (piTreeSessionId == id) {
             piTree = null
@@ -362,12 +368,13 @@ class ChatState {
         entriesBySession.remove(id)
         leafBySession.remove(id)
         if (currentSessionId == id) {
-        piDesiredLeaf.remove(id)
-        if (piTreeSessionId == id) {
-            piTree = null
-            piTreeSessionId = null
-        }
+            piDesiredLeaf.remove(id)
+            if (piTreeSessionId == id) {
+                piTree = null
+                piTreeSessionId = null
+            }
             currentSessionId = sessionsFor(currentProject ?: "").firstOrNull()?.id
+            onSessionChanged()   // 当前会话被删：环不能继续显示它的数字
         }
         discardPiSession(piFile)
     }
@@ -491,6 +498,21 @@ class ChatState {
     }
 
     /**
+     * **当前会话变了**（新建 / 切换 / 删除 / 分支 / 换项目）：上下文用量**先归位、再取真值**。
+     *
+     * 环上的数字只属于「当前会话」—— 任何一个换会话入口不收口，环都会沿用上一个会话的数字
+     * （2026-09-16 用户实报：新建会话后环仍显示上一个会话的用量，且「刷新」也救不回来）。
+     * 归位保证「绝不显示别的会话的数字」；真值交给 [refreshContextUsage]（新会话还没有 pi 文件时
+     * 它自己判未知，不会误读进程里停着的那个旧会话）。
+     */
+    fun onSessionChanged() {
+        contextUsageKnown = false
+        windowTokens = 0
+        contextPercent = 0f
+        requestContextUsage()
+    }
+
+    /**
      * 上下文用量（**pi 真值**；2026-09-16 取代两个原型常量）。
      *
      * 来源 = pi 官方 `get_session_stats` 的 `contextUsage { tokens, contextWindow, percent }`
@@ -499,6 +521,17 @@ class ChatState {
      * pi 不提供分类明细（pi-web 也只显示聚合百分比），故分类明细收成一行「对话」。
      */
     suspend fun refreshContextUsage() {
+        // **当前会话还没有 pi 侧文件 = 无可读的用量**（Pient 对 pi 会话文件是懒建的：首条消息、
+        // 开画布才建）。这时**绝不能去问 pi** —— pi 进程里停着的是上一个会话，`get_session_stats`
+        // 回的是**它的**真值，等于把别的会话的用量当成当前会话的（2026-09-16 用户实报：新建会话后
+        // 环沿用上一个会话的数字，且"刷新"也救不回来）。本守卫必须先于任何 RPC。
+        val file = sessionRecord(currentSessionId ?: "")?.piSessionFile
+        if (file.isNullOrBlank()) {
+            contextUsageKnown = false
+            windowTokens = 0
+            contextPercent = 0f
+            return
+        }
         // **先真问一次**，拿不到才起通道 —— 不能用 `PiRpc.usable()` 当「进程活着」的判据：
         // 它的实现是 `process?.isAlive || (rootfsReady && piReady)`，只要运行时部署齐全就返回 true
         // （2026-09-16 实测踩到：新装包、还没发过消息时 usable()=true 但进程没起 → 卡片只有 `? / —`，
@@ -509,8 +542,8 @@ class ChatState {
             data = PiRpc.getSessionStats()
         }
         // 绑到「当前会话」那个文件（通道刚起时 pi 可能还停在上次的文件上；不绑会读到别的会话的用量）
-        val file = sessionRecord(currentSessionId ?: "")?.piSessionFile
-        if (!file.isNullOrBlank() && data?.optString("sessionFile").orEmpty() != file) {
+        // file 已在函数开头取出且非空（守卫已返回），这里只需判「pi 当前打开的到底是不是它」
+        if (data?.optString("sessionFile").orEmpty() != file) {
             PiRpc.switchSession(file)
             data = PiRpc.getSessionStats()
         }
@@ -1339,6 +1372,7 @@ class ChatState {
                 entriesBySession[newId] = mutableStateListOf()
                 leafBySession[newId] = null
                 currentSessionId = newId
+                onSessionChanged()   // 新分支会话：环归位，真值随后按它的 pi 文件读回
                 refreshPiTree()
                 AppCtx.get()?.let { ChatStore.save(it, this@ChatState) }
                 Log.i(TAG_CHAT, "会话外分支已建：$file")
@@ -1984,6 +2018,7 @@ class ChatState {
         leafBySession[newId] = parent
         currentSessionId = newId
         activePanel = Panel.MESSAGES
+        onSessionChanged()   // 新会话：环归位，真值随后按它的 pi 文件读回
         return newId
     }
 
