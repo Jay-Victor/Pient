@@ -682,6 +682,41 @@ class ChatState {
     var liveThinkingIndex by mutableStateOf(-1)
     var streamJob: Job? = null
 
+    /**
+     * 起一轮对话。**跑在 ChatState 自己的 scope 上 —— 不是聊天页的 UI scope**。
+     *
+     * 2026-09-16 真机实测的修复：发送原来是 `rememberCoroutineScope().launch { streamReply(...) }`，
+     * 一旦离开聊天页（返回退出 / 页面被销毁），那个 scope 被取消 → 本轮在应用侧"静默结束"，
+     * 但**没有任何代码通知 pi**（全仓唯一会发 `PiRpc.abort()` 的是 [abort]）→ pi 继续跑那一轮、
+     * 界面却显示空闲 → 下一条消息被 pi 拒（"Agent is already processing"，用户看到一条英文报错）。
+     * PiKeepAlive 的意义本来就是让回合在后台跑完；要停必须走 [abort]（它会通知 pi 并等它收尾）。
+     */
+    fun startTurn(text: String, quote: Quote? = null) =
+        launchTurn { streamReply(text, quote) }
+
+    /** 重新生成一轮（同 [startTurn] 的口径：UI scope 会随页面销毁静默取消，pi 却还在跑） */
+    fun startRegenerate(index: Int) = launchTurn {
+        val err = regenerateMessage(index)
+        if (err != null) blockedNote = "重新生成失败：$err"
+    }
+
+    /**
+     * 把一轮任务挂到进程 scope 上跑，并保证**异常不逃逸**：
+     * 取消照常上抛（abort 路径要用），其它异常由默认 handler 兜 → 会崩掉应用，所以这里收口成提示。
+     */
+    private fun launchTurn(block: suspend () -> Unit) {
+        streamJob = bgScope.launch {
+            try {
+                block()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.e(TAG_CHAT, "本轮异常逃逸：${e.message}", e)
+                blockedNote = "本轮异常：${e.message ?: "未知错误"}"
+            }
+        }
+    }
+
 
     /**
      * pi 运行时就绪态（2026-09-15 用户拍板 B：**pi 是唯一产品路径**）。
@@ -698,6 +733,13 @@ class ChatState {
 
     /** 一次性的界面提示（被阻断的发送等；ChatScreen 消费后清空） */
     var blockedNote by mutableStateOf<String?>(null)
+
+    /**
+     * 被拦下的发送要把**文本还给输入栏**（值 = 待还文本；ChatScreen 取走后置 null）。
+     * [blockedNote] 只能给一句 Toast，而"这条压根没发出去"必须把草稿还回去
+     * （输入栏在点击时已自行清空文本）—— 见 [streamReply] 开头「pi 还在处理上一轮」的拦截。
+     */
+    var draftRestore by mutableStateOf<String?>(null)
 
     /**
      * 直连内核只作**开发诊断通道**（debug 包）：release 包里 pi 起不来就是起不来，
@@ -779,6 +821,16 @@ class ChatState {
         if (piReadiness == PiReadiness.Unready) {
             blockedNote = "pi 运行时未就绪：消息未发送（点上方提示条的「环境配置」修复）"
             Log.w(TAG_CHAT, "发送被阻断：pi 未就绪（$piUnreadyReason）")
+            return
+        }
+        // **pi 侧还在跑就别硬发**（2026-09-16 真机实测）：pi 对「流式中且未指定 streamingBehavior」的
+        // prompt 会**直接拒绝**（docs/rpc.md:56-65；抛错点 core/agent-session.ts:1213），硬发的代价 =
+        // 一条废用户消息 + 一句用户看不懂的英文报错。可能撞上的窗口：上一轮在别处被留下（旧版 UI scope
+        // 取消的遗留）、刚中止还没收尾、画布/终端那边正在跑。这里不落任何条目，把文本还给输入栏。
+        if (PiRpc.isStreamingNow() == true) {
+            draftRestore = userText
+            blockedNote = "AI 还在处理上一条消息，本条没有发出去（等它收尾后再发）"
+            Log.w(TAG_CHAT, "发送被拦：pi 仍在处理上一轮（isStreaming=true）")
             return
         }
         isStreaming = true
@@ -1513,7 +1565,7 @@ class ChatState {
         val res = PiRpc.prompt(promptText, piImages)
         if (res != null && !res.optBoolean("success", true)) {
             collector.cancel()
-            throw AiException(res.optString("error").ifBlank { "pi 拒绝了这次请求" })
+            throw AiException(piErrorText(res.optString("error")))
         }
         val ok = withTimeoutOrNull(600_000) { settled.await() } != null
         collector.cancel()
@@ -1554,6 +1606,17 @@ class ChatState {
     /** 工具行预览（截断；全文进 [Msg.ToolResult.full]，点开才看） */
     private fun piPreview(text: String): String =
         if (text.length <= 800) text else text.take(800) + "\n…（共 ${text.length} 字）"
+
+    /**
+     * pi 的报错 → 面向用户的文案。pi 的错误串是给调用方（开发者）看的英文，直接上屏用户读不懂；
+     * 已知的按语义翻译，**其余原样透出**（不编造、不静默）。
+     */
+    private fun piErrorText(raw: String): String = when {
+        raw.isBlank() -> "pi 拒绝了这次请求"
+        raw.contains("Agent is already processing", ignoreCase = true) ->
+            "AI 还在处理上一条消息，本条没有发出去（等它收尾后再发）"
+        else -> raw
+    }
 
     /** pi 事件的 usage → Pient 的 [Usage]（pi 口径：input 不含 cacheRead/cacheWrite） */
     private fun piUsage(u: JSONObject): Usage? {

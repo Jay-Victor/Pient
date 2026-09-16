@@ -161,6 +161,14 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
         Toast.makeText(context, note, Toast.LENGTH_SHORT).show()
         chatState.blockedNote = null
     }
+    // 被拦下的发送：把文本还给输入栏并聚焦（2026-09-16：pi 还在处理上一轮时不再硬发，
+    // 见 ChatState.streamReply 开头的拦截 —— 草稿不能因为"没发出去"而丢）
+    LaunchedEffect(chatState.draftRestore) {
+        val t = chatState.draftRestore ?: return@LaunchedEffect
+        inputText = TextFieldValue(t, TextRange(t.length))
+        chatState.draftRestore = null
+        inputFocusTick++
+    }
     // @ 引用查询（派生态，2026-09-12）：光标前最近一个「词首 @」到光标之间的文本即筛选串；
     // null = 不在引用输入中（引用已提交 "@路径 " 之后、词中 @、或压根没 @）。
     // 查询串随每次输入变化 → 引用卡候选列表实时筛选，不需要额外的开关状态。
@@ -510,7 +518,9 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                                 // 首条消息自动建会话（2026-09-08：无 mock 会话后，发送即建当前项目首会话）
                                 if (chatState.currentSessionId == null) chatState.newSession()
                                 val q = pendingQuote
-                                chatState.streamJob = scope.launch { chatState.streamReply(text, q) }
+                                // 本轮跑在 ChatState 自己的 scope 上，**不是**这里的 UI scope —— 离开页面
+                                // 不该静默取消一轮（2026-09-16 真机实测的根因，见 ChatState.startTurn）
+                                chatState.startTurn(text, q)
                                 pendingQuote = null // 引用随消息落库（Msg.User.quote），输入栏引用卡随之清空
                             }
                         },
@@ -794,10 +804,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                     },
                     onRegenerate = {
                         forkMenuTarget = null
-                        scope.launch {
-                            val err = chatState.regenerateMessage(forkIdx)
-                            if (err != null) Toast.makeText(context, "重新生成失败：$err", Toast.LENGTH_SHORT).show()
-                        }
+                        // 同 startTurn 的口径：挂到进程 scope 上跑，失败由 blockedNote 提示（不再用 UI scope）
+                        chatState.startRegenerate(forkIdx)
                     },
                 )
             }
