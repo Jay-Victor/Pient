@@ -59,7 +59,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -139,8 +138,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
             with(density) { (if (px > 0) px else (screenHpx * 0.72f).toInt()).toDp().value }
         }
     }
-    // 长按消息 → fork 上下文菜单（2026-09-02 分支功能设计 §4）：目标消息下标 + 气泡根坐标
-    var forkMenuTarget by remember { mutableStateOf<Pair<Int, Rect>?>(null) }
+    // 长按消息 → fork 上下文菜单（2026-09-02 分支功能设计 §4）：目标消息下标 + 气泡根坐标 + 触点
+    var forkMenuTarget by remember { mutableStateOf<MessageMenuTarget?>(null) }
     // 复制消息卡（2026-09-11）：内容在打开时快照，避免下标失效；null = 未打开
     var copyCardText by remember { mutableStateOf<String?>(null) }
     // 待发送引用块（引用某条消息追问；2026-09-11）
@@ -482,7 +481,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                             viewportDp = listViewportDp,
                             bottomInset = dockInset,
                             onOpenLocator = { locatorOpen = true },
-                            onMessageLongPress = { idx, rect -> forkMenuTarget = idx to rect },
+                            onMessageLongPress = { target -> forkMenuTarget = target },
                             onConfigureAi = {
                                 attachSheetOpen = false
                                 nav.navigate("model_config")
@@ -785,7 +784,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
 
         // ── 长按消息上下文菜单（fork 会话外分支入口，2026-09-02 分支功能设计 §4）──
         if (forkMenuTarget != null) {
-            val (forkIdx, forkRect) = forkMenuTarget!!
+            val target = forkMenuTarget!!
+            val forkIdx = target.index
             Box(Modifier.fillMaxSize().zIndex(3f)) {
                 Box(
                     Modifier
@@ -793,7 +793,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                         .clickable(onClick = { forkMenuTarget = null }),
                 )
                 ForkContextMenu(
-                    anchor = forkRect,
+                    anchor = target.anchor,
+                    press = target.press,
                     forkEnabled = !chatState.isStreaming && chatState.currentSession?.running != true,
                     isAssistant = chatState.currentMessages.getOrNull(forkIdx) is Msg.Assistant,
                     // 重新生成仅最下方一条消息支持（2026-09-11 用户定）：非末条不显示该项
@@ -1011,7 +1012,7 @@ private fun MessagesPanel(
     viewportDp: Float,
     bottomInset: Dp = 0.dp,
     onOpenLocator: () -> Unit,
-    onMessageLongPress: (Int, Rect) -> Unit,
+    onMessageLongPress: (MessageMenuTarget) -> Unit,
     onConfigureAi: () -> Unit,
     onOpenEnvSetup: () -> Unit,
 ) {

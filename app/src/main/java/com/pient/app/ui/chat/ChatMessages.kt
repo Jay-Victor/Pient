@@ -12,6 +12,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.BorderStroke
+import android.util.Log
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -90,6 +91,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -98,6 +100,7 @@ import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationExceptio
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
@@ -163,7 +166,7 @@ fun ChatMessages(
     /** 点「显示更早的消息」：返回本次新增条数（调用方据此保持视口锚点） */
     onShowEarlier: () -> Int = { 0 },
     onOpenLocator: () -> Unit,
-    onMessageLongPress: ((Int, Rect) -> Unit)? = null,
+    onMessageLongPress: ((MessageMenuTarget) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
 
@@ -189,6 +192,8 @@ fun ChatMessages(
     // 每个可见项在每帧都多走一轮组合（长会话卡顿源之一，2026-09-12 修复）。
     // 该 Map 只在长按那一刻被读，不需要参与重组。
     val bubbleBounds = remember { HashMap<Int, Rect>() }
+    /** 各消息条目的根坐标**原点**（positionInRoot）：长按触点 = 它 + 按下点（2026-09-17） */
+    val bubblePos = remember { HashMap<Int, Offset>() }
     // 长按超时配置（消息长按 fork 检测用）
     val viewConfig = LocalViewConfiguration.current
 
@@ -338,7 +343,10 @@ fun ChatMessages(
                 Box(
                     Modifier
                         .padding(top = renderGap(renderItems, messages, i))
-                        .onGloballyPositioned { bubbleBounds[idx] = it.boundsInRoot() }
+                        .onGloballyPositioned {
+                            bubbleBounds[idx] = it.boundsInRoot()
+                            bubblePos[idx] = it.positionInRoot()
+                        }
                         .then(
                             if (longPressable) Modifier.pointerInput(idx) {
                                 // ★ 不能 detectTapGestures：其 awaitFirstDown 默认
@@ -350,15 +358,19 @@ fun ChatMessages(
                                 // （链接点击/思考卡展开不受影响）。
                                 awaitPointerEventScope {
                                     while (true) {
-                                        awaitFirstDown(requireUnconsumed = false)
+                                        val down = awaitFirstDown(requireUnconsumed = false)
                                         try {
                                             withTimeout(viewConfig.longPressTimeoutMillis) {
                                                 waitForUpOrCancellation()
                                             }
                                         } catch (_: PointerEventTimeoutCancellationException) {
                                             onMessageLongPress?.invoke(
-                                                idx,
-                                                bubbleBounds[idx] ?: Rect.Zero,
+                                                MessageMenuTarget(
+                                                    index = idx,
+                                                    anchor = bubbleBounds[idx] ?: Rect.Zero,
+                                                    // 触点（根坐标）= 条目根原点 + 按下点（按下点相对条目局部）
+                                                    press = (bubblePos[idx] ?: Offset.Zero) + down.position,
+                                                ),
                                             )
                                         }
                                     }
@@ -775,15 +787,73 @@ private fun MessageCard(
 // ───────────────────────────── 长按消息菜单（分支 + 复制 + 重新生成） ─────────────────────────────
 
 /**
- * 长按消息气泡的上下文菜单（2026-09-02 分支功能设计 §4.1；2026-09-11 按 Operit 补两项）：
- * - 「从此处创建新会话」= fork（官方 RPC 原型）；
- * - 「复制消息」= 打开复制卡片（纯文本 / Markdown 源码分段，见 [MessageCopyCard]）；
- * - 「重新生成」= 重新请求该条**助手消息**（Operit `单条重新生成` 同款，仅 AI 消息显示）。
- * 锚定气泡：默认在气泡下方，近屏幕底部时翻转到上方；点外关闭无 scrim（外层处理）。
+ * 长按菜单的目标（2026-09-17）：上屏下标 + 气泡根坐标 rect + **触点**的根坐标。
+ * 定位以触点为基准（旧实现只传 rect = 整条消息的 bounds，长回答能有好几屏高 → 菜单会飞到最上方）。
+ */
+data class MessageMenuTarget(
+    val index: Int,
+    val anchor: Rect,
+    val press: Offset,
+)
+
+/** 菜单排版常量（MenuRow 固定 44dp/行，见 [MenuRow]） */
+private val MenuWidth = 208.dp
+private val MenuRowHeight = 44.dp
+private val MenuVertPadding = 8.dp
+private val MenuEdgeMargin = 8.dp
+private val MenuGap = 8.dp
+
+/**
+ * 长按菜单的落点（2026-09-17 重做：**锚定触点**）。
+ *
+ * 实战口径（四处同一条思路）：
+ * - Android 平台 `PopupMenu` / `MenuPopupHelper`：有空间就放在锚点下方，否则翻到上方；两边都放不下
+ *   就给「可用高度上限 + 滚动」（`getMaxAvailableHeight`），不会贴到屏幕边缘；
+ * - Material 3 `DropdownMenu`：锚点在屏幕**下半部分**时优先上翻（top = anchor.top − menuH），
+ *   下方优先放在 anchor.bottom 处，两者都夹在垂直边距内；
+ * - Flutter `showMenu` / `_PopupMenuRouteLayout`：菜单永远贴着调用方传入的**触点**摆，再夹进
+ *   8dp 屏幕内边距（`_kMenuScreenPadding`），装不下就限高成可滚动；
+ * - iOS 上下文菜单：贴着触点出现（配合源视图预览），不飞到屏幕边缘。
+ * ⇒ 共同点 = 锚定**手指按下的那一点**；仅当气泡整条都在可视区内时，才用气泡边缘（经典「贴着气泡弹」观感）。
+ */
+private fun menuOffset(
+    press: Offset,
+    anchor: Rect,
+    container: Size,
+    menu: Size,
+    margin: Float,
+    gap: Float,
+): Offset {
+    // 横向：看**触点在哪半边**（条目 rect 是全宽的，用它的中心判会永远落回左对齐）——
+    // 按在右半边（用户气泡）→ 菜单右缘贴条目右缘；按在左半边（AI 气泡）→ 左缘贴左缘（M3 同款：先对齐起点，再对齐终点）
+    val xRaw = if (press.x > container.width / 2f) anchor.right - menu.width else anchor.left
+    val x = xRaw.coerceIn(margin, (container.width - menu.width - margin).coerceAtLeast(margin))
+    // 纵向参考边：气泡**整条都在可视区内**（短消息）就用它的边缘 —— 这才是「贴着气泡弹」的经典观感；
+    // 长消息（被滚动裁掉一头）一律改用触点：否则「放气泡上方」会把菜单顶到离手指好几百像素之外
+    // （实测 1746px 高的回答：press.y=1500 会算到 y=36 —— 又是一个「太上方」）
+    val itemVisible = anchor.top >= margin && anchor.bottom <= container.height - margin
+    val belowRef = if (itemVisible) anchor.bottom else press.y
+    val aboveRef = if (itemVisible) anchor.top else press.y
+    val maxY = (container.height - menu.height - margin).coerceAtLeast(margin)
+    val y = when {
+        belowRef + gap + menu.height <= container.height - margin -> belowRef + gap
+        aboveRef - gap - menu.height >= margin -> aboveRef - gap - menu.height
+        // 两边都放不下（长消息 + 小窗口）：以触点为中心夹进容器 —— 宁可遮住一段气泡，也不要飞到远处的屏幕边
+        else -> press.y - menu.height / 2f
+    }.coerceIn(margin, maxY)
+    return Offset(x, y)
+}
+
+/**
+ * 长按消息的上下文菜单（fork / 复制 / 引用 / 重新生成）。
+ *
+ * 定位：见 [menuOffset] —— 锚定长按**触点**，容器 = 本菜单挂载的那层（聊天页根 Box，键盘弹起时它自己会缩）；
+ * 点外关闭（无 scrim，外层处理）。
  */
 @Composable
 fun ForkContextMenu(
     anchor: Rect,
+    press: Offset,
     forkEnabled: Boolean,
     isAssistant: Boolean,
     /** 重新生成仅最下方一条消息支持（2026-09-11 用户定）：非末条不显示该项 */
@@ -795,49 +865,66 @@ fun ForkContextMenu(
     onRegenerate: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val configuration = LocalConfiguration.current
     val density = LocalDensity.current
-    val screenW = configuration.screenWidthDp.dp
-    val screenH = configuration.screenHeightDp.dp
-    val menuW = 208.dp
     val rows = 2 + 1 + (if (showRegenerate) 1 else 0) // fork + 复制消息 + 引用 (+ 重新生成)
-    val menuH = 44.dp * rows + 8.dp // 44dp/行 + 上下 4dp padding
-    val x = with(density) { anchor.left.toDp() }.coerceIn(8.dp, screenW - menuW - 8.dp)
-    val belowY = with(density) { anchor.bottom.toDp() } + 8.dp
-    val y = if (belowY + menuH < screenH - 8.dp) belowY
-    else (with(density) { anchor.top.toDp() } - menuH - 8.dp).coerceAtLeast(8.dp)
-    PientPanel(
-        modifier = modifier
-            .offset(x = x, y = y)
-            .width(menuW),
-        shape = RoundedCornerShape(16.dp),
-    ) {
-        Column(Modifier.padding(vertical = 4.dp)) {
-            MenuRow(
-                icon = Icons.Outlined.ForkRight,
-                label = L.chat.forkFromHere,
-                enabled = forkEnabled,
-                onClick = onFork,
-            )
-            MenuRow(
-                icon = Icons.Outlined.ContentCopy,
-                label = L.chat.copyMessage,
-                enabled = true,
-                onClick = onCopy,
-            )
-            MenuRow(
-                icon = Icons.Outlined.FormatQuote,
-                label = L.chat.quote,
-                enabled = true,
-                onClick = onQuote,
-            )
-            if (showRegenerate) {
-                MenuRow(
-                    icon = Icons.Outlined.Refresh,
-                    label = L.chat.regenerate,
-                    enabled = regenerateEnabled,
-                    onClick = onRegenerate,
+    val menuW = MenuWidth
+    val menuH = MenuRowHeight * rows + MenuVertPadding
+    // 容器 = 挂载层的真实约束（同一帧就能拿到，不需要等布局回调）：不用 screenHeightDp 是因为
+    // 量的是整屏 —— 键盘弹起 / 顶栏占位时菜单会算错位置
+    BoxWithConstraints(modifier) {
+        val container = with(density) { Size(maxWidth.toPx(), maxHeight.toPx()) }
+        val menuSize = with(density) { Size(menuW.toPx(), menuH.toPx()) }
+        val place = menuOffset(
+            press = press,
+            anchor = anchor,
+            container = container,
+            menu = menuSize,
+            margin = with(density) { MenuEdgeMargin.toPx() },
+            gap = with(density) { MenuGap.toPx() },
+        )
+        // 落点打点（几何类 UI 的取证口径：一次长按 = 一行数字，别靠看图猜）
+        LaunchedEffect(press, anchor, container) {
+            Log.i("PientChat", "长按菜单落点：press=${press.x.toInt()},${press.y.toInt()} " +
+                "anchor=${anchor.left.toInt()},${anchor.top.toInt()},${anchor.right.toInt()},${anchor.bottom.toInt()} " +
+                "container=${container.width.toInt()}x${container.height.toInt()} menu=${menuSize.width.toInt()}x${menuSize.height.toInt()} " +
+                "→ (${place.x.toInt()},${place.y.toInt()})")
+        }
+        PientPanel(
+            modifier = Modifier
+                .offset(
+                    x = with(density) { place.x.toDp() },
+                    y = with(density) { place.y.toDp() },
                 )
+                .width(menuW),
+            shape = RoundedCornerShape(16.dp),
+        ) {
+            Column(Modifier.padding(vertical = 4.dp)) {
+                MenuRow(
+                    icon = Icons.Outlined.ForkRight,
+                    label = L.chat.forkFromHere,
+                    enabled = forkEnabled,
+                    onClick = onFork,
+                )
+                MenuRow(
+                    icon = Icons.Outlined.ContentCopy,
+                    label = L.chat.copyMessage,
+                    enabled = true,
+                    onClick = onCopy,
+                )
+                MenuRow(
+                    icon = Icons.Outlined.FormatQuote,
+                    label = L.chat.quote,
+                    enabled = true,
+                    onClick = onQuote,
+                )
+                if (showRegenerate) {
+                    MenuRow(
+                        icon = Icons.Outlined.Refresh,
+                        label = L.chat.regenerate,
+                        enabled = regenerateEnabled,
+                        onClick = onRegenerate,
+                    )
+                }
             }
         }
     }
