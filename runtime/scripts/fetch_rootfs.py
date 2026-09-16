@@ -2,8 +2,8 @@
 """拉取终端层产物：PRoot（+ 依赖库）与 Ubuntu base rootfs。
 
 用法:
-    python runtime/scripts/fetch_rootfs.py --abi x86_64     # 模拟器
-    python runtime/scripts/fetch_rootfs.py --abi aarch64    # 真机
+    python runtime/scripts/fetch_rootfs.py --abi aarch64    # 真机（**默认**，2026-09-16 起唯一常规目标）
+    python runtime/scripts/fetch_rootfs.py --abi x86_64     # 模拟器（opt-in，只在要跑 AVD 时）
 
 产物（runtime/cache/rootfs-<abi>/）:
     bin/proot                      PRoot 主程序（随 APK 以 libpient_proot.so 分发）
@@ -98,7 +98,7 @@ def main() -> int:
     import argparse
 
     ap = argparse.ArgumentParser()
-    ap.add_argument("--abi", default="x86_64", choices=list(UBUNTU_ARCH))
+    ap.add_argument("--abi", default="aarch64", choices=list(UBUNTU_ARCH))
     args = ap.parse_args()
     fetch_rootfs(args.abi)
     return 0

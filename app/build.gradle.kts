@@ -53,7 +53,9 @@ android {
 // node / python 等环境不随包，由用户首次进入时在环境配置页/首启弹窗里下载安装。
 // 源 = runtime/cache/rootfs-<abi>/（runtime/scripts/fetch_rootfs.py 拉取；cache 不入库）；
 // 目标 = jniLibs（可执行文件：proot + loader + shell 包装脚本）+ assets（rootfs 归档）。
-val pientRuntimeAbi = (findProperty("pientRuntimeAbi") as String?) ?: "x86_64"
+// 目标 ABI（2026-09-16 用户定：**只做 arm64、用真机测试**）：默认即真机 arm64-v8a；
+// 模拟器那一支改为 opt-in —— 要跑 AVD 时才显式 `-PpientRuntimeAbi=x86_64`。
+val pientRuntimeAbi = (findProperty("pientRuntimeAbi") as String?) ?: "arm64-v8a"
 val pientJniAbi = when (pientRuntimeAbi) {
     "x86_64" -> "x86_64"
     "aarch64", "arm64-v8a" -> "arm64-v8a"
@@ -116,11 +118,12 @@ fun pientAssertAbi(files: List<File>, expected: String, hint: String) {
 }
 
 // ABI 策略（与 Operit 同口径）：**单 ABI 出包**——rootfs 约 30MB，fat APK 会翻倍。
-// 默认 x86_64 供模拟器开发，真机/release 必须显式 -PpientRuntimeAbi=arm64-v8a（漏了直接失败）。
-if (findProperty("pientRuntimeAbi") == null &&
+// 默认 = arm64-v8a（真机，见上）；release 反向锁死 arm64 —— 解析出的 ABI 不是 arm64-v8a
+// 就当场失败（防止有人顺手拿 x86_64 出交付包）。
+if (pientRuntimeAbi !in listOf("arm64-v8a", "aarch64") &&
     gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
 ) {
-    throw GradleException("release 构建必须显式指定 -PpientRuntimeAbi=arm64-v8a（默认 x86_64 只用于模拟器开发）")
+    throw GradleException("release 构建必须是 arm64-v8a（真机）；当前解析到的是 \"$pientRuntimeAbi\"")
 }
 
 /**
