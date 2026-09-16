@@ -19,7 +19,9 @@ object Languages {
 
     private val packs: List<Pack> = listOf(
         Pack("zh-CN", "简体中文", ZhStrings),
+        Pack("zh-TW", "繁體中文", ZhTwStrings),
         Pack("en", "English", EnStrings),
+        Pack("ja", "日本語", JaStrings),
     )
 
     /** 语言设置页的选项：「跟随系统」置顶 + 各语言包（设计计划 6.3） */
@@ -34,10 +36,16 @@ object Languages {
         return systemId()
     }
 
-    /** 系统语言 → 我们的语言包：只认 zh / en，其余回退 en（口径同 pi-web `resolveBrowserLocale`） */
+    /** 系统语言 → 我们的语言包：zh-Hant/zh-TW/zh-HK/zh-MO → 繁中，zh* → 简中，ja* → 日语，其余 → 英文 */
     private fun systemId(): String {
         val tag = Locale.getDefault().toLanguageTag().lowercase(Locale.ROOT)
-        return if (tag.startsWith("zh")) "zh-CN" else "en"
+        return when {
+            tag.startsWith("zh") && (tag.contains("hant") || tag.contains("tw") ||
+                tag.contains("hk") || tag.contains("mo")) -> "zh-TW"
+            tag.startsWith("zh") -> "zh-CN"
+            tag.startsWith("ja") -> "ja"
+            else -> "en"
+        }
     }
 
     /** 当前生效的文案包 */

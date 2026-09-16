@@ -66,5 +66,45 @@ object EnStrings : Strings {
     override val runtime = EnRuntime
 }
 
+/** 繁體中文（台灣用語）文案包 */
+object ZhTwStrings : Strings {
+    override val common = ZhTwCommon
+    override val settings = ZhTwSettings
+    override val chat = ZhTwChat
+    override val canvas = ZhTwCanvas
+    override val session = ZhTwSession
+    override val files = ZhTwFiles
+    override val terminal = ZhTwTerminal
+    override val skills = ZhTwSkills
+    override val plugins = ZhTwPlugins
+    override val models = ZhTwModels
+    override val perm = ZhTwPerm
+    override val project = ZhTwProject
+    override val env = ZhTwEnv
+    override val onboarding = ZhTwOnboarding
+    override val theme = ZhTwTheme
+    override val runtime = ZhTwRuntime
+}
+
+/** 日本語 文案包 */
+object JaStrings : Strings {
+    override val common = JaCommon
+    override val settings = JaSettings
+    override val chat = JaChat
+    override val canvas = JaCanvas
+    override val session = JaSession
+    override val files = JaFiles
+    override val terminal = JaTerminal
+    override val skills = JaSkills
+    override val plugins = JaPlugins
+    override val models = JaModels
+    override val perm = JaPerm
+    override val project = JaProject
+    override val env = JaEnv
+    override val onboarding = JaOnboarding
+    override val theme = JaTheme
+    override val runtime = JaRuntime
+}
+
 /** 当前语言包的文案（Compose 与非 Compose 通用；切换语言 = SettingsStore.language 变化 → 重组） */
 val L: Strings get() = Languages.current()
