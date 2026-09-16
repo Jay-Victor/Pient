@@ -173,6 +173,7 @@ object JaChat : ChatStrings {
     override val piUnreadyToast: String = "pi ランタイムが未就緒：メッセージは送信されませんでした（上のバナーを参照）"
     override val compactDone: String = "コンテキストを圧縮しました（pi ネイティブ）：チャットページは圧縮後のコンテキストで再構築されました"
     override val sessionCreated: String = "新しいセッションを作成しました"
+    override val forkUnavailable: String = "このメッセージの pi エントリが見つからないため、ブランチの起点にできません"
     override val newSession: String = "新規セッション"
     override val idle: String = "待機中"
     override val sessionBranches: String = "セッションブランチ"
@@ -287,9 +288,6 @@ object JaCanvas : CanvasStrings {
     override val switchBranch: String = "ブランチを切り替え"
     override val nodeDetails: String = "ノードの詳細"
     override val noAnswer: String = "（回答はまだありません）"
-    override val branchSummary: String = "ブランチ切り替え時に要約を生成（pi がモデルを1回呼び出します）"
-    override val switchToBranch: String = "このブランチに切り替え"
-    override val forkSession: String = "ここから新しいセッションをフォーク"
 }
 
 object JaSession : SessionStrings {
@@ -1202,7 +1200,7 @@ object JaRuntime : RuntimeStrings {
     override val noContextAvailable: String = "利用可能なコンテキストがありません"
     override val piChannelStartFailedHint: String = "pi チャネルの起動に失敗しました：「環境設定」で検出/更新できます"
     override val piNotReadyTurnNotSent: String = "pi ランタイムの準備ができていません：このターンは送信されませんでした。「ターミナル → 環境設定」で Ubuntu / pi を確認してください。"
-    override val branchTitlePrefix: String = "ブランチ · "
+    override val branchTitlePrefix: String = "（ブランチ）"
     override val sessionTitle: String = "セッション"
     override val piChannelDisconnected: String = "pi チャネルが途中で切断されました（このターンは完了していません）"
     override val piChannelTimeout: String = "pi チャネルがタイムアウトしました（10 分経過しても agent_settled がありません）"

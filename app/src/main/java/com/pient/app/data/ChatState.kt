@@ -1534,19 +1534,54 @@ class ChatState {
     }
 
     /**
-     * **会话外分支**：从 [entryId]（一条用户消息）在 pi 侧 fork 出一个新会话文件，
-     * 并在 Pient 里建一个绑定它的新会话（标题带「分支」前缀，便于认）。
-     * 返回新会话 id（异步建，失败返回空串）。
+     * **会话外分支：从某条上屏消息创建新会话（pi 原生实现，2026-09-17）**。
+     *
+     * 口径 = 《Pient 分支功能设计》§4.2「含 fork 点」：新会话包含这条消息**及其回答**。
+     * pi 自己的 `fork(entryId)` 是「这条消息**之前**」语义（`agent-session-runtime.ts:262-287`，
+     * position 默认 before、且要求目标是用户消息），做不到含 fork 点 —— 所以走两步原生命令：
+     * ① `/pient-nav <锚点>` 把活跃叶移到该消息**回合末尾**（锚点 = 该回合最后一个非用户条目；
+     *    尚无回答的节点由扩展补一条锚点标记）；② pi 官方 `clone`（= `fork(leafId, { position: "at" })`）
+     * 以当前叶为准 fork 出新会话文件。**两条都是 pi 原生能力，应用侧不拼任何上下文。**
+     *
+     * 长按 AI 回答时落点 = 该回答所属回合的末尾（正常情况就是那条回答本身）；回合中途的旁白
+     * 不单独切 —— 切在半截会让新会话以「toolCall 没有结果」收尾，下一轮请求会被上游拒。
      */
-    fun forkPiSession(entryId: String): String {
-        val proj = currentProject ?: return ""
-        val newId = newSessionId()
+    fun forkFromMessage(messageIndex: Int) {
+        val proj = currentProject ?: return
+        val sid = currentSessionId ?: return
+        val rec = sessionRecord(sid) ?: return
+        if (rec.piSessionFile.isNullOrBlank() || !PiRpc.usable()) {
+            blockedNote = L.runtime.piNotReadyNotSent
+            return
+        }
+        if (isStreaming || currentSession?.running == true) {
+            blockedNote = L.runtime.blockedPiBusy
+            return
+        }
+        val msgs = currentMessages.toList()
+        if (messageIndex !in msgs.indices) return
+        // 目标用户消息 = 本条（用户消息）或往前最近的一条（AI 回答走它所属的回合）
+        val userIdx = if (msgs[messageIndex] is Msg.User) messageIndex
+        else (messageIndex downTo 0).firstOrNull { msgs[it] is Msg.User } ?: -1
+        val title = L.runtime.branchTitlePrefix + forkTitle(msgs, messageIndex)  // 「（分支）」前缀：与源会话区分（用户 2026-09-17 定）
         bgScope.launch {
-            runCatching {
-                PiRpc.fork(entryId)
+            try {
+                refreshPiTree()                                  // 目标在新鲜的树上解析（锚点表一并刷新）
+                val nodeId = piNodeIdForUserIndex(userIdx)
+                if (nodeId == null) {
+                    blockedNote = L.chat.forkUnavailable
+                    Log.w(TAG_CHAT, "会话外分支：消息 #$messageIndex 在 pi 树里定位不到，已放弃")
+                    return@launch
+                }
+                PiRpc.navigate(piAnchorOf[nodeId] ?: nodeId)     // 活跃叶 → 该回合末尾（含这条消息及其回答）
+                PiRpc.clone()                                    // pi 原生：以当前叶为准 fork 出新会话文件
                 val file = PiRpc.getSessionStats()?.optString("sessionFile").orEmpty()
-                if (file.isBlank()) return@runCatching
-                val title = L.runtime.branchTitlePrefix + (sessionRecord()?.title ?: L.runtime.sessionTitle)
+                if (file.isBlank()) {
+                    blockedNote = L.chat.forkUnavailable
+                    return@launch
+                }
+                PiRpc.setSessionName(title)                      // 标题去程：pi 的 sessionName 是真相源
+                val newId = newSessionId()
                 sessions.getOrPut(proj) { mutableStateListOf() }
                     .add(0, Session(newId, title, proj, updatedAt = System.currentTimeMillis(), piSessionFile = file))
                 messagesBySession[newId] = mutableStateListOf()
@@ -1555,12 +1590,59 @@ class ChatState {
                 currentSessionId = newId
                 onSessionChanged()   // 新分支会话：环归位，真值随后按它的 pi 文件读回
                 refreshPiTree()
+                syncMessagesFromPi()
                 AppCtx.get()?.let { ChatStore.save(it, this@ChatState) }
-                Log.i(TAG_CHAT, "会话外分支已建：$file")
-            }.onFailure { Log.w(TAG_CHAT, "fork 失败：${it.message}") }
+                blockedNote = L.chat.sessionCreated
+                Log.i(TAG_CHAT, "会话外分支已建（pi 原生 navigate+clone，含 fork 点）：节点 $nodeId → $file")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                blockedNote = L.chat.forkUnavailable
+                Log.w(TAG_CHAT, "会话外分支失败：${e.message}")
+            }
         }
-        return newId
     }
+
+    /** pi 树里 root→leaf 的节点链（piParseTree 按「到叶的路径」标 active） */
+    private fun piActivePathNodes(): List<SessionTreeNode> {
+        val out = ArrayList<SessionTreeNode>()
+        var node: SessionTreeNode? = piTree ?: return out
+        while (node != null) {
+            out += node
+            node = node.children.firstOrNull { it.active }
+        }
+        return out
+    }
+
+    /**
+     * 上屏的用户消息 → pi 树节点 id（= pi 的用户消息条目 id；找不到返回 null）。
+     *
+     * ① 主路：把上屏用户消息与活跃路径节点**从末尾配对**（两侧都是同一条会话的用户消息，
+     *    从末尾数不受「压缩把老消息移出上下文」影响），配上的再拿文本校验；
+     * ② 兜底：按文本在活跃路径上找（双向包含 —— 注入过引用/附件的文本是显示文本的超集），
+     *    多个命中取最靠近末尾的一个。
+     * 都没有就如实返回 null（调用方给一句提示，别猜一个 id 去导航）。
+     */
+    private fun piNodeIdForUserIndex(userIdx: Int): String? {
+        val msgs = currentMessages
+        if (userIdx !in msgs.indices) return null
+        val text = (msgs[userIdx] as? Msg.User)?.text ?: return null
+        val path = piActivePathNodes()
+        if (path.isEmpty()) return null
+        val users = msgs.withIndex().filter { it.value is Msg.User }
+        val kFromEnd = users.size - users.indexOfFirst { it.index == userIdx }   // 1 = 末尾那条
+        path.getOrNull(path.size - kFromEnd)?.let { if (piTextSame(it.userText, text)) return it.id }
+        return path.lastOrNull { piTextSame(it.userText, text) }?.id
+    }
+
+    /** 用户消息同一性判定：完全相等，或一方包含另一方（pi 侧文本可能带引用/附件注入） */
+    private fun piTextSame(a: String, b: String): Boolean {
+        val x = a.trim()
+        val y = b.trim()
+        if (x.isEmpty() || y.isEmpty()) return false
+        return x == y || x.contains(y) || y.contains(x)
+    }
+
 
     /**
      * **走 pi 通道跑一轮**（2026-09-14）：只送最后一条用户消息 —— pi 在同一条 RPC 会话里
@@ -2188,8 +2270,8 @@ class ChatState {
             val target = anchor ?: nodeId
             piDesiredLeaf[sid] = target
             bgScope.launch {
-                // 摘要是可选的：pi 会为此**调用一次模型**（用户偏好见 SettingsStore.branchSummarize）
-                runCatching { PiRpc.navigate(target, summarize = SettingsStore.branchSummarize) }
+                // 纯切分支：不带 --summarize（分支摘要按设计不生成，不额外花一次模型调用）
+                runCatching { PiRpc.navigate(target) }
                     .onFailure { Log.w(TAG_CHAT, "pi 会话内分支跳转失败：${it.message}") }
                 refreshPiTree()
                 syncMessagesFromPi()
@@ -2208,39 +2290,6 @@ class ChatState {
         leafBySession[sid] = end.id
         rebuildMessagesFromLeaf(sid)
         return true
-    }
-
-    /**
-     * fork 会话外分支（原型；v1 = 官方 RPC fork，上下文拷贝由 pi 底座完成）：
-     * 新建独立会话入当前项目侧栏头部，消息流 = fork 点（含）之前全部消息的拷贝；
-     * 与原会话再无关联（pi 表头 parentSession 保留但不展示）。
-     * 自动跳转新会话（用户拍板：沿用 pi-web）。
-     */
-    fun forkSession(entryIndex: Int): String {
-        val proj = currentProject ?: return ""
-        val id = currentSessionId ?: return ""
-        val src = messagesBySession[id]?.toList() ?: return ""
-        if (entryIndex !in src.indices) return ""
-        val newId = newSessionId()
-        val prefix = src.subList(0, entryIndex + 1).toMutableStateList()
-        val list = sessions.getOrPut(proj) { mutableStateListOf() }
-        list.add(0, Session(newId, forkTitle(src, entryIndex), proj, updatedAt = System.currentTimeMillis()))
-        messagesBySession[newId] = prefix
-        // 新会话条目树 = 前缀线性链（全新 id，leaf = 末条目）：新会话自带完整上下文、
-        // 并能独立继续分叉（/tree 画布页与继续发消息都可用）
-        val chain = mutableStateListOf<SessionEntry>()
-        var parent: String? = null
-        prefix.forEach { m ->
-            val eid = newEntryId(chain)
-            chain += SessionEntry(eid, parent, m)
-            parent = eid
-        }
-        entriesBySession[newId] = chain
-        leafBySession[newId] = parent
-        currentSessionId = newId
-        activePanel = Panel.MESSAGES
-        onSessionChanged()   // 新会话：环归位，真值随后按它的 pi 文件读回
-        return newId
     }
 
     /** fork 新会话默认标题：fork 点用户消息前 20 字（AI 消息则取其前一条用户消息） */

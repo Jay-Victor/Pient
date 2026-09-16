@@ -30,7 +30,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AltRoute
 import androidx.compose.material.icons.outlined.CallSplit
 import androidx.compose.material.icons.outlined.Visibility
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
@@ -66,7 +65,6 @@ import com.pient.app.data.ChatState
 import com.pient.app.data.Msg
 import com.pient.app.data.Panel
 import com.pient.app.data.SessionTreeNode
-import com.pient.app.data.SettingsStore
 import com.pient.app.data.ToolStatus
 import com.pient.app.ui.components.MarkdownText
 import com.pient.app.ui.theme.PientPanel
@@ -489,57 +487,6 @@ fun TreeCanvasPanel(chatState: ChatState) {
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 6.dp),
-                        )
-                    }
-                    // 摘要开关（pi 的 branch summary）：开启后切分支时 pi 调一次模型，
-                    // 把切走的那条分支摘成摘要挂到新位置 —— 保留"刚做过什么"的上下文
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { SettingsStore.branchSummarize = !SettingsStore.branchSummarize }
-                            .padding(top = 8.dp),
-                    ) {
-                        Checkbox(
-                            checked = SettingsStore.branchSummarize,
-                            onCheckedChange = { SettingsStore.branchSummarize = it },
-                        )
-                        Text(
-                            L.canvas.branchSummary,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    // ── 节点动作（2026-09-14 会话映射）──
-                    // 左：会话内分支（同一个 pi 会话文件里移动活跃叶 = pi 的 /tree）
-                    // 右：会话外分支（pi 的 fork → 新会话文件 → Pient 里新建一个绑它的会话）
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(top = 14.dp),
-                    ) {
-                        Text(
-                            L.canvas.switchToBranch,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier
-                                .clickable {
-                                    detailOpen = false
-                                    switchTo(chatState, selectedId)
-                                }
-                                .padding(horizontal = 8.dp, vertical = 8.dp),
-                        )
-                        Text(
-                            L.canvas.forkSession,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier
-                                .padding(start = 10.dp)
-                                .clickable {
-                                    detailOpen = false
-                                    chatState.forkPiSession(selectedNode.id)
-                                    chatState.activePanel = Panel.MESSAGES
-                                }
-                                .padding(horizontal = 8.dp, vertical = 8.dp),
                         )
                     }
                 }

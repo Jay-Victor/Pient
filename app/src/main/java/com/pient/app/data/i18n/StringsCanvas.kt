@@ -8,9 +8,6 @@ interface CanvasStrings {
     val switchBranch: String
     val nodeDetails: String
     val noAnswer: String
-    val branchSummary: String
-    val switchToBranch: String
-    val forkSession: String
 }
 
 object ZhCanvas : CanvasStrings {
@@ -20,9 +17,6 @@ object ZhCanvas : CanvasStrings {
     override val switchBranch: String = "切换分支"
     override val nodeDetails: String = "节点详情"
     override val noAnswer: String = "（暂无回答）"
-    override val branchSummary: String = "切分支时生成摘要（pi 会调用一次模型）"
-    override val switchToBranch: String = "切换到此分支"
-    override val forkSession: String = "从此处分叉新会话"
 }
 
 object EnCanvas : CanvasStrings {
@@ -32,7 +26,4 @@ object EnCanvas : CanvasStrings {
     override val switchBranch: String = "Switch branch"
     override val nodeDetails: String = "Node details"
     override val noAnswer: String = "(No answer yet)"
-    override val branchSummary: String = "Generate a summary when switching branches (pi calls the model once)"
-    override val switchToBranch: String = "Switch to this branch"
-    override val forkSession: String = "Fork a new session from here"
 }

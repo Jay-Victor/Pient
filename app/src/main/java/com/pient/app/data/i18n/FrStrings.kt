@@ -173,6 +173,7 @@ object FrChat : ChatStrings {
     override val piUnreadyToast: String = "Runtime pi non prêt : message non envoyé (voir la bannière ci-dessus)"
     override val compactDone: String = "Contexte compacté (natif pi) : la page de chat a été reconstruite à partir du contexte compacté"
     override val sessionCreated: String = "Nouvelle session créée"
+    override val forkUnavailable: String = "Impossible de localiser l’entrée de ce message dans la session pi : il ne peut pas servir de point de bifurcation"
     override val newSession: String = "Nouvelle session"
     override val idle: String = "Inactif"
     override val sessionBranches: String = "Branches de session"
@@ -287,9 +288,6 @@ object FrCanvas : CanvasStrings {
     override val switchBranch: String = "Changer de branche"
     override val nodeDetails: String = "Détails du nœud"
     override val noAnswer: String = "(Aucune réponse pour l’instant)"
-    override val branchSummary: String = "Générer un résumé lors du changement de branche (pi appelle le modèle une fois)"
-    override val switchToBranch: String = "Basculer vers cette branche"
-    override val forkSession: String = "Créer une nouvelle session à partir d’ici"
 }
 
 object FrSession : SessionStrings {
@@ -1202,7 +1200,7 @@ object FrRuntime : RuntimeStrings {
     override val noContextAvailable: String = "Aucun contexte utilisable"
     override val piChannelStartFailedHint: String = "Échec du démarrage du canal pi : à vérifier / mettre à jour dans « Environnement »"
     override val piNotReadyTurnNotSent: String = "Environnement d’exécution pi non prêt : ce tour n’a pas été envoyé. Vérifier Ubuntu / pi dans « Terminal → Environnement »."
-    override val branchTitlePrefix: String = "Branche · "
+    override val branchTitlePrefix: String = "(Branche) "
     override val sessionTitle: String = "Session"
     override val piChannelDisconnected: String = "Le canal pi s’est déconnecté en cours de tour (ce tour n’a pas abouti)"
     override val piChannelTimeout: String = "Le canal pi a expiré (aucun agent_settled en 10 minutes)"

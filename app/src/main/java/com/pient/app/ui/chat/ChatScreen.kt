@@ -801,8 +801,9 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                     regenerateEnabled = !chatState.isStreaming,
                     onFork = {
                         forkMenuTarget = null
-                        chatState.forkSession(forkIdx)
-                        Toast.makeText(context, L.chat.sessionCreated, Toast.LENGTH_SHORT).show()
+                        // 会话外分支 = pi 原生 navigate（回合末尾锚点）+ clone（含 fork 点）：
+                        // 结果走 ChatState.blockedNote 通道给一句 Toast（成功「已创建新会话」/ 失败说明）
+                        chatState.forkFromMessage(forkIdx)
                     },
                     onCopy = {
                         // 打开时快照内容：Markdown 源码态 = 助手回答原文；用户消息 = 消息文本

@@ -173,6 +173,7 @@ object EsChat : ChatStrings {
     override val piUnreadyToast: String = "El runtime de pi no está listo: mensaje no enviado (ver el aviso de arriba)"
     override val compactDone: String = "Contexto compactado (nativo de pi): la página de chat se reconstruyó a partir del contexto compactado"
     override val sessionCreated: String = "Nueva sesión creada"
+    override val forkUnavailable: String = "No se encontró el elemento de este mensaje en la sesión pi: no puede usarse como punto de bifurcación"
     override val newSession: String = "Nueva sesión"
     override val idle: String = "Sin actividad"
     override val sessionBranches: String = "Ramas de la sesión"
@@ -287,9 +288,6 @@ object EsCanvas : CanvasStrings {
     override val switchBranch: String = "Cambiar de rama"
     override val nodeDetails: String = "Detalles del nodo"
     override val noAnswer: String = "(Sin respuesta todavía)"
-    override val branchSummary: String = "Generar un resumen al cambiar de rama (pi llama al modelo una vez)"
-    override val switchToBranch: String = "Cambiar a esta rama"
-    override val forkSession: String = "Bifurcar una nueva sesión desde aquí"
 }
 
 object EsSession : SessionStrings {
@@ -1202,7 +1200,7 @@ object EsRuntime : RuntimeStrings {
     override val noContextAvailable: String = "No hay contexto disponible"
     override val piChannelStartFailedHint: String = "No se pudo iniciar el canal de pi: se puede comprobar o actualizar en \"Entorno\""
     override val piNotReadyTurnNotSent: String = "El runtime de pi no está listo: este turno no se envió. Hay que comprobar Ubuntu / pi en \"Terminal → Entorno\"."
-    override val branchTitlePrefix: String = "Rama · "
+    override val branchTitlePrefix: String = "(Rama) "
     override val sessionTitle: String = "Sesión"
     override val piChannelDisconnected: String = "El canal de pi se desconectó a mitad del turno (el turno no se completó)"
     override val piChannelTimeout: String = "Se agotó el tiempo de espera del canal de pi (no se recibió agent_settled en 10 minutos)"

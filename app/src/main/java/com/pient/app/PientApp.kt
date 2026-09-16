@@ -166,8 +166,6 @@ fun PientApp() {
 
     // 抽屉展出方式持久化（行为设置），重启后保持
     LaunchedEffect(Unit) {
-        snapshotFlow { SettingsStore.branchSummarize }
-            .collect { SettingsStore.saveBranchSummarize(context) }
         snapshotFlow { SettingsStore.drawerMode }
             .collect { SettingsStore.saveDrawerMode(context) }
     }

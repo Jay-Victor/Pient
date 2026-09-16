@@ -173,6 +173,7 @@ object ZhTwChat : ChatStrings {
     override val piUnreadyToast: String = "pi 執行時未就緒：訊息未傳送（見上方提示條）"
     override val compactDone: String = "已壓縮上下文（pi 原生）：聊天頁已按壓縮後的上下文重建"
     override val sessionCreated: String = "已建立新工作階段"
+    override val forkUnavailable: String = "找不到這則訊息的 pi 項目，無法作為分支點"
     override val newSession: String = "新工作階段"
     override val idle: String = "空閒"
     override val sessionBranches: String = "工作階段分支"
@@ -287,9 +288,6 @@ object ZhTwCanvas : CanvasStrings {
     override val switchBranch: String = "切換分支"
     override val nodeDetails: String = "節點詳情"
     override val noAnswer: String = "（暫無回答）"
-    override val branchSummary: String = "切分支時生成摘要（pi 會呼叫一次模型）"
-    override val switchToBranch: String = "切換到此分支"
-    override val forkSession: String = "從此處分叉新工作階段"
 }
 
 object ZhTwSession : SessionStrings {
@@ -1202,7 +1200,7 @@ object ZhTwRuntime : RuntimeStrings {
     override val noContextAvailable: String = "缺少可用的上下文"
     override val piChannelStartFailedHint: String = "pi 通道啟動失敗：可到「環境配置」裡檢測/更新"
     override val piNotReadyTurnNotSent: String = "pi 執行時未就緒：本輪沒有傳送。請到「終端 → 環境配置」檢查 Ubuntu / pi。"
-    override val branchTitlePrefix: String = "分支 · "
+    override val branchTitlePrefix: String = "（分支）"
     override val sessionTitle: String = "工作階段"
     override val piChannelDisconnected: String = "pi 通道中途斷開（本輪未完成）"
     override val piChannelTimeout: String = "pi 通道超時（10 分鐘未見 agent_settled）"

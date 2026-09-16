@@ -173,6 +173,7 @@ object HiChat : ChatStrings {
     override val piUnreadyToast: String = "pi रनटाइम तैयार नहीं: संदेश नहीं भेजा गया (ऊपर बैनर देखें)"
     override val compactDone: String = "कॉन्टेक्स्ट कॉम्पैक्ट किया गया (pi-native): चैट पेज को कॉम्पैक्ट किए गए कॉन्टेक्स्ट से फिर से बनाया गया"
     override val sessionCreated: String = "नया सेशन बन गया"
+    override val forkUnavailable: String = "इस संदेश की pi एंट्री नहीं मिली, इसलिए इसे ब्रांच बिंदु नहीं बनाया जा सकता"
     override val newSession: String = "नया सेशन"
     override val idle: String = "निष्क्रिय"
     override val sessionBranches: String = "सेशन ब्रांचें"
@@ -287,9 +288,6 @@ object HiCanvas : CanvasStrings {
     override val switchBranch: String = "ब्रांच स्विच करें"
     override val nodeDetails: String = "नोड विवरण"
     override val noAnswer: String = "(अभी कोई उत्तर नहीं)"
-    override val branchSummary: String = "ब्रांच स्विच करते समय सारांश बनाएँ (pi एक बार मॉडल कॉल करता है)"
-    override val switchToBranch: String = "इस ब्रांच पर स्विच करें"
-    override val forkSession: String = "यहाँ से नया सेशन फ़ोर्क करें"
 }
 
 object HiSession : SessionStrings {
@@ -1202,7 +1200,7 @@ object HiRuntime : RuntimeStrings {
     override val noContextAvailable: String = "कोई उपयोगी कॉन्टेक्स्ट उपलब्ध नहीं"
     override val piChannelStartFailedHint: String = "pi चैनल शुरू नहीं हो सका: \"एनवायरनमेंट\" में इसे जाँचें या अपडेट करें"
     override val piNotReadyTurnNotSent: String = "pi रनटाइम तैयार नहीं: यह टर्न नहीं भेजा गया। \"टर्मिनल → एनवायरनमेंट\" में Ubuntu / pi जाँचें।"
-    override val branchTitlePrefix: String = "ब्रांच · "
+    override val branchTitlePrefix: String = "(ब्रांच) "
     override val sessionTitle: String = "सेशन"
     override val piChannelDisconnected: String = "pi चैनल बीच में डिस्कनेक्ट हो गया (यह टर्न पूरा नहीं हुआ)"
     override val piChannelTimeout: String = "pi चैनल का टाइमआउट हो गया (10 मिनट तक agent_settled नहीं आया)"

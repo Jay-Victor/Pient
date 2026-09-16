@@ -65,6 +65,7 @@ interface ChatStrings {
     val piUnreadyToast: String
     val compactDone: String
     val sessionCreated: String
+    val forkUnavailable: String
     val newSession: String
     val idle: String
     val sessionBranches: String
@@ -250,6 +251,7 @@ object ZhChat : ChatStrings {
     override val piUnreadyToast: String = "pi 运行时未就绪：消息未发送（见上方提示条）"
     override val compactDone: String = "已压缩上下文（pi 原生）：聊天页已按压缩后的上下文重建"
     override val sessionCreated: String = "已创建新会话"
+    override val forkUnavailable: String = "定位不到这条消息的 pi 条目，不能作为分支点"
     override val newSession: String = "新会话"
     override val idle: String = "空闲"
     override val sessionBranches: String = "会话分支"
@@ -421,6 +423,7 @@ object EnChat : ChatStrings {
     override val piUnreadyToast: String = "pi runtime not ready: message not sent (see the banner above)"
     override val compactDone: String = "Context compacted (pi-native): the chat page was rebuilt from the compacted context"
     override val sessionCreated: String = "New session created"
+    override val forkUnavailable: String = "This message can't be located in the pi session, so it can't be used as a branch point"
     override val newSession: String = "New session"
     override val idle: String = "Idle"
     override val sessionBranches: String = "Session branches"

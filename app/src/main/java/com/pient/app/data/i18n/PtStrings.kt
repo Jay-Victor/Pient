@@ -173,6 +173,7 @@ object PtChat : ChatStrings {
     override val piUnreadyToast: String = "Runtime do pi não está pronto: mensagem não enviada (veja o aviso acima)"
     override val compactDone: String = "Contexto compactado (nativo do pi): a página de chat foi reconstruída a partir do contexto compactado"
     override val sessionCreated: String = "Nova sessão criada"
+    override val forkUnavailable: String = "Não foi possível localizar a entrada desta mensagem na sessão pi, então ela não pode servir como ponto de ramificação"
     override val newSession: String = "Nova sessão"
     override val idle: String = "Ocioso"
     override val sessionBranches: String = "Ramificações da sessão"
@@ -287,9 +288,6 @@ object PtCanvas : CanvasStrings {
     override val switchBranch: String = "Trocar de ramificação"
     override val nodeDetails: String = "Detalhes do nó"
     override val noAnswer: String = "(Ainda sem resposta)"
-    override val branchSummary: String = "Gerar um resumo ao trocar de ramificação (o pi chama o modelo uma vez)"
-    override val switchToBranch: String = "Trocar para esta ramificação"
-    override val forkSession: String = "Bifurcar uma nova sessão a partir daqui"
 }
 
 object PtSession : SessionStrings {
@@ -1202,7 +1200,7 @@ object PtRuntime : RuntimeStrings {
     override val noContextAvailable: String = "Nenhum contexto disponível"
     override val piChannelStartFailedHint: String = "Falha ao iniciar o canal do pi: verifique/atualize em \"Ambiente\""
     override val piNotReadyTurnNotSent: String = "Runtime do pi não está pronto: este turno não foi enviado. Verifique o Ubuntu / pi em \"Terminal → Ambiente\"."
-    override val branchTitlePrefix: String = "Ramificação · "
+    override val branchTitlePrefix: String = "(Ramificação) "
     override val sessionTitle: String = "Sessão"
     override val piChannelDisconnected: String = "O canal do pi desconectou no meio do turno (este turno não foi concluído)"
     override val piChannelTimeout: String = "O canal do pi excedeu o tempo limite (nenhum agent_settled em 10 minutos)"
