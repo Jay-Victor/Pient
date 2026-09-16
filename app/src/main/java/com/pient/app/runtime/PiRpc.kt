@@ -74,6 +74,9 @@ object PiRpc {
 
     // ─────────────────────── 就绪判断 / 启停 ───────────────────────
 
+    /** 通道**此刻真的在跑**（可用 ≠ 在跑：usable 还含「能起来」）。用于「要不要为换工作区重启它」。 */
+    fun running(): Boolean = process?.isAlive == true
+
     /** 通道可用 = 在跑，或**能起来**（rootfs + 预置 pi 都在）。 */
     fun usable(): Boolean {
         process?.let { if (it.isAlive) return true }
@@ -127,7 +130,8 @@ object PiRpc {
         _state.value = PiRpcState.Starting
         return try {
             val proc = ProcessBuilder(shell.absolutePath, "-c", cmd)
-                .directory(PiRuntime.appDir(ctx))
+                // cwd = 当前项目目录（guest 里就是 /workspace 的绑定源；没设过项目时退回随包 app/）
+                .directory(PiRuntime.workspaceDir(ctx))
                 .redirectErrorStream(false)
                 // **pi 自己永远在 Ubuntu 里跑**（与用户选的 exec_env 解耦）：node 与 pi 都装在那棵 rootfs 里，
                 // 跟着 exec_env=android 走会把通道整体打断（见 PiRuntime.guestEnv 的说明）。

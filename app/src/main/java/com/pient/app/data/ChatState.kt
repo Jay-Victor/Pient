@@ -244,6 +244,8 @@ class ChatState {
         if (availableModels.none { it.id == selectedModelId }) {
             selectedModelId = availableModels.firstOrNull()?.id.orEmpty()
         }
+        // 启动恢复：把当前项目的目录写给 guest（否则它落在 pi 自己的运行目录里）
+        syncWorkspace(currentProject)
     }
 
     val currentMessages: SnapshotStateList<Msg>
@@ -262,11 +264,72 @@ class ChatState {
         currentProject = name
         currentSessionId = sessionsFor(name).firstOrNull()?.id
         onSessionChanged()   // 换项目＝换会话：环归位并按新会话的 pi 文件读回
+        syncWorkspace(name)  // 工作区指针：guest 的 /workspace 跟着换项目（AI 与终端都落在里面）
         // 项目切换：清空文件预览标签与树展开状态（标签/展开路径属于原项目的文件树，
         // 2026-09-02 修复：切项目后标签栏仍显示上一项目文件）
         openTabs.clear()
         activeTabIndex = 0
         expandedDirs.clear()
+    }
+
+    /**
+     * 工作区指针同步：**切到哪个项目，AI 与终端就落在哪个项目的文件夹里**。
+     *
+     * guest 的 `/workspace` 是包装脚本按 `$P/workspace` 指针文件**现读**挂上的 bind 挂载
+     * （PRoot 档 `pient-shell.sh:26-27,56-57`；chroot 档 `pient-root-wrapper.sh:30`）。
+     * 这个指针此前只有「项目改名」会写，切换 / 新建 / 启动恢复 / 删除回退都没写 —— 指针缺失时
+     * 包装脚本退回 `$P/app`，AI 实际落在**自己的运行目录**里（2026-09-16 真机实测：guest `ls /workspace`
+     * 列出的是 pi 运行时那几个文件，而不是项目目录里的 `.pient-project.json`）。
+     * `PiSkills` 的项目技能根（`<workspaceDir>/.pi/skills`）也吃这条，所以它一并被修好。
+     *
+     * 指针变了要重启 pi 通道：proot 的绑定挂载是**进程级**的，已在跑的 pi 仍看着旧目录，而它每次
+     * spawn 的 `bash` 工具都重读指针 → 两者会看到不同目录。pi 正忙时不打断它，记一个 pending，
+     * 等它空闲（下次发送前）再换（见 [applyPendingWorkspaceRestart]）。
+     */
+    private fun syncWorkspace(projectName: String?) {
+        val ctx = AppCtx.get() ?: return
+        val dir = projectName?.let { n -> projects.firstOrNull { it.name == n }?.path }?.let { java.io.File(it) }
+        val before = runCatching { PiRuntime.workspaceDir(ctx).absolutePath }.getOrNull()
+        PiRuntime.setWorkspace(ctx, dir)
+        val after = runCatching { PiRuntime.workspaceDir(ctx).absolutePath }.getOrNull()
+        if (before == after) return
+        Log.i(TAG_CHAT, "工作区已切到：$after（原：$before）")
+        bgScope.launch { applyPendingWorkspaceRestart() }
+    }
+
+    /**
+     * 启动就绪后（`AppCtx` 已注入）把当前项目的目录写给 guest。
+     *
+     * 为什么单独留一个入口：读盘（[ChatStore.load] → [normalizeAfterLoad]）跑在 `AppCtx.set` **之前**，
+     * 那时 `AppCtx.get()` 还是 null → 那条调用会静默跳过（2026-09-16 实测：装包后启动，指针文件没被写）。
+     */
+    fun syncWorkspaceToCurrentProject() = syncWorkspace(currentProject)
+
+    /** 工作区换了但 pi 正忙 → 记下来，等它空闲（下次发送前）再重启通道 */
+    private var workspaceRestartPending = false
+
+    /**
+     * 把 pi 通道重启到新工作区（**只在该通道真的在跑时**才重启 —— 没在跑下次启动自然读到新指针，
+     * 也就不会在冷启动时把 pi 拉起来）。重启后要重绑本会话的 pi 文件。
+     */
+    private suspend fun applyPendingWorkspaceRestart() {
+        if (!PiRpc.running()) {
+            workspaceRestartPending = false
+            return
+        }
+        if (PiRpc.isStreamingNow(timeoutMs = 600) == true) {
+            workspaceRestartPending = true
+            Log.i(TAG_CHAT, "工作区已换，但 pi 正忙：等它收尾后重启通道")
+            return
+        }
+        workspaceRestartPending = false
+        val target = piChannelTarget() ?: return
+        PiRpc.stop()
+        if (PiRpc.start(target.first, target.second)) {
+            bindPiSession()   // 新进程要重新绑回本会话的 pi 文件（否则 get_state 落在别的会话上）
+            val name = AppCtx.get()?.let { runCatching { PiRuntime.workspaceDir(it).name }.getOrNull() }.orEmpty()
+            Log.i(TAG_CHAT, "pi 通道已按新工作区重启（工作区=$name）")
+        }
     }
 
     fun selectSession(id: String) {
@@ -633,7 +696,7 @@ class ChatState {
         if (currentProject == oldName) {
             currentProject = newName
             // 当前项目改了目录名：工作区指针（$P/workspace）跟着走，否则终端 / pi 还指着旧路径
-            AppCtx.get()?.let { PiRuntime.setWorkspace(it, java.io.File(newPath)) }
+            syncWorkspace(newName)
         }
         return null
     }
@@ -654,6 +717,7 @@ class ChatState {
         if (currentProject == name) {
             currentProject = projects.firstOrNull()?.name
             currentSessionId = sessionsFor(currentProject ?: "").firstOrNull()?.id
+            syncWorkspace(currentProject)   // 删的是当前项目：工作区跟着回退到剩下的第一个项目
             // 被删项目的文件树不再有效；FileTreePanel 会按新 currentProject 重载
             fileTreeRoot = null
             fileTreeTruncated = false
@@ -827,6 +891,8 @@ class ChatState {
         // prompt 会**直接拒绝**（docs/rpc.md:56-65；抛错点 core/agent-session.ts:1213），硬发的代价 =
         // 一条废用户消息 + 一句用户看不懂的英文报错。可能撞上的窗口：上一轮在别处被留下（旧版 UI scope
         // 取消的遗留）、刚中止还没收尾、画布/终端那边正在跑。这里不落任何条目，把文本还给输入栏。
+        // 工作区换过但当时 pi 正忙：趁现在（它空闲）把通道重启到新目录，再发本轮
+        if (workspaceRestartPending) applyPendingWorkspaceRestart()
         if (PiRpc.isStreamingNow() == true) {
             draftRestore = userText
             blockedNote = "AI 还在处理上一条消息，本条没有发出去（等它收尾后再发）"

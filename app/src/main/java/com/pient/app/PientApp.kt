@@ -124,6 +124,8 @@ fun PientApp() {
     LaunchedEffect(ready) {
         if (!ready) return@LaunchedEffect
         AppCtx.set(context.applicationContext)
+        // 工作区指针：**必须在 AppCtx 注入之后**（读盘阶段 AppCtx 还是 null，那次调用会跳过）
+        chatState.syncWorkspaceToCurrentProject()
     }
 
     // 通知点开回终端页（2026-09-16）：前台服务通知把面板请求留在 PientRuntime.pendingPanel
