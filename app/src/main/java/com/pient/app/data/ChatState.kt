@@ -43,9 +43,17 @@ private const val TAG_CHAT = "PientChat"
 private const val SYS_PROMPT_FILE = ".pient-sysprompt.txt"
 
 /**
- * pi 侧「引用标记」的 customType（`custom` 条目：不进 LLM 上下文、不进画布）。
- * 必须与 `assets/pient-pi-extension.ts` 的 QUOTE_TYPE 保持一致 —— 发送前写标记、重建时按它挂回引用卡。
+ * pi 侧「用户消息元数据」标记的 customType（`custom` 条目：不进 LLM 上下文、不进画布）。
+ * 必须与 `assets/pient-pi-extension.ts` 的 META_TYPE 一致 —— 发送前写标记、重建时按它把
+ * 引用与**附件清单（含文件名）**挂回来。
+ *
+ * 为什么附件清单也要写：pi 的 `image` 内容块只有 `data/mimeType`（协议里没有文件名），
+ * 直发时正文里那行「[附件] 名称 · 路径」又按 Operit「移除链接」口径被去掉 —— 于是
+ * **pi 侧完全没有名字**，只有本地镜像知道。标记把名字固化进会话文件（跨重建/重装/换端都在）。
  */
+private const val PI_META_TYPE = "pient_meta"
+
+/** 旧版标记（只带引用，2026-09-17 上半场）；读侧仍认，写侧已不用 */
 private const val PI_QUOTE_TYPE = "pient_quote"
 
 /** 顶栏右下方区域内容（消息区 / 文件内容预览区 / 终端页 / 分支画布 四态切换） */
@@ -1019,6 +1027,7 @@ class ChatState {
                 cfg = cfg.copy(modelList = effectiveModel),
                 userTurnText = promptText,
                 quote = quote,
+                attachments = currentMsg.attachments,
                 onDelta = { draft -> streamDraft = draft },
                 onThinking = { noteThinkingDelta(it) },
                 media = inline.parts,
@@ -1060,8 +1069,9 @@ class ChatState {
         onThinking: (String) -> Unit = {},
         /** 本回合要直发的附件部件（媒体能力开关；只作用于最新一条用户消息） */
         media: List<WirePart> = emptyList(),
-        /** 本轮的引用块（写进 pi 会话的 `pient_quote` 标记；见 [writeQuoteMarker]） */
+        /** 本轮的引用块与附件清单（写进 pi 会话的 `pient_meta` 标记；见 [writeMsgMeta]） */
         quote: Quote? = null,
+        attachments: List<Attachment> = emptyList(),
     ): ChatOutcome {
         val target = piChannelTarget()
         if (target != null && PiRpc.usable() && PiRpc.start(target.first, target.second)) {
@@ -1070,7 +1080,7 @@ class ChatState {
                 piReadiness = PiReadiness.Ready
                 piUnreadyReason = ""
             }
-            return runChatViaPi(cfg, userTurnText, media, onDelta, onThinking, quote)
+            return runChatViaPi(cfg, userTurnText, media, onDelta, onThinking, quote, attachments)
         }
         // ── pi 起不来：**不换路**（2026-09-15 拍板 B + 收口）────────────────────────
         // 直连没有任何工具能力，落回去会让用户以为自己在用 agent；§8.3 作废后本地也不存在
@@ -1267,7 +1277,7 @@ class ChatState {
         // 这里按文本对位还原成结构（正文干净、引用回 quote、附件回 attachments）。
         // 不还原的话「开画布 / 切分支 / fork / 中止 / 压缩」之后气泡里会直接冒出 "> …" 与
         // "[附件] 名称 · 路径" 字面行，引用卡与附件 chip 也再也回不来。
-        val restoredMsgs = piUserMsgs()
+        val restoredMsgs = piUserMsgs(localAttachByText(id))
         if (restoredMsgs.isNotEmpty()) {
             var restored = 0
             for (i in rebuilt.indices) {
@@ -1342,9 +1352,10 @@ class ChatState {
         fun isUserTurn(id: String): Boolean = isPiUserNode(entryById[id])
         val userIds = order.filter { isUserTurn(it) }
         /** 用户条目的还原形态（正文剥离引用块 / 附件清单，引用与附件进各自字段）；无可还原项返回 null */
+        val localAttach = localAttachByText(currentSessionId)
         fun userMsgOf(id: String): Msg.User? =
             if (!isUserTurn(id)) null
-            else piUserMsg(id, entryById[id]?.optJSONObject("message"), entryById, parentOf)
+            else piUserMsg(id, entryById[id]?.optJSONObject("message"), entryById, parentOf, localAttach)
 
         fun textOf(id: String): String {
             val raw = piText(entryById[id]?.optJSONObject("message"))
@@ -1577,85 +1588,141 @@ class ChatState {
         return x == y || x.contains(y) || y.contains(x)
     }
 
-    // ── 引用标记（pi `custom` 条目，2026-09-17）────────────────────────────────
-    // 引用卡不能只活在本地镜像里：pi 的会话文件里只留得下注入后的文本（"> …" + 空行 + 正文），
-    // 任何一次「按 pi 重建上屏流」都会把卡片抹成气泡里的字面行。所以发送前先往 pi 会话写一条
-    // `pient_quote` custom 条目（`session-format.md` 明写不进 LLM 上下文、不进画布），
-    // 重建时按「这条 user 条目的 parent 是不是它」把卡片挂回去。
+    // ── 用户消息元数据标记（pi `custom` 条目，2026-09-17）────────────────────────
+    // 引用卡与附件清单不能只活在本地镜像里：pi 的会话文件里只留得下**文本**，而
+    //   · 引用 = 正文开头的 "> …" 块引用（结构由 pient_meta 标记兜底）；
+    //   · 附件 = 正文尾部的 "[附件] 名称 · 路径" 清单 —— **直发时这行按「移除链接」口径被去掉**，
+    //     而 `image` 内容块只有 data/mimeType（协议里没有文件名字段）→ pi 侧完全没有名字。
+    // 所以发送前把「引用 + 附件清单（含文件名/类型/路径）」作为一条 `pient_meta` custom 条目
+    // 写进会话（`session-format.md` 明写不进 LLM 上下文、不进画布），读侧按「user 条目的
+    // parent 是不是它」还原 —— 跨重建、重装、换端都在。
 
     /**
-     * 把引用写进 pi 会话（扩展命令 `/pient-quote <base64(JSON)>` → `pi.appendEntry`）。
+     * 把「引用 + 附件清单」写进 pi 会话（扩展命令 `/pient-meta <base64(JSON)>` → `pi.appendEntry`）。
      * 为什么走扩展命令：pi 的 RPC 没有「追加自定义条目」这条命令，官方扩展 API 有
      * （锚点标记 `pient_anchor` 走的就是同一条路）。**必须在 prompt 之前发** ——
      * 标记写在当前叶之下，随后追加的用户消息才成为它的子条目。
      */
-    private suspend fun writeQuoteMarker(quote: Quote) {
-        val payload = JSONObject().put("text", quote.text).put("role", quote.role).toString()
+    private suspend fun writeMsgMeta(quote: Quote?, attachments: List<Attachment>) {
+        if (quote == null && attachments.isEmpty()) return
+        val payload = JSONObject()
+        quote?.let { payload.put("quote", JSONObject().put("text", it.text).put("role", it.role)) }
+        if (attachments.isNotEmpty()) {
+            payload.put("attachments", JSONArray().apply {
+                attachments.forEach { a ->
+                    put(
+                        JSONObject()
+                            .put("name", a.name)
+                            .put("kind", a.kind.name)
+                            .put("path", a.path ?: JSONObject.NULL),
+                    )
+                }
+            })
+        }
         val b64 = android.util.Base64.encodeToString(
-            payload.toByteArray(Charsets.UTF_8),
+            payload.toString().toByteArray(Charsets.UTF_8),
             android.util.Base64.NO_WRAP,
         )
-        val res = runCatching { PiRpc.prompt("/pient-quote $b64") }.getOrNull()
+        val res = runCatching { PiRpc.prompt("/pient-meta $b64") }.getOrNull()
         if (res == null || !res.optBoolean("success", true)) {
-            Log.w(TAG_CHAT, "引用标记未写入 pi（本轮照发）：${res?.optString("error").orEmpty()}")
+            Log.w(TAG_CHAT, "消息元数据未写入 pi（本轮照发）：${res?.optString("error").orEmpty()}")
         } else {
-            Log.i(TAG_CHAT, "引用标记已写入 pi 会话（${quote.role} · ${quote.text.length} 字）")
+            Log.i(TAG_CHAT, "消息元数据已写入 pi 会话（引用=${quote != null} 附件=${attachments.size} 个）")
         }
     }
 
+    /** pi 条目的元数据标记（`pient_meta`；旧版 `pient_quote` 只带引用） */
+    private data class PiMeta(val quote: Quote?, val attachments: List<Attachment>)
+
     /**
-     * pi 条目 → 它挂着的引用标记（parent 是 `custom/pient_quote` 时取它的 data；没有返回 null）。
+     * pi 条目 → 它挂着的元数据标记（parent 是 `custom/(pient_meta|pient_quote)` 时取它的 data）。
      *
      * `entries` / `parents` 默认取实例上那份（`refreshPiTree` 后的全局状态）；**画布建树时必须显式传
      * `piParseTree` 自己的局部表** —— 那一刻实例字段还是上一棵树（首次刷新时是空的），
      * 用它会让画布节点预览退回 "> …" 原文（2026-09-17 实测踩过）。
      */
-    private fun quoteMarkerOf(
+    private fun piMetaOf(
         entryId: String,
         entries: Map<String, JSONObject> = piEntryById,
         parents: Map<String, String?> = piParentOf,
-    ): Quote? {
+    ): PiMeta? {
         val pid = parents[entryId] ?: return null
         val parent = entries[pid] ?: return null
-        if (parent.optString("type") != "custom" || parent.optString("customType") != PI_QUOTE_TYPE) return null
+        if (parent.optString("type") != "custom") return null
+        val ct = parent.optString("customType")
+        if (ct != PI_META_TYPE && ct != PI_QUOTE_TYPE) return null
         val d = parent.optJSONObject("data") ?: return null
-        val text = d.optString("text").trim()
-        if (text.isEmpty()) return null
-        return Quote(text, if (d.optString("role") == "assistant") "assistant" else "user")
+        val qo = d.optJSONObject("quote") ?: d            // 新形态 data.quote / 旧形态直接挂 data
+        val qText = qo.optString("text").trim()
+        val quote = qText.takeIf { it.isNotEmpty() }?.let {
+            Quote(it, if (qo.optString("role") == "assistant") "assistant" else "user")
+        }
+        val atts = ArrayList<Attachment>()
+        d.optJSONArray("attachments")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val a = arr.optJSONObject(i) ?: continue
+                val name = a.optString("name")
+                val kind = runCatching { AttachmentKind.valueOf(a.optString("kind", "FILE")) }
+                    .getOrDefault(AttachmentKind.FILE)
+                val path = a.optString("path").takeIf { it.isNotBlank() }
+                if (name.isNotBlank() || path != null) atts += Attachment(name, kind, path)
+            }
+        }
+        if (quote == null && atts.isEmpty()) return null
+        return PiMeta(quote, atts)
+    }
+
+    /** 本地镜像里「用户消息文本 → 附件」（重建时把 pi 侧认不出的附件名补回来；条目树与消息流都看） */
+    private fun localAttachByText(sid: String?): Map<String, List<Attachment>> {
+        if (sid == null) return emptyMap()
+        val out = HashMap<String, List<Attachment>>()
+        entriesBySession[sid]?.forEach { e ->                    // 条目树：持久化的那份
+            val u = e.msg as? Msg.User ?: return@forEach
+            if (u.attachments.isNotEmpty()) out[u.text.trim()] = u.attachments
+        }
+        messagesBySession[sid]?.forEach { m ->                   // 上屏流：当前正在显示的那份
+            val u = m as? Msg.User ?: return@forEach
+            if (u.attachments.isNotEmpty()) out[u.text.trim()] = u.attachments
+        }
+        return out
     }
 
     /**
      * pi 用户条目 → 上屏用的 [Msg.User]（正文剥离元数据、附件与引用挂回各自字段）。
      * 返回 null = 这条条目没有可还原的东西（纯文本、无标记、无附件），调用方按 piText 原样用。
      *
-     * 为什么需要：pi 的会话文件里用户消息**只有文本** —— 引用是正文开头的 `> …` 块，
-     * 附件是尾部的 `[附件] 名称 · 路径` 清单（直发的图片只有 content 里的 image 块、名字不留痕）。
-     * 这些元数据本地镜像里有结构，但任何一次按 pi 重建都会丢，所以读回时必须重解析。
-     *
-     * 引用那部分**文本形态必须与标记对得上**：标记有可能成了孤儿（写了标记但本轮没发出去 →
-     * 后一条消息会挂在它下面），对不上宁可不认 —— 最坏是回到「正文里有 `> …` 行」的旧样子，
-     * 不会把别的消息错标成引用。
+     * 附件名的三级来源（前面的优先）：① 标记里的清单（pi 会话文件里那份，最权威）；
+     * ② 本地镜像里同文本那条（老消息没有标记时的兜底）；③ pi 侧推断（清单行 / image 块，
+     * 直发图片在这一级**没有名字**）。
      */
     private fun piUserMsg(
         entryId: String,
         msg: JSONObject?,
         entries: Map<String, JSONObject> = piEntryById,
         parents: Map<String, String?> = piParentOf,
+        localAttach: Map<String, List<Attachment>> = emptyMap(),
     ): Msg.User? {
         val raw = piText(msg).trim()
         if (raw.isEmpty()) return null
         var body = raw
-        var quote: Quote? = null
-        val marker = quoteMarkerOf(entryId, entries, parents)
-        if (marker != null) {
+        val meta = piMetaOf(entryId, entries, parents)
+        var quote = meta?.quote
+        if (quote != null) {
             val split = Quote.splitInjected(body)
-            if (split != null && split.first == marker.text.trim()) {
-                quote = marker
-                body = split.second
-            }
+            if (split != null && split.first == quote.text.trim()) body = split.second
+            else quote = null      // 文本形态对不上 = 孤儿标记（写了标记但本轮没发出去）→ 不认
         }
         val (text, listed) = ContextPolicy.splitAttachments(body)
-        val attachments = listed + imageAttachments(msg)
+        var attachments = listed + imageAttachments(msg)
+        when {
+            meta?.attachments?.isNotEmpty() == true -> attachments = meta.attachments
+            else -> {
+                val local = localAttach[text.trim()]
+                if (local != null && local.size == attachments.size && attachments.any { it.name.isBlank() }) {
+                    attachments = local
+                }
+            }
+        }
         if (quote == null && attachments.isEmpty()) return null
         return Msg.User(text.ifBlank { body }, attachments, quote)
     }
@@ -1672,14 +1739,14 @@ class ChatState {
     }
 
     /** 重建上屏流时按「pi 条目文本」对位还原用户消息（`get_messages` 不带条目 id，只能按文本认） */
-    private fun piUserMsgs(): Map<String, Msg.User> {
+    private fun piUserMsgs(localAttach: Map<String, List<Attachment>> = emptyMap()): Map<String, Msg.User> {
         val out = HashMap<String, Msg.User>()
         for ((id, e) in piEntryById) {
             if (!isPiUserNode(e)) continue
             val msg = e.optJSONObject("message")
             val raw = piText(msg).trim()
             if (raw.isEmpty()) continue
-            piUserMsg(id, msg)?.let { out[raw] = it }
+            piUserMsg(id, msg, piEntryById, piParentOf, localAttach)?.let { out[raw] = it }
         }
         return out
     }
@@ -1703,6 +1770,7 @@ class ChatState {
         onDelta: (String) -> Unit,
         onThinking: (String) -> Unit,
         quote: Quote? = null,
+        attachments: List<Attachment> = emptyList(),
     ): ChatOutcome = coroutineScope {
         val userText = userTurnText
         // 附件直发：pi 的 `prompt` 支持 images（ImageContent = {type,data,mimeType}，见 pi docs/rpc.md）。
@@ -1876,10 +1944,10 @@ class ChatState {
                 }
             }
         }
-        // 引用元数据先写进 pi 会话（`pient_quote` custom 条目，parent = 当前叶 → 紧随其后的用户消息
-        // 成为它的子条目）：按 pi 重建上屏流时靠它把引用卡挂回去（2026-09-17）。
+        // 引用与附件清单先写进 pi 会话（`pient_meta` custom 条目，parent = 当前叶 → 紧随其后的
+        // 用户消息成为它的子条目）：按 pi 重建上屏流时靠它把引用卡与**附件名**挂回去（2026-09-17）。
         // 失败只记一行日志 —— 正文里那份 "> …" 注入本来就是模型侧的兜底，标记只服务 UI 还原。
-        if (quote != null) writeQuoteMarker(quote)
+        if (quote != null || attachments.isNotEmpty()) writeMsgMeta(quote, attachments)
         val res = PiRpc.prompt(promptText, piImages)
         if (res != null && !res.optBoolean("success", true)) {
             collector.cancel()
@@ -2223,7 +2291,7 @@ class ChatState {
             val out = ArrayList<Msg>()
             val nodeMsg = piEntryById[nodeId]?.optJSONObject("message")
             // 节点自身（用户消息）：引用块 / 附件清单剥回结构 —— 与聊天页气泡同口径
-            val selfMsg = if (nodeMsg != null) piUserMsg(nodeId, nodeMsg) else null
+            val selfMsg = if (nodeMsg != null) piUserMsg(nodeId, nodeMsg, localAttach = localAttachByText(sid)) else null
             if (selfMsg != null) out += selfMsg else pushPiMessage(nodeMsg, out)
             // 子表按条目顺序建（get_tree 的解析顺序 = 会话顺序）
             val kids = HashMap<String, MutableList<String>>()
