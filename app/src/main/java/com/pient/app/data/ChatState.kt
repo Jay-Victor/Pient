@@ -2128,7 +2128,6 @@ class ChatState {
     var selectedModelId by mutableStateOf("")
     var thinkingEnabled by mutableStateOf(false)
     var thinkingLevel by mutableStateOf(ThinkingLevel.MEDIUM)
-    var streamingOutputEnabled by mutableStateOf(true) // 流式输出开关（模型选择器"输出"栏）
 
     /** 聊天页可用模型 = 已配置服务商模型列表（模型切换数据源） */
     val availableModels: List<AiModel>

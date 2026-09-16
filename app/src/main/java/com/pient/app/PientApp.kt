@@ -257,8 +257,7 @@ fun PientApp() {
                 chatState.piDesiredLeaf.toMap() to
                 (chatState.currentProject to chatState.currentSessionId) to
                 chatState.selectedModelId to
-                (chatState.thinkingEnabled to chatState.thinkingLevel to
-                    chatState.streamingOutputEnabled)
+                (chatState.thinkingEnabled to chatState.thinkingLevel)
         }.debounce(800).collect {
             withContext(Dispatchers.IO) { ChatStore.save(context, chatState) }
         }

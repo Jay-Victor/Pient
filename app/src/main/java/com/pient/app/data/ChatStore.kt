@@ -23,7 +23,6 @@ object ChatStore {
             root.put("selectedModelId", state.selectedModelId)
             root.put("thinkingEnabled", state.thinkingEnabled)
             root.put("thinkingLevel", state.thinkingLevel.name)
-            root.put("streamingOutputEnabled", state.streamingOutputEnabled)
 
             val projects = JSONArray()
             state.projects.forEach { p ->
@@ -234,7 +233,6 @@ object ChatStore {
             state.thinkingLevel = runCatching {
                 ThinkingLevel.valueOf(root.optString("thinkingLevel", "MEDIUM"))
             }.getOrDefault(ThinkingLevel.MEDIUM)
-            state.streamingOutputEnabled = root.optBoolean("streamingOutputEnabled", true)
             state.normalizeAfterLoad()
         } catch (e: Exception) {
             // 记录损坏：忽略（按全新状态处理）

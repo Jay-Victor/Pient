@@ -21,7 +21,6 @@ import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.SmartToy
-import androidx.compose.material.icons.outlined.Stream
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -75,7 +74,6 @@ fun ModelSelectorSheet(
     val providers = chatState.availableModels.groupBy { it.provider }
     val screenH = LocalConfiguration.current.screenHeightDp
     var thinkingExpanded by remember { mutableStateOf(false) }
-    var outputExpanded by remember { mutableStateOf(false) }
     // 单选展开：一次只展开一个服务商（用户决策 2026-08-27）；默认全部收起（2026-08-30）
     var expandedProvider by remember { mutableStateOf<String?>(null) }
 
@@ -138,44 +136,6 @@ fun ModelSelectorSheet(
                         modifier = Modifier.padding(top = 6.dp),
                     )
                 }
-            }
-        }
-
-        // ①b 输出折叠栏（流式输出开关，2026-08-27 新增）
-        ThinkingModeRow(
-            enabled = chatState.streamingOutputEnabled,
-            levelLabel = if (chatState.streamingOutputEnabled) "流式" else "off",
-            expanded = outputExpanded,
-            onClick = { outputExpanded = !outputExpanded },
-            icon = Icons.Outlined.Stream,
-            title = "输出",
-        )
-        if (outputExpanded) {
-            Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        "流式输出",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Switch(
-                        checked = chatState.streamingOutputEnabled,
-                        onCheckedChange = { chatState.streamingOutputEnabled = it },
-                        colors = SwitchDefaults.colors(
-                            checkedTrackColor = MaterialTheme.colorScheme.primary,
-                        ),
-                    )
-                }
-                Text(
-                    if (chatState.streamingOutputEnabled) "回复逐字流式呈现"
-                    else "回复生成完成后整段呈现",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
             }
         }
 
