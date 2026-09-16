@@ -100,6 +100,13 @@ object JaSettings : SettingsStrings {
     override val residentNotification: String = "バックグラウンド常駐通知"
     override val residentNotificationDesc: String = "オンにすると通知バーに Pient の通知が常駐します：プロセスがシステムに終了されにくくなり、AI ターンとターミナルセッションはバックグラウンドや画面オフでも動き続けます"
     override val residentNotificationNoPermission: String = "通知権限がありません：常駐通知は表示されません（システム設定で有効にできます）"
+    override val messageNotify: String = "メッセージ通知"
+    override val messageNotifyDesc: String = "AI の返信時にシステム通知を送信します"
+    override val messageNotifySound: String = "メッセージ通知の通知音"
+    override val messageNotifySoundDesc: String = "メッセージ通知時に通知音を鳴らします"
+    override val messageNotifyVibrate: String = "メッセージ通知のバイブレーション"
+    override val messageNotifyVibrateDesc: String = "メッセージ通知時にバイブレーションで知らせます"
+    override val messageNotifyNoPermission: String = "通知権限がありません：メッセージ通知は表示されません（システム設定で有効にできます）"
 }
 
 object JaChat : ChatStrings {
@@ -1236,6 +1243,11 @@ object JaRuntime : RuntimeStrings {
     override val residentRunning: String = "Pient はバックグラウンドで常駐中"
     override val keepAliveInterruptedTitle: String = "バックグラウンド維持が中断されました"
     override val keepAliveInterruptedText: String = "フォアグラウンドサービスがシステムの制限時間（Android 15 以降の dataSync は「バックグラウンドで 24 時間あたり計 6 時間」）に達して停止しました。バックグラウンド維持は中断されています。Pient を開き直すと復帰します"
+    override val replyChannelSilent: String = "Pient メッセージ通知"
+    override val replyChannelSound: String = "Pient メッセージ通知（通知音）"
+    override val replyChannelVibration: String = "Pient メッセージ通知（バイブレーション）"
+    override val replyChannelBoth: String = "Pient メッセージ通知（通知音とバイブレーション）"
+    override val replyChannelDesc: String = "AI の返信完了時のシステム通知（アプリがバックグラウンドのとき）"
     override fun keepAliveBigModelThinking(a0: Any?, a1: Any?): String = "モデル：${a0} · 思考：${a1}"
     override fun keepAliveBigRuntime(a0: Any?, a1: Any?): String = "ターミナル：${a0} · ツール呼び出し：${a1}"
     override val piPackagesSession: String = "pi パッケージ管理"

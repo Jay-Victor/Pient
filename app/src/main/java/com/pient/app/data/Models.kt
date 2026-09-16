@@ -155,6 +155,13 @@ object SettingsStore {
     //   上限），通知栏常驻一条；关 = 按需（AI 回合 / 终端会话有活时才挂）。见 runtime/PiKeepAlive.kt
     var residentNotification by mutableStateOf(false)
 
+    // ── 消息通知（2026-09-16，行为设置，照 Operit 的「回复通知」口径）：AI 回复完成且**应用不在
+    //   前台**时发一条系统通知；提示音 / 震动各自独立开关（对应通知渠道的声音与震动属性，见
+    //   runtime/ReplyNotify.kt）。默认 = 通知开、声音关、震动关（Operit 同款：能收到但不打扰）
+    var replyNotify by mutableStateOf(true)
+    var replyNotifySound by mutableStateOf(false)
+    var replyNotifyVibrate by mutableStateOf(false)
+
     // ── 自定义主题色（2026-09-01）：开关 + 色相（0..360）；开启时覆盖 12 预设色作为 accent ──
     var customAccentEnabled by mutableStateOf(false)
     var customAccentHue by mutableStateOf(215f)   // 默认蓝 hue ≈ 215
@@ -235,6 +242,9 @@ object SettingsStore {
         startupAnimation = p.getBoolean("startup_animation", true)
         filePreviewNoWrap = p.getBoolean("file_preview_no_wrap", false)
         residentNotification = p.getBoolean("resident_notification", false)
+        replyNotify = p.getBoolean("reply_notify", true)
+        replyNotifySound = p.getBoolean("reply_notify_sound", false)
+        replyNotifyVibrate = p.getBoolean("reply_notify_vibrate", false)
         customAccentEnabled = p.getBoolean("custom_accent_enabled", false)
         customAccentHue = p.getFloat("custom_accent_hue", 215f).coerceIn(0f, 360f)
         backgroundMediaType = runCatching {
@@ -361,6 +371,16 @@ object SettingsStore {
         androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
             .edit()
             .putBoolean("resident_notification", residentNotification)
+            .apply()
+    }
+
+    /** 保存「消息通知」三项（行为设置：通知 / 提示音 / 震动），重启后保持 */
+    fun saveReplyNotify(androidCtx: android.content.Context) {
+        androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("reply_notify", replyNotify)
+            .putBoolean("reply_notify_sound", replyNotifySound)
+            .putBoolean("reply_notify_vibrate", replyNotifyVibrate)
             .apply()
     }
 

@@ -100,6 +100,13 @@ object ZhTwSettings : SettingsStrings {
     override val residentNotification: String = "背景常駐通知"
     override val residentNotificationDesc: String = "開啟後通知欄常駐一條 Pient 通知：程序不被系統清理，AI 回合與終端工作階段退到背景、熄屏後也能繼續跑"
     override val residentNotificationNoPermission: String = "未授予通知權限：常駐通知不會顯示（可在系統設定裡開啟）"
+    override val messageNotify: String = "訊息通知"
+    override val messageNotifyDesc: String = "當 AI 回覆時傳送系統通知"
+    override val messageNotifySound: String = "訊息通知提示音"
+    override val messageNotifySoundDesc: String = "當訊息通知觸發時播放訊息提示音"
+    override val messageNotifyVibrate: String = "訊息通知震動"
+    override val messageNotifyVibrateDesc: String = "當訊息通知觸發時進行震動提醒"
+    override val messageNotifyNoPermission: String = "未授予通知權限：訊息通知不會顯示（可在系統設定裡開啟）"
 }
 
 object ZhTwChat : ChatStrings {
@@ -1236,6 +1243,11 @@ object ZhTwRuntime : RuntimeStrings {
     override val residentRunning: String = "Pient 背景常駐中"
     override val keepAliveInterruptedTitle: String = "背景保活已中斷"
     override val keepAliveInterruptedText: String = "前景服務到達系統時限被停止（Android 15+ 對 dataSync 型別有「背景累計 6 小時 / 24 小時」上限），背景保活已中斷；重新開啟 Pient 即可恢復"
+    override val replyChannelSilent: String = "Pient 訊息通知"
+    override val replyChannelSound: String = "Pient 訊息通知（提示音）"
+    override val replyChannelVibration: String = "Pient 訊息通知（震動）"
+    override val replyChannelBoth: String = "Pient 訊息通知（提示音和震動）"
+    override val replyChannelDesc: String = "AI 回覆完成後的系統通知（應用不在前景時）"
     override fun keepAliveBigModelThinking(a0: Any?, a1: Any?): String = "模型：${a0} · 思考：${a1}"
     override fun keepAliveBigRuntime(a0: Any?, a1: Any?): String = "終端工作階段：${a0} · 工具呼叫：${a1}"
     override val piPackagesSession: String = "pi 包管理"

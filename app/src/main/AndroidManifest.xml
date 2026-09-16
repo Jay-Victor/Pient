@@ -27,6 +27,8 @@
     <!-- 通知权限（Android 13+）：没有它前台服务的通知不显示（服务本身仍可运行）；
          开启「后台常驻通知」时会当场申请一次（行为设置页），基础权限页不重复收口 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 震动（消息通知的「震动提醒」，2026-09-16）：通知渠道的震动属性需要它，见 runtime/ReplyNotify.kt -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
 
     <!-- 包可见性（Android 11+）：权限页要探测 Shizuku 与各 Root 管理器是否安装，

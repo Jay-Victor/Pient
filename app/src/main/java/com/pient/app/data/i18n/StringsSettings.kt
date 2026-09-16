@@ -44,6 +44,13 @@ interface SettingsStrings {
     val residentNotification: String
     val residentNotificationDesc: String
     val residentNotificationNoPermission: String
+    val messageNotify: String
+    val messageNotifyDesc: String
+    val messageNotifySound: String
+    val messageNotifySoundDesc: String
+    val messageNotifyVibrate: String
+    val messageNotifyVibrateDesc: String
+    val messageNotifyNoPermission: String
 }
 
 object ZhSettings : SettingsStrings {
@@ -89,6 +96,13 @@ object ZhSettings : SettingsStrings {
     override val residentNotification: String = "后台常驻通知"
     override val residentNotificationDesc: String = "打开后通知栏常驻一条 Pient 通知：进程不被系统清理，AI 回合与终端会话退到后台、熄屏后也能继续跑"
     override val residentNotificationNoPermission: String = "未授予通知权限：常驻通知不会显示（可在系统设置里开启）"
+    override val messageNotify: String = "消息通知"
+    override val messageNotifyDesc: String = "当 AI 回复时发送系统通知"
+    override val messageNotifySound: String = "消息通知提示音"
+    override val messageNotifySoundDesc: String = "当消息通知触发时播放消息提示音"
+    override val messageNotifyVibrate: String = "消息通知震动"
+    override val messageNotifyVibrateDesc: String = "当消息通知触发时进行震动提醒"
+    override val messageNotifyNoPermission: String = "未授予通知权限：消息通知不会显示（可在系统设置里开启）"
 }
 
 object EnSettings : SettingsStrings {
@@ -134,4 +148,11 @@ object EnSettings : SettingsStrings {
     override val residentNotification: String = "Resident notification"
     override val residentNotificationDesc: String = "Pins a Pient notification in the shade so the system does not clean up the process: AI turns and terminal sessions keep running in the background or with the screen off"
     override val residentNotificationNoPermission: String = "Notification permission not granted: the resident notification stays hidden (you can enable it in system settings)"
+    override val messageNotify: String = "Message notifications"
+    override val messageNotifyDesc: String = "Send a system notification when the AI replies"
+    override val messageNotifySound: String = "Notification sound"
+    override val messageNotifySoundDesc: String = "Play a sound when a message notification fires"
+    override val messageNotifyVibrate: String = "Notification vibration"
+    override val messageNotifyVibrateDesc: String = "Vibrate when a message notification fires"
+    override val messageNotifyNoPermission: String = "Notification permission not granted: message notifications stay hidden (you can enable it in system settings)"
 }

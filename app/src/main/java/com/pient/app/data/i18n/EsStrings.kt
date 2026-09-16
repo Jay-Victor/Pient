@@ -100,6 +100,13 @@ object EsSettings : SettingsStrings {
     override val residentNotification: String = "Notificación permanente en segundo plano"
     override val residentNotificationDesc: String = "Fija una notificación de Pient en la barra de notificaciones: el sistema no cierra el proceso y los turnos de IA y las sesiones de terminal siguen en segundo plano o con la pantalla apagada"
     override val residentNotificationNoPermission: String = "Sin permiso de notificaciones: la notificación permanente no se mostrará (puedes activarlo en los ajustes del sistema)"
+    override val messageNotify: String = "Notificaciones de mensajes"
+    override val messageNotifyDesc: String = "Envía una notificación del sistema cuando la IA responde"
+    override val messageNotifySound: String = "Sonido de la notificación"
+    override val messageNotifySoundDesc: String = "Reproduce un sonido cuando se dispara la notificación de mensajes"
+    override val messageNotifyVibrate: String = "Vibración de la notificación"
+    override val messageNotifyVibrateDesc: String = "Vibra cuando se dispara la notificación de mensajes"
+    override val messageNotifyNoPermission: String = "Sin permiso de notificaciones: las notificaciones de mensajes no se mostrarán (puedes activarlo en los ajustes del sistema)"
 }
 
 object EsChat : ChatStrings {
@@ -1236,6 +1243,11 @@ object EsRuntime : RuntimeStrings {
     override val residentRunning: String = "Pient en segundo plano"
     override val keepAliveInterruptedTitle: String = "Se interrumpió el mantenimiento en segundo plano"
     override val keepAliveInterruptedText: String = "El servicio en primer plano alcanzó el límite del sistema (Android 15+ limita dataSync a 6 horas de ejecución en segundo plano por cada 24 horas) y se detuvo: el mantenimiento en segundo plano está interrumpido; vuelve a abrir Pient para restaurarlo"
+    override val replyChannelSilent: String = "Notificaciones de Pient"
+    override val replyChannelSound: String = "Notificaciones de Pient (sonido)"
+    override val replyChannelVibration: String = "Notificaciones de Pient (vibración)"
+    override val replyChannelBoth: String = "Notificaciones de Pient (sonido y vibración)"
+    override val replyChannelDesc: String = "Notificación del sistema al terminar una respuesta de la IA (con la aplicación en segundo plano)"
     override fun keepAliveBigModelThinking(a0: Any?, a1: Any?): String = "Modelo: ${a0} · Razonamiento: ${a1}"
     override fun keepAliveBigRuntime(a0: Any?, a1: Any?): String = "Sesiones de terminal: ${a0} · Llamadas a herramientas: ${a1}"
     override val piPackagesSession: String = "Paquetes de pi"

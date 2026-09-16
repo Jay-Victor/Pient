@@ -100,6 +100,13 @@ object HiSettings : SettingsStrings {
     override val residentNotification: String = "बैकग्राउंड में स्थायी सूचना"
     override val residentNotificationDesc: String = "चालू करने पर सूचना शेड में Pient की सूचना हमेशा रहती है: सिस्टम प्रोसेस को बंद नहीं करता और AI टर्न व टर्मिनल सत्र बैकग्राउंड में या स्क्रीन बंद होने पर भी चलते रहते हैं"
     override val residentNotificationNoPermission: String = "सूचना की अनुमति नहीं है: स्थायी सूचना दिखाई नहीं देगी (सिस्टम सेटिंग्स में चालू कर सकते हैं)"
+    override val messageNotify: String = "संदेश सूचनाएँ"
+    override val messageNotifyDesc: String = "AI के जवाब देने पर सिस्टम सूचना भेजें"
+    override val messageNotifySound: String = "संदेश सूचना की ध्वनि"
+    override val messageNotifySoundDesc: String = "संदेश सूचना चालू होने पर ध्वनि बजाएँ"
+    override val messageNotifyVibrate: String = "संदेश सूचना का कंपन"
+    override val messageNotifyVibrateDesc: String = "संदेश सूचना चालू होने पर कंपन करें"
+    override val messageNotifyNoPermission: String = "सूचना की अनुमति नहीं है: संदेश सूचनाएँ दिखाई नहीं देंगी (सिस्टम सेटिंग्स में चालू कर सकते हैं)"
 }
 
 object HiChat : ChatStrings {
@@ -1236,6 +1243,11 @@ object HiRuntime : RuntimeStrings {
     override val residentRunning: String = "Pient बैकग्राउंड में चालू है"
     override val keepAliveInterruptedTitle: String = "बैकग्राउंड बनाए रखना बंद हो गया"
     override val keepAliveInterruptedText: String = "फ़ोरग्राउंड सेवा सिस्टम की समय-सीमा (Android 15+ में dataSync के लिए 24 घंटे में कुल 6 घंटे बैकग्राउंड) तक पहुँचकर बंद हो गई: बैकग्राउंड बनाए रखना रुक गया है; Pient दोबारा खोलने पर यह फिर चालू हो जाएगा"
+    override val replyChannelSilent: String = "Pient संदेश सूचनाएँ"
+    override val replyChannelSound: String = "Pient संदेश सूचनाएँ (ध्वनि)"
+    override val replyChannelVibration: String = "Pient संदेश सूचनाएँ (कंपन)"
+    override val replyChannelBoth: String = "Pient संदेश सूचनाएँ (ध्वनि और कंपन)"
+    override val replyChannelDesc: String = "AI का जवाब पूरा होने पर सिस्टम सूचना (ऐप बैकग्राउंड में होने पर)"
     override fun keepAliveBigModelThinking(a0: Any?, a1: Any?): String = "मॉडल: ${a0} · सोच: ${a1}"
     override fun keepAliveBigRuntime(a0: Any?, a1: Any?): String = "टर्मिनल सत्र: ${a0} · टूल कॉल: ${a1}"
     override val piPackagesSession: String = "pi पैकेज"

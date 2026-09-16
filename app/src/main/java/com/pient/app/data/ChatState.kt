@@ -18,6 +18,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
 import com.pient.app.runtime.PiRpc
 import com.pient.app.runtime.PiRuntime
+import com.pient.app.runtime.ReplyNotify
 import java.io.File
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -987,6 +988,8 @@ class ChatState {
             appendEntry(Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
             // 用量台账（用量页数据源）：完成即记一笔（usage 为空 = 服务商未返回用量，不记）
             UsageStore.record(cfg.providerId, effectiveModel, outcome.usage)
+            // 消息通知（2026-09-16 行为设置）：应用不在前台时，给这条回复发一条系统通知
+            ReplyNotify.notifyReply(AppCtx.get(), currentSession?.title, outcome.text)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e // abort：保留 abort() 对 draft 的处理
         } catch (e: Exception) {
@@ -1053,6 +1056,8 @@ class ChatState {
             replaceMessageAt(runInsertAt ?: index, Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
             // 重新生成同样计入用量台账（一次真实请求 = 一笔用量）
             UsageStore.record(cfg.providerId, effectiveModel, outcome.usage)
+            // 消息通知：重新生成同样算「AI 回复完成」（应用不在前台时才发）
+            ReplyNotify.notifyReply(AppCtx.get(), currentSession?.title, outcome.text)
             null
         } catch (e: kotlinx.coroutines.CancellationException) {
             replaceMessageAt(runInsertAt ?: index, original)   // 中止：恢复原内容

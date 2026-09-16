@@ -197,6 +197,13 @@ fun PientApp() {
             .collect { SettingsStore.saveResidentNotification(context) }
     }
 
+    // 消息通知设置持久化（行为设置：通知 / 提示音 / 震动），重启后保持
+    LaunchedEffect(Unit) {
+        snapshotFlow {
+            Triple(SettingsStore.replyNotify, SettingsStore.replyNotifySound, SettingsStore.replyNotifyVibrate)
+        }.collect { SettingsStore.saveReplyNotify(context) }
+    }
+
     // 输入框设置持久化（样式 + 材质 + 透明度/纹理强度），重启后保持
     LaunchedEffect(Unit) {
         snapshotFlow {

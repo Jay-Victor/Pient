@@ -23,12 +23,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.FormatIndentIncrease
 import androidx.compose.material.icons.automirrored.outlined.ViewSidebar
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.Animation
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Compress
 import androidx.compose.material.icons.outlined.NotificationsActive
+import androidx.compose.material.icons.outlined.NotificationsNone
 import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material.icons.outlined.Vibration
 import androidx.compose.material.icons.outlined.ViewInAr
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -77,6 +80,25 @@ fun BehaviorSettingsScreen(nav: NavController) {
             PackageManager.PERMISSION_GRANTED
         ) {
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    // 消息通知权限（Android 13+）：缺它通知不显示 —— 开总开关时申请一次（同上，不拦开关本身）
+    val replyNotifPermission =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (!granted) {
+                Toast.makeText(context, L.settings.messageNotifyNoPermission, Toast.LENGTH_LONG).show()
+            }
+        }
+
+    /** 开/关「消息通知」：改状态（落盘见 PientApp 的持久化 effect）；打开时补一次通知权限 */
+    fun applyReplyNotify(enabled: Boolean) {
+        SettingsStore.replyNotify = enabled
+        if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            replyNotifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
@@ -189,6 +211,42 @@ fun BehaviorSettingsScreen(nav: NavController) {
                         desc = L.settings.residentNotificationDesc,
                         checked = SettingsStore.residentNotification,
                         onCheckedChange = { applyResidentNotification(it) },
+                    )
+                }
+            }
+            // 消息通知（2026-09-16，行为设置）：AI 回复完成且应用不在前台时发系统通知；
+            // 提示音 / 震动是通知渠道属性，各自独立开关（见 runtime/ReplyNotify.kt）
+            item { SectionHeader(L.settings.messageNotify) }
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(16.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
+                ) {
+                    SettingToggleRow(
+                        icon = Icons.Outlined.NotificationsNone,
+                        title = L.settings.messageNotify,
+                        desc = L.settings.messageNotifyDesc,
+                        checked = SettingsStore.replyNotify,
+                        onCheckedChange = { applyReplyNotify(it) },
+                    )
+                    DividerLine()
+                    SettingToggleRow(
+                        icon = Icons.AutoMirrored.Outlined.VolumeUp,
+                        title = L.settings.messageNotifySound,
+                        desc = L.settings.messageNotifySoundDesc,
+                        checked = SettingsStore.replyNotifySound,
+                        onCheckedChange = { SettingsStore.replyNotifySound = it },
+                    )
+                    DividerLine()
+                    SettingToggleRow(
+                        icon = Icons.Outlined.Vibration,
+                        title = L.settings.messageNotifyVibrate,
+                        desc = L.settings.messageNotifyVibrateDesc,
+                        checked = SettingsStore.replyNotifyVibrate,
+                        onCheckedChange = { SettingsStore.replyNotifyVibrate = it },
                     )
                 }
             }
