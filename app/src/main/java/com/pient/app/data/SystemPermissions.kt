@@ -87,6 +87,47 @@ object SystemPermissions {
         overlay = overlayGranted(context),
     )
 
+    /**
+     * 档位就绪快照 —— 「某档位能不能作为当前档位」的**唯一判据**（用户口径 2026-09-16）：
+     * 只有该档位卡里列出的**全部项**（基础权限 4 项 + 档位专属项）都配齐，才允许把它设为当前档位。
+     * 「系统权限设置」页（「设为当前档位」门控 + 未配齐说明行）与首启引导页（进入 Pient 前的写入）共用本判定。
+     */
+    data class TierState(
+        val status: Status,
+        val shizukuInstalled: Boolean,
+        val shizukuRunning: Boolean,
+        val shizukuAuthorized: Boolean,
+        val deviceRooted: Boolean,
+        val rootGranted: Boolean,
+    ) {
+        /** 该档位权限清单是否全部配齐（标准 = 基础四项；调试 = 基础四项 + Shizuku 三步；Root = 基础四项 + Root 两项） */
+        fun ready(tier: PermissionTier): Boolean = when (tier) {
+            PermissionTier.STANDARD -> status.allReady
+            PermissionTier.DEBUGGER -> status.allReady && shizukuInstalled && shizukuRunning && shizukuAuthorized
+            PermissionTier.ROOT -> status.allReady && deviceRooted && rootGranted
+        }
+
+        /** 未配齐的原因（已配齐 = null）—— 文案复用各档位既有提示：先看基础权限，再看档位专属项 */
+        fun missingHint(tier: PermissionTier): String? = when {
+            ready(tier) -> null
+            !status.allReady -> L.perm.basicPermissionsMissing
+            tier == PermissionTier.DEBUGGER -> L.perm.shizukuSetupFirst
+            else -> L.perm.rootDeviceRequired
+        }
+    }
+
+    /** 读一次完整档位快照（基础四项 + Shizuku 三态 + Root 两项）；binder / 包查询走 IO 线程 */
+    suspend fun tierState(context: Context): TierState = withContext(Dispatchers.IO) {
+        TierState(
+            status = status(context),
+            shizukuInstalled = ShizukuGateway.installed(context),
+            shizukuRunning = ShizukuGateway.running(),
+            shizukuAuthorized = ShizukuGateway.authorized(),
+            deviceRooted = RootGateway.deviceRooted(context),
+            rootGranted = RootGateway.granted,
+        )
+    }
+
     /** 存储：Android 11+ 走「所有文件访问」（appops MANAGE_EXTERNAL_STORAGE）；10 及以下看运行时权限 */
     fun storageGranted(context: Context): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -325,9 +366,18 @@ object RootGateway {
     var granted: Boolean = false
         private set
 
+    /**
+     * 「**已跑过一次 su**」标记（2026-09-16 加）：区分状态行的「未验证 / 已拒绝」，
+     * 也让权限页的刷新键知道该不该复检 su（未申请过就不主动弹 Root 授权框）。
+     */
+    @Volatile
+    var probed: Boolean = false
+        private set
+
     /** 请求 Root 授权：调用一次 su（首次触发授权弹窗），返回是否拿到 uid=0 */
     suspend fun requestAccess(): Boolean = withContext(Dispatchers.IO) {
         val ok = runSu("id")?.contains("uid=0") == true
+        probed = true
         granted = ok
         ok
     }

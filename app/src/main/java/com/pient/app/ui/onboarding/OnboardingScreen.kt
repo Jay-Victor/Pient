@@ -446,7 +446,11 @@ private fun SystemPermissionPage(
     onBackToWelcome: () -> Unit,
     onBackToBasics: () -> Unit,
 ) {
+    val context = LocalContext.current
     var selected by rememberSaveable { mutableIntStateOf(0) }
+    // 档位就绪快照：只有配齐该档位权限才能把它写成当前档位（与「系统权限设置」页共用同一判定）
+    var tierState by remember { mutableStateOf<SystemPermissions.TierState?>(null) }
+    LaunchedEffect(Unit) { tierState = SystemPermissions.tierState(context) }
 
     // 三档文案唯一出处 = PermissionTier（设置页「系统权限设置」共用同一份，避免两处漂移）
     val tiers = PermissionTier.values()
@@ -542,8 +546,22 @@ private fun SystemPermissionPage(
         PientButton(
             L.onboarding.enterPient,
             onClick = {
-                // 选定档位写入设置（首启后可在「设置 → 数据与权限 → 系统权限设置」更改）
-                SettingsStore.permissionTier = tiers[selected]
+                val picked = tiers[selected]
+                // 用户口径（2026-09-16）：只有配齐该档位权限才可以把它作为当前档位 ——
+                // 未配齐时仍以标准档进入（标准档依赖的基础四项已由上一页强制），并说明缺什么、去哪配齐。
+                val st = tierState
+                val ready = if (picked == PermissionTier.STANDARD) st?.ready(picked) ?: true
+                else st?.ready(picked) == true
+                if (ready) {
+                    SettingsStore.permissionTier = picked
+                } else {
+                    SettingsStore.permissionTier = PermissionTier.STANDARD
+                    Toast.makeText(
+                        context,
+                        L.perm.tierSwitchedWithHint(PermissionTier.STANDARD.title, st?.missingHint(picked).orEmpty()),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
                 onDone()
             },
             modifier = Modifier.fillMaxWidth(),

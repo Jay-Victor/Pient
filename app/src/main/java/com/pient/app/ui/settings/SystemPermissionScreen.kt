@@ -73,6 +73,7 @@ import com.pient.app.ui.components.PientSegmented
 import com.pient.app.ui.components.SectionHeader
 import com.pient.app.ui.components.StatusBadge
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
@@ -94,34 +95,62 @@ fun SystemPermissionScreen(nav: NavController) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // ── 实时状态 ──
+    // ── 实时状态（页面显示的一切都从这里来：进入页面 / ON_RESUME / 刷新键 / 换档位，一律走 readStatus） ──
     var status by remember { mutableStateOf(SystemPermissions.status(context)) }
     var shizukuInstalled by remember { mutableStateOf(ShizukuGateway.installed(context)) }
     var shizukuRunning by remember { mutableStateOf(ShizukuGateway.running()) }
     var shizukuAuthorized by remember { mutableStateOf(ShizukuGateway.authorized()) }
     var deviceRooted by remember { mutableStateOf(RootGateway.deviceRooted(context)) }
-    var rootGranted by remember { mutableStateOf(false) }
-    var rootProbed by remember { mutableStateOf(false) }
+    var rootGranted by remember { mutableStateOf(RootGateway.granted) }
+    var rootProbed by remember { mutableStateOf(RootGateway.probed) }
     var refreshing by remember { mutableStateOf(false) }
     var rootRequesting by remember { mutableStateOf(false) }
+    // Android shell 卡状态：读进 state（不在组合期现查 binder / 包列表），随刷新键与换档位更新
+    var shellReady by remember { mutableStateOf(AndroidShell.available(context)) }
+    var shellText by remember { mutableStateOf(AndroidShell.statusText(context)) }
 
     // 展示中的档位（可预览，与「当前生效档位」分离，同 Operit displayedPermissionLevel / preferredPermissionLevel）
     var displayed by remember { mutableStateOf(SettingsStore.permissionTier) }
     val activeTier = SettingsStore.permissionTier
 
-    /** 读取全部真实状态（binder / 文件系统查询放 IO 线程） */
+    // 「该档位能不能设为当前档位」的唯一判据（与首启引导页共用 SystemPermissions.TierState）
+    val tierState = SystemPermissions.TierState(
+        status = status,
+        shizukuInstalled = shizukuInstalled,
+        shizukuRunning = shizukuRunning,
+        shizukuAuthorized = shizukuAuthorized,
+        deviceRooted = deviceRooted,
+        rootGranted = rootGranted,
+    )
+
+    /**
+     * 读取全部真实状态（binder / 文件系统查询放 IO 线程）——
+     * 进入页面 / ON_RESUME / 刷新键 / 换档位**都走这一条**，页面不留任何「只查一次」的死状态。
+     */
     suspend fun readStatus() = withContext(Dispatchers.IO) {
-        status = SystemPermissions.status(context)
-        shizukuInstalled = ShizukuGateway.installed(context)
-        shizukuRunning = ShizukuGateway.running()
-        shizukuAuthorized = ShizukuGateway.authorized()
-        deviceRooted = RootGateway.deviceRooted(context)
+        // su 授权读不到、只能真跑一次 su：用户已申请过才复检（未申请过就不主动弹 Root 授权框）
+        if (RootGateway.probed) RootGateway.requestAccess()
+        val st = SystemPermissions.tierState(context)
+        status = st.status
+        shizukuInstalled = st.shizukuInstalled
+        shizukuRunning = st.shizukuRunning
+        shizukuAuthorized = st.shizukuAuthorized
+        deviceRooted = st.deviceRooted
+        rootGranted = st.rootGranted
+        rootProbed = RootGateway.probed
+        // Android shell 卡同样要真刷新（此前只在组合期现查，刷新键动不了它）
+        shellReady = AndroidShell.available(context)
+        shellText = AndroidShell.statusText(context)
     }
 
     fun refresh() {
         scope.launch {
             refreshing = true
+            val t0 = System.nanoTime()
             readStatus()
+            // 可见反馈：真读一遍通常只要几毫秒，圆弧得转够时长才看得出「点到了」（交互红线②：状态变化必须有可见反馈）
+            val dtMs = (System.nanoTime() - t0) / 1_000_000
+            if (dtMs < REFRESH_FEEDBACK_MS) delay(REFRESH_FEEDBACK_MS - dtMs)
             refreshing = false
         }
     }
@@ -182,15 +211,13 @@ fun SystemPermissionScreen(nav: NavController) {
         }
     }
 
+    /** 设为当前档位 —— **门控：该档位权限清单全部配齐才允许**（按钮已不可点，这里是第二道闸） */
     fun setActiveTier(tier: PermissionTier) {
+        if (!tierState.ready(tier)) return
         SettingsStore.permissionTier = tier
-        val hint = when {
-            tierReady(tier, status, shizukuInstalled, shizukuRunning, shizukuAuthorized, deviceRooted, rootGranted) -> null
-            tier == PermissionTier.DEBUGGER -> L.perm.shizukuSetupFirst
-            tier == PermissionTier.ROOT -> L.perm.rootDeviceRequired
-            else -> L.perm.basicPermissionsMissing
-        }
-        toast(if (hint == null) L.perm.tierSwitched(tier.title) else L.perm.tierSwitchedWithHint(tier.title, hint))
+        // 通道按档位门控：换档后 Android shell 卡（与向导）要跟着重读
+        scope.launch { readStatus() }
+        toast(L.perm.tierSwitched(tier.title))
     }
 
     // 进入页面即读一次；从系统设置/授权弹窗返回（ON_RESUME）自动重检
@@ -333,12 +360,26 @@ fun SystemPermissionScreen(nav: NavController) {
                                 )
                             }
                         } else if (displayed != activeTier) {
-                            PientButton(
-                                L.perm.setActiveTier,
-                                onClick = { setActiveTier(displayed) },
-                                modifier = Modifier.widthIn(max = 200.dp),
-                                height = 38,   // 与同页「设置向导」按钮同高
-                            )
+                            // 门控（用户口径 2026-09-16）：只有该档位权限清单**全部配齐**才允许设为当前档位
+                            val ready = tierState.ready(displayed)
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                PientButton(
+                                    L.perm.setActiveTier,
+                                    onClick = { setActiveTier(displayed) },
+                                    enabled = ready,
+                                    modifier = Modifier.widthIn(max = 200.dp),
+                                    height = 38,   // 与同页「设置向导」按钮同高
+                                )
+                                // 未配齐：按钮变暗不可点 + 一行说明缺什么（复用各档位既有提示文案）
+                                tierState.missingHint(displayed)?.let { hint ->
+                                    Text(
+                                        hint,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp),
+                                    )
+                                }
+                            }
                         } else {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
@@ -397,7 +438,7 @@ fun SystemPermissionScreen(nav: NavController) {
             SectionHeader(L.perm.shellSectionTitle, icon = Icons.Outlined.Terminal)
             PermissionCardBox {
                 Column(Modifier.padding(14.dp)) {
-                    val shellReady = AndroidShell.available(context)
+                    // shellReady / shellText 由 readStatus 读入 state（刷新键、换档位都会更新；不在组合期现查 binder）
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             if (shellReady) Icons.Outlined.CheckCircle else Icons.Outlined.Info,
@@ -407,7 +448,7 @@ fun SystemPermissionScreen(nav: NavController) {
                             modifier = Modifier.size(16.dp),
                         )
                         Text(
-                            AndroidShell.statusText(context),
+                            shellText,
                             style = MaterialTheme.typography.bodyMedium,
                             color = if (shellReady) MaterialTheme.colorScheme.onBackground
                             else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -432,7 +473,7 @@ fun SystemPermissionScreen(nav: NavController) {
 
             // ═══════════ 设置向导（档位未就绪时） ═══════════
             val wizardTier = when {
-                tierReady(displayed, status, shizukuInstalled, shizukuRunning, shizukuAuthorized, deviceRooted, rootGranted) -> null
+                tierState.ready(displayed) -> null
                 displayed == PermissionTier.STANDARD -> null      // 标准档无外部组件，缺的只是上面的四项授权
                 else -> displayed
             }
@@ -469,23 +510,6 @@ fun SystemPermissionScreen(nav: NavController) {
             }
         }
     }
-}
-
-// ─────────────────────────── 档位就绪判定 ───────────────────────────
-
-/** 档位是否已具备生效条件（标准=基础权限四项齐备；调试=Shizuku 三步齐备；Root=已 Root 且已授权） */
-private fun tierReady(
-    tier: PermissionTier,
-    status: SystemPermissions.Status,
-    shizukuInstalled: Boolean,
-    shizukuRunning: Boolean,
-    shizukuAuthorized: Boolean,
-    deviceRooted: Boolean,
-    rootGranted: Boolean,
-): Boolean = when (tier) {
-    PermissionTier.STANDARD -> status.allReady
-    PermissionTier.DEBUGGER -> shizukuInstalled && shizukuRunning && shizukuAuthorized
-    PermissionTier.ROOT -> deviceRooted && rootGranted
 }
 
 // ─────────────────────────── 权限清单 ───────────────────────────
@@ -594,71 +618,12 @@ private fun PermissionStatusRow(
     }
 }
 
-// ─────────────────────────── Android shell 三档行 ───────────────────────────
-
-/** 一档 Android shell：标题 + 当前生效标记 + 状态/说明；未就绪时给授权入口 */
-@Composable
-private fun AndroidShellTierRow(
-    title: String,
-    desc: String,
-    ready: Boolean,
-    current: Boolean,
-    onAction: (() -> Unit)?,
-    supported: Boolean = true,
-) {
-    Row(
-        verticalAlignment = Alignment.Top,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 9.dp),
-    ) {
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, style = MaterialTheme.typography.bodyMedium)
-                if (current) {
-                    Text(
-                        L.perm.activeNow,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
-            Text(
-                desc,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp),
-            )
-        }
-        if (ready) {
-            Text(
-                L.perm.available,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(start = 8.dp),
-            )
-        } else if (!supported) {
-            // 设备不具备该能力：如实标注、不给入口（用户不可能选到一条跑不通的通道）
-            Text(
-                L.perm.notSupported,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 8.dp),
-            )
-        } else if (onAction != null) {
-            PientButton(
-                text = L.perm.authorize,
-                onClick = onAction,
-                primary = false,
-                height = 32,
-            )
-        }
-    }
-}
-
 // ─────────────────────────── 设置向导 ───────────────────────────
 
 private const val ROOT_GUIDE_URL = "https://github.com/topjohnwu/Magisk"
+
+/** 刷新键的最短可见时长（ms）：真读一遍通常只要几毫秒，圆弧得转够时长才看得出「点到了」 */
+private const val REFRESH_FEEDBACK_MS = 420L
 
 @Composable
 private fun ShizukuWizard(
