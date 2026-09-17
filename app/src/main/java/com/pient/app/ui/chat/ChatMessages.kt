@@ -12,7 +12,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.BorderStroke
-import android.util.Log
+import com.pient.app.data.PientLog
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -884,7 +884,7 @@ fun ForkContextMenu(
         )
         // 落点打点（几何类 UI 的取证口径：一次长按 = 一行数字，别靠看图猜）
         LaunchedEffect(press, anchor, container) {
-            Log.i("PientChat", "长按菜单落点：press=${press.x.toInt()},${press.y.toInt()} " +
+            PientLog.i("PientChat", "长按菜单落点：press=${press.x.toInt()},${press.y.toInt()} " +
                 "anchor=${anchor.left.toInt()},${anchor.top.toInt()},${anchor.right.toInt()},${anchor.bottom.toInt()} " +
                 "container=${container.width.toInt()}x${container.height.toInt()} menu=${menuSize.width.toInt()}x${menuSize.height.toInt()} " +
                 "→ (${place.x.toInt()},${place.y.toInt()})")

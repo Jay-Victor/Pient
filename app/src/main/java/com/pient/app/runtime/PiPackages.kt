@@ -2,7 +2,7 @@ package com.pient.app.runtime
 
 import com.pient.app.data.i18n.L
 import android.content.Context
-import android.util.Log
+import com.pient.app.data.PientLog
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -89,7 +89,7 @@ object PiPackages {
         val (g, p) = parseList(text)
         global.clear(); global.addAll(g)
         project.clear(); project.addAll(p)
-        Log.i(TAG, "pi list：用户 ${g.size} 个 / 项目 ${p.size} 个包")
+        PientLog.i(TAG, "pi list：用户 ${g.size} 个 / 项目 ${p.size} 个包")
         return null
     }
 
@@ -125,7 +125,7 @@ object PiPackages {
             running = false
             step = ""
             lastExit = code
-            Log.i(TAG, "$label 结束，退出码 $code")
+            PientLog.i(TAG, "$label 结束，退出码 $code")
             onFinished?.invoke()
             onFinished = null
         }

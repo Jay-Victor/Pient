@@ -2,7 +2,7 @@ package com.pient.app.runtime
 
 import com.pient.app.data.i18n.L
 import android.content.Context
-import android.util.Log
+import com.pient.app.data.PientLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.InputStream
@@ -93,7 +93,7 @@ object PiPolish {
                     .also { it.environment().putAll(PiRuntime.guestEnv(context)) }
                     .start()
             } catch (t: Throwable) {
-                Log.w(TAG, "润色进程启动失败：${t.message}")
+                PientLog.w(TAG, "润色进程启动失败：${t.message}")
                 throw PiPolishException(t.message ?: L.runtime.commandFailed)
             }
 
@@ -109,7 +109,7 @@ object PiPolish {
                         w.write(payload)
                         w.flush()
                     }
-                }.onFailure { Log.w(TAG, "写入 stdin 失败：${it.message}") }
+                }.onFailure { PientLog.w(TAG, "写入 stdin 失败：${it.message}") }
             }.apply { isDaemon = true; name = "pient-polish-in" }
             tIn.start()
 
@@ -137,12 +137,12 @@ object PiPolish {
                     .filter { it.isNotEmpty() }
                     .lastOrNull()
                     .orEmpty()
-                Log.w(TAG, "润色失败（exit=$code）：${why.take(300)}")
+                PientLog.w(TAG, "润色失败（exit=$code）：${why.take(300)}")
                 throw PiPolishException(
                     if (why.isBlank()) L.runtime.commandFailed + "（exit=$code）" else why.take(300)
                 )
             }
-            Log.i(TAG, "润色完成：${result.length} 字符（$provider/$model）")
+            PientLog.i(TAG, "润色完成：${result.length} 字符（$provider/$model）")
             result
         }
 

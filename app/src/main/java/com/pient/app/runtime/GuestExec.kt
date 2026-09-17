@@ -2,7 +2,7 @@ package com.pient.app.runtime
 
 import com.pient.app.data.i18n.L
 import android.content.Context
-import android.util.Log
+import com.pient.app.data.PientLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
@@ -47,7 +47,7 @@ object GuestExec {
             reader.join(1200)
             proc.exitValue() to tail(out, maxChars)
         }.getOrElse {
-            Log.w(TAG, "guest 命令执行失败：${it.message}")
+            PientLog.w(TAG, "guest 命令执行失败：${it.message}")
             -1 to (it.message ?: L.runtime.commandFailed)
         }
     }

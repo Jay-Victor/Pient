@@ -277,7 +277,7 @@ object AiConfigStore {
         normalizeGlobals()   // 老格式里各家可能不同；pi 侧只有一份（写盘取第一家）→ 统一
         // 立刻把 pi 原生文件写出来，并把 ai_config.json 收敛成「只含附加数据」
         save(context)
-        android.util.Log.i("PientConfig", "已从 ai_config.json 迁移到 pi 原生配置（${configs.size} 个服务商）")
+        PientLog.i("PientConfig", "已从 ai_config.json 迁移到 pi 原生配置（${configs.size} 个服务商）")
         true
     }.getOrDefault(false)
 

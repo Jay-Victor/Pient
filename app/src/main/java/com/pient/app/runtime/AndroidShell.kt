@@ -3,7 +3,7 @@ package com.pient.app.runtime
 import com.pient.app.data.i18n.L
 import android.content.Context
 import android.os.ParcelFileDescriptor
-import android.util.Log
+import com.pient.app.data.PientLog
 import com.pient.app.data.PermissionTier
 import com.pient.app.data.RootGateway
 import com.pient.app.data.SettingsStore
@@ -179,7 +179,7 @@ object AndroidShell {
         if (!binder.isBinderAlive) return null
         IShizukuService.Stub.asInterface(binder)
     }.getOrElse {
-        Log.w(TAG, "取 Shizuku 服务失败：${it.message}")
+        PientLog.w(TAG, "取 Shizuku 服务失败：${it.message}")
         null
     }
 

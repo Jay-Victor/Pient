@@ -1,7 +1,6 @@
 package com.pient.app.data
 
 import android.content.Context
-import android.util.Log
 import com.pient.app.runtime.PiRuntime
 import org.json.JSONArray
 import org.json.JSONObject
@@ -115,10 +114,10 @@ object PiAgentFiles {
         }
         root.put("providers", providers)
         val changed = write(modelsFile(context), root.toString(2))
-        if (changed) Log.i(TAG, "models.json 已写入：${configs.size} 个服务商 → ${modelsFile(context).absolutePath}")
+        if (changed) PientLog.i(TAG, "models.json 已写入：${configs.size} 个服务商 → ${modelsFile(context).absolutePath}")
         changed
     }.getOrElse {
-        Log.w(TAG, "models.json 写入失败：${it.message}")
+        PientLog.w(TAG, "models.json 写入失败：${it.message}")
         false
     }
 
@@ -142,10 +141,10 @@ object PiAgentFiles {
             }
         }
         val changed = write(authFile(context), root.toString(2))
-        if (changed) Log.i(TAG, "auth.json 已写入：${configs.count { it.apiKey.isNotBlank() }} 个凭据")
+        if (changed) PientLog.i(TAG, "auth.json 已写入：${configs.count { it.apiKey.isNotBlank() }} 个凭据")
         changed
     }.getOrElse {
-        Log.w(TAG, "auth.json 写入失败：${it.message}")
+        PientLog.w(TAG, "auth.json 写入失败：${it.message}")
         false
     }
 
@@ -175,10 +174,10 @@ object PiAgentFiles {
         // 「总是信任」；用户若在桌面 pi 里显式设过别的值，这里不覆盖。
         if (!root.has("defaultProjectTrust")) root.put("defaultProjectTrust", "always")
         val changed = write(settingsFile(context), root.toString(2))
-        if (changed) Log.i(TAG, "settings.json 已合并写入（compaction + defaultTools=${PI_DEFAULT_TOOLS.size} 项）")
+        if (changed) PientLog.i(TAG, "settings.json 已合并写入（compaction + defaultTools=${PI_DEFAULT_TOOLS.size} 项）")
         changed
     }.getOrElse {
-        Log.w(TAG, "settings.json 写入失败：${it.message}")
+        PientLog.w(TAG, "settings.json 写入失败：${it.message}")
         false
     }
 
@@ -326,14 +325,14 @@ object PiAgentFiles {
                 if (merged.isNotEmpty()) out[pid] = merged
             }
         }
-        Log.i(
+        PientLog.i(
             TAG,
             "pi 目录：随包 ${dataDir?.path?.substringAfterLast('/') ?: "未找到"} + 刷新目录 $storeCount 条" +
                 " ⇒ ${out.size} 家 / ${out.values.sumOf { it.size }} 个模型",
         )
         out
     }.getOrElse {
-        Log.w(TAG, "读 pi 内置目录失败（按自建模型处理）：${it.message}")
+        PientLog.w(TAG, "读 pi 内置目录失败（按自建模型处理）：${it.message}")
         emptyMap()
     }.also { catalogCache = it }
 

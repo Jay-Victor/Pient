@@ -8,7 +8,7 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.os.Build
 import android.provider.Settings
-import android.util.Log
+import com.pient.app.data.PientLog
 import androidx.core.app.NotificationCompat
 import com.pient.app.MainActivity
 import com.pient.app.PientRuntime
@@ -58,7 +58,7 @@ object ReplyNotify {
         val body = replyText.trim()
         if (body.isEmpty()) return
         runCatching { post(ctx, sessionTitle?.takeIf { it.isNotBlank() }, body) }
-            .onFailure { Log.w(TAG, "发送消息通知失败：${it.message}") }
+            .onFailure { PientLog.w(TAG, "发送消息通知失败：${it.message}") }
     }
 
     private fun post(ctx: Context, sessionTitle: String?, body: String) {
@@ -85,7 +85,7 @@ object ReplyNotify {
             .setAutoCancel(true)
             .build()
         nm.notify(NOTIF_ID, notif)
-        Log.i(TAG, "消息通知已发送（$channelId）：${body.take(40)}")
+        PientLog.i(TAG, "消息通知已发送（$channelId）：${body.take(40)}")
     }
 
     /** 渠道 id = 前缀 + 档位后缀（Operit 的 `_sound_vibration / _sound / _vibration / _silent` 同款） */
@@ -140,7 +140,7 @@ object ReplyNotify {
                     },
                 )
             }
-        }.onFailure { Log.w(TAG, "创建消息通知渠道失败：${it.message}") }
+        }.onFailure { PientLog.w(TAG, "创建消息通知渠道失败：${it.message}") }
         return id
     }
 }

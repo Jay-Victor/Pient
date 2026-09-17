@@ -10,7 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import android.util.Log
+import com.pient.app.data.PientLog
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.pient.app.MainActivity
@@ -105,11 +105,11 @@ object PiKeepAlive {
         running = true
         runCatching {
             push(ctx, startNew = true)
-            Log.i(TAG, "前台保活已开启（$key：${currentText()}）")
+            PientLog.i(TAG, "前台保活已开启（$key：${currentText()}）")
         }.onFailure {
             running = false
             sentText = null
-            Log.w(TAG, "前台服务启动失败：${it.message}")
+            PientLog.w(TAG, "前台服务启动失败：${it.message}")
         }
     }
 
@@ -138,7 +138,7 @@ object PiKeepAlive {
             ctx.startService(
                 Intent(ctx, PiKeepAliveService::class.java).setAction(PiKeepAliveService.ACTION_STOP),
             )
-            Log.i(TAG, "前台保活已关闭（没有在跑的活了）")
+            PientLog.i(TAG, "前台保活已关闭（没有在跑的活了）")
         }
     }
 
@@ -168,7 +168,7 @@ object PiKeepAlive {
         if (PientRuntime.appVisible) {
             runCatching {
                 Toast.makeText(ctx, L.runtime.keepAliveInterruptedText, Toast.LENGTH_LONG).show()
-            }.onFailure { Log.w(TAG, "提示保活中断失败：${it.message}") }
+            }.onFailure { PientLog.w(TAG, "提示保活中断失败：${it.message}") }
             return
         }
         runCatching {
@@ -195,7 +195,7 @@ object PiKeepAlive {
                     .setAutoCancel(true)
                     .build(),
             )
-        }.onFailure { Log.w(TAG, "发送保活中断说明失败：${it.message}") }
+        }.onFailure { PientLog.w(TAG, "发送保活中断说明失败：${it.message}") }
     }
 
     /** 通知渠道（幂等；IMPORTANCE_LOW = 不响不震，只在通知栏占一行）。服务与「保活中断说明」共用一份 */
@@ -215,7 +215,7 @@ object PiKeepAlive {
                     },
                 )
             }
-        }.onFailure { Log.w(TAG, "创建通知渠道失败：${it.message}") }
+        }.onFailure { PientLog.w(TAG, "创建通知渠道失败：${it.message}") }
     }
 
     /** 当前该进通知栏的文案：聊天回合 → 终端脚本 → 终端会话 → 其余（常驻） */
@@ -240,8 +240,8 @@ object PiKeepAlive {
         ) return
         runCatching {
             push(ctx, startNew = false)
-            Log.i(TAG, "前台保活通知已刷新（$key：${currentText()}）")
-        }.onFailure { Log.w(TAG, "刷新保活通知失败：${it.message}") }
+            PientLog.i(TAG, "前台保活通知已刷新（$key：${currentText()}）")
+        }.onFailure { PientLog.w(TAG, "刷新保活通知失败：${it.message}") }
     }
 
     /**
@@ -390,7 +390,7 @@ class PiKeepAliveService : Service() {
             }
         }.onFailure {
             // 通知权限被拒 / 类型不允许：如实记一条，别让保活静默失效
-            Log.w(TAG, "startForeground 失败（保活未生效）：${it.message}")
+            PientLog.w(TAG, "startForeground 失败（保活未生效）：${it.message}")
         }
         // 「停」指令：**先走完 startForeground 契约再自停**（见 [ACTION_STOP] 的注释 ——
         // 直接 stopService 撤单会让系统抛 ForegroundServiceDidNotStartInTimeException 杀掉应用）。
@@ -431,7 +431,7 @@ class PiKeepAliveService : Service() {
      * 不做假的续命，用户下次操作 / 下次打开应用会重新挂上。
      */
     override fun onTimeout(startId: Int, fgsType: Int) {
-        Log.w(TAG, "前台服务到点（type=$fgsType，系统时限）：按系统要求自停")
+        PientLog.w(TAG, "前台服务到点（type=$fgsType，系统时限）：按系统要求自停")
         runCatching { @Suppress("DEPRECATION") stopForeground(true) }
         // **必须无条件 stopSelf()**（2026-09-16 真机崩溃实测）：这里不能用 stopSelf(startId) ——
         // 服务被多次启动过（acquire / 刷新 / 换 key）时这个 startId 不是最后一次启动请求，

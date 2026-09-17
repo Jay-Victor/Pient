@@ -1,7 +1,7 @@
 package com.pient.app.runtime
 
 import android.content.Context
-import android.util.Log
+import com.pient.app.data.PientLog
 import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
@@ -57,7 +57,7 @@ object ExecBridge {
         val ss = runCatching {
             ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
         }.getOrElse {
-            Log.w(TAG, "回桥启动失败（无法绑定 loopback）：${it.message}")
+            PientLog.w(TAG, "回桥启动失败（无法绑定 loopback）：${it.message}")
             return
         }
         token = randomToken()
@@ -66,7 +66,7 @@ object ExecBridge {
         Thread({ acceptLoop(context.applicationContext, ss) }, "pient-exec-bridge").apply {
             isDaemon = true
         }.start()
-        Log.i(TAG, "Android shell 回桥已启动：127.0.0.1:${ss.localPort}")
+        PientLog.i(TAG, "Android shell 回桥已启动：127.0.0.1:${ss.localPort}")
         writeEndpointFile(context)
     }
 
@@ -90,7 +90,7 @@ object ExecBridge {
                 endpointFile(context).writeText(json.toString())
                 tmp.delete()
             }
-        }.onFailure { Log.w(TAG, "端点文件写入失败：${it.message}") }
+        }.onFailure { PientLog.w(TAG, "端点文件写入失败：${it.message}") }
     }
 
     private fun randomToken(): String {
@@ -157,7 +157,7 @@ object ExecBridge {
 
                     else -> respond(s.getOutputStream(), 404, JSONObject().put("ok", false).put("note", "unknown path"))
                 }
-            }.onFailure { Log.w(TAG, "回桥请求处理失败：${it.message}") }
+            }.onFailure { PientLog.w(TAG, "回桥请求处理失败：${it.message}") }
         }
     }
 

@@ -4,7 +4,7 @@ import com.pient.app.data.i18n.L
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import com.pient.app.data.PientLog
 import androidx.compose.runtime.mutableStateListOf
 import com.pient.app.data.ExecEnv
 import com.pient.app.data.MockTerminal
@@ -289,7 +289,7 @@ object TerminalSessions {
         session.process = wrapped
         session.alive = true
         session.pending.setLength(0)
-        Log.i(TAG, "会话${session.id} 启动 shell=${shell.name}")
+        PientLog.i(TAG, "会话${session.id} 启动 shell=${shell.name}")
         // 前台保活（2026-09-16）：**手打命令也算在跑** —— 无 PTY 时应用不知道用户敲的那条命令
         // 何时结束，只能按「会话活着」挂着（系统清进程是不区分命令来源的）；
         // 释放点 = 关会话（close）/ 进程真退出（pump 末尾，且只认当前这个进程）。
@@ -320,7 +320,7 @@ object TerminalSessions {
                 val text = String(pending, Charsets.UTF_8)
                 if (text.isNotEmpty()) main.post { feed(session, text) }
             }
-        }.onFailure { Log.w(TAG, "读取会话${session.id} 输出失败：${it.message}") }
+        }.onFailure { PientLog.w(TAG, "读取会话${session.id} 输出失败：${it.message}") }
         val code = runCatching { proc.waitFor() }.getOrDefault(-1)
         session.alive = false
         // 进程真退出了 → 释放保活。**只认「还是当前这个进程」**：中断 = 销毁旧进程 + 立刻重建
@@ -331,7 +331,7 @@ object TerminalSessions {
             flushPending(session)
             appendDirect(session, TerminalLine(L.runtime.sessionExited(code), TerminalLineKind.OUTPUT))
         }
-        Log.i(TAG, "会话${session.id} 退出 code=$code")
+        PientLog.i(TAG, "会话${session.id} 退出 code=$code")
     }
 
     /** 把一段输出按行喂进会话（余下不足一行的部分留在 pending） */

@@ -2,7 +2,7 @@ package com.pient.app.runtime
 
 import com.pient.app.data.i18n.L
 import android.content.Context
-import android.util.Log
+import com.pient.app.data.PientLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -64,11 +64,11 @@ object PiSkillsMarket {
         if (q.isEmpty()) return emptyList<Hit>() to L.runtime.enterKeyword
         val api = runCatching { searchViaApi(q, limit) }
         api.getOrNull()?.let { hits ->
-            Log.i(TAG, "skills.sh 搜索「$q」：${hits.size} 条")
+            PientLog.i(TAG, "skills.sh 搜索「$q」：${hits.size} 条")
             return hits to null
         }
         val apiErr = api.exceptionOrNull()
-        Log.w(TAG, "skills.sh 搜索失败（回落 npx）：${apiErr?.message}")
+        PientLog.w(TAG, "skills.sh 搜索失败（回落 npx）：${apiErr?.message}")
         val fallback = searchViaNpx(context, q, limit)
         return fallback
     }

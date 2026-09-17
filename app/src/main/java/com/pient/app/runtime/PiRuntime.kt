@@ -4,7 +4,7 @@ import com.pient.app.data.i18n.L
 import android.content.Context
 import android.os.Build
 import android.system.Os
-import android.util.Log
+import com.pient.app.data.PientLog
 import java.io.File
 
 /**
@@ -180,7 +180,7 @@ object PiRuntime {
         if (!rootfsArchiveAvailable(context)) {
             val msg = L.runtime.apkNoUbuntuPrefix +
                 L.runtime.apkNoUbuntuHint(abiLabel())
-            Log.w(TAG, msg)
+            PientLog.w(TAG, msg)
             onProgress(0f, msg)
             return false
         }
@@ -220,11 +220,11 @@ object PiRuntime {
                 // untrusted_app 建硬链接（实测 avc: denied { link } … app_data_file）。
                 // ubuntu-base 里只有极少数这种条目，所以真正的判据是「/bin/bash 在不在」，
                 // 不是 tar 的退出码。
-                Log.w(TAG, "解包退出码 $code（多半只是硬链接被拒）：${tail.take(200)}")
+                PientLog.w(TAG, "解包退出码 $code（多半只是硬链接被拒）：${tail.take(200)}")
             }
             val ok = rootfsReady(context)
             // 留一条可核对的证据行：终端层出问题时先看它（架构不符 / 半成品都在这里现形）
-            Log.i(
+            PientLog.i(
                 TAG,
                 "解包结果 ok=$ok bash=${rootfsBash(context).isFile} " +
                     "arch=${elfMachine(rootfsBash(context))}（本机 ${hostMachine()}）",
@@ -233,7 +233,7 @@ object PiRuntime {
             if (ok) ensurePiAsync(context)      // rootfs 一就绪就把预置的 pi 铺进 npm 全局位置
             return ok
         } catch (e: Exception) {
-            Log.w(TAG, "解包异常：${e.message}")
+            PientLog.w(TAG, "解包异常：${e.message}")
             onProgress(0f, L.runtime.unpackException(e.message))
             return false
         } finally {
@@ -258,7 +258,7 @@ object PiRuntime {
         installPiExtension(context)   // 应用启动即装（内容变了才重写；rootfs 没就绪也只是先写好文件）
         if (rootfsReady(context) || isUnpacking()) return false
         if (!rootfsArchiveAvailable(context)) {
-            Log.w(TAG, "rootfs 未就绪，且 APK 未内置归档（构建时没跑 fetch_rootfs.py --abi ${abiLabel()}）")
+            PientLog.w(TAG, "rootfs 未就绪，且 APK 未内置归档（构建时没跑 fetch_rootfs.py --abi ${abiLabel()}）")
             return false
         }
         Thread {
@@ -266,15 +266,15 @@ object PiRuntime {
             // 别往一棵架构不对的树里覆盖写（会留下混合内容，最难查）。只有「归档在手」才会走到这。
             val dir = rootfsDir(context)
             if (dir.isDirectory) {
-                Log.w(TAG, "rootfs 不可用（bash 架构 ${elfMachine(rootfsBash(context))} ≠ 本机 ${hostMachine()}）→ 清空重解")
+                PientLog.w(TAG, "rootfs 不可用（bash 架构 ${elfMachine(rootfsBash(context))} ≠ 本机 ${hostMachine()}）→ 清空重解")
                 runCatching { dir.deleteRecursively() }
-                    .onFailure { Log.w(TAG, "清空 rootfs 失败：${it.message}") }
+                    .onFailure { PientLog.w(TAG, "清空 rootfs 失败：${it.message}") }
             }
             ensureLinks(context)
-            Log.i(TAG, "自动解包开始（后台，无需用户操作）")
+            PientLog.i(TAG, "自动解包开始（后台，无需用户操作）")
             val ok = extractRootfs(context) { pct, text -> unpackNote = "${(pct * 100).toInt()}% · $text" }
             unpackNote = if (ok) "" else unpackNote
-            Log.i(TAG, if (ok) "自动解包完成：${rootfsBash(context).absolutePath}" else "自动解包失败：$unpackNote")
+            PientLog.i(TAG, if (ok) "自动解包完成：${rootfsBash(context).absolutePath}" else "自动解包失败：$unpackNote")
         }.apply {
             isDaemon = true
             name = "pient-rootfs-autounpack"
@@ -332,7 +332,7 @@ object PiRuntime {
         if (current == target.absolutePath) return
         if (current != null || link.exists()) runCatching { link.delete() }
         runCatching { Os.symlink(target.absolutePath, link.absolutePath) }
-            .onFailure { Log.w(TAG, "建链接失败 ${link.name}：${it.message}") }
+            .onFailure { PientLog.w(TAG, "建链接失败 ${link.name}：${it.message}") }
     }
 
     // ─────────────── 终端会话的外围准备：DNS / root 启动器 / 执行环境 / 工作区 ───────────────
@@ -372,9 +372,9 @@ object PiRuntime {
             val f = workspaceFile(context)
             if (!f.exists() || f.readText().trim() != target.absolutePath) {
                 f.writeText(target.absolutePath)
-                Log.i(TAG, "工作区已设为：${target.absolutePath}")
+                PientLog.i(TAG, "工作区已设为：${target.absolutePath}")
             }
-        }.onFailure { Log.w(TAG, "工作区写入失败：${it.message}") }
+        }.onFailure { PientLog.w(TAG, "工作区写入失败：${it.message}") }
     }
 
     /**
@@ -386,7 +386,7 @@ object PiRuntime {
     fun syncResolvConf(context: Context) {
         val file = File(File(rootfsDir(context), "etc"), "resolv.conf")
         if (!file.parentFile.exists()) {
-            Log.w(TAG, "rootfs 未就绪，跳过 resolv.conf：${file.absolutePath}")
+            PientLog.w(TAG, "rootfs 未就绪，跳过 resolv.conf：${file.absolutePath}")
             return
         }
         val servers = linkedSetOf<String>()
@@ -397,16 +397,16 @@ object PiRuntime {
                     addr.hostAddress?.takeIf { it.isNotBlank() }?.let(servers::add)
                 }
             }
-        }.onFailure { Log.w(TAG, "读取系统 DNS 失败：${it.message}") }
+        }.onFailure { PientLog.w(TAG, "读取系统 DNS 失败：${it.message}") }
         if (servers.isEmpty()) servers.addAll(listOf("223.5.5.5", "8.8.8.8"))
         val text = servers.joinToString("") { "nameserver $it" + "\n" }
         val shown = servers.joinToString(" ")
         runCatching {
             if (!file.exists() || file.readText() != text) {
                 file.writeText(text)
-                Log.i(TAG, "resolv.conf 已写入：$shown")
+                PientLog.i(TAG, "resolv.conf 已写入：$shown")
             }
-        }.onFailure { Log.w(TAG, "写 resolv.conf 失败：${it.message}") }
+        }.onFailure { PientLog.w(TAG, "写 resolv.conf 失败：${it.message}") }
     }
 
     /**
@@ -420,16 +420,16 @@ object PiRuntime {
             context.assets.open(ROOT_WRAPPER_ASSET).use { input ->
                 File(root(context), ROOT_WRAPPER_ASSET).outputStream().use { input.copyTo(it) }
             }
-        }.onFailure { Log.w(TAG, "root 侧启动器写入失败：${it.message}") }
+        }.onFailure { PientLog.w(TAG, "root 侧启动器写入失败：${it.message}") }
         val env = com.pient.app.data.SettingsStore.execEnv.id
         val file = execEnvFile(context)
         if (!file.parentFile.exists()) return
         runCatching {
             if (!file.exists() || file.readText().trim() != env) {
                 file.writeText(env)
-                Log.i(TAG, "执行环境已写入：$env")
+                PientLog.i(TAG, "执行环境已写入：$env")
             }
-        }.onFailure { Log.w(TAG, "执行环境写入失败：${it.message}") }
+        }.onFailure { PientLog.w(TAG, "执行环境写入失败：${it.message}") }
         appDir(context).mkdirs()
         ensureLinks(context)
         installPiExtension(context)
@@ -495,10 +495,10 @@ object PiRuntime {
         if (target.isFile && target.readText() == text) return@runCatching true
         target.parentFile?.mkdirs()
         target.writeText(text)
-        Log.i(TAG, "pi 扩展已安装：${target.absolutePath}")
+        PientLog.i(TAG, "pi 扩展已安装：${target.absolutePath}")
         true
     }.getOrElse {
-        Log.w(TAG, "pi 扩展安装失败：${it.message}")
+        PientLog.w(TAG, "pi 扩展安装失败：${it.message}")
         false
     }
 
@@ -523,7 +523,7 @@ object PiRuntime {
         if (piReady(context) || piUnpacking) return false
         if (!rootfsReady(context)) return false
         if (!piArchiveAvailable(context)) {
-            Log.w(TAG, "pi 未预置，且 APK 未内置 $PI_ARCHIVE_ASSET（构建时未生成归档）")
+            PientLog.w(TAG, "pi 未预置，且 APK 未内置 $PI_ARCHIVE_ASSET（构建时未生成归档）")
             return false
         }
         Thread {
@@ -533,7 +533,7 @@ object PiRuntime {
                 val dir = nodeModulesDir(context)
                 if (File(dir, "@earendil-works/pi-coding-agent").isDirectory) {
                     // 上次中断的半成品：先清空再解（判据是 piEntry，走到这里说明它不在）
-                    Log.w(TAG, "pi 目录不完整 → 清空重解：${piDir(context).absolutePath}")
+                    PientLog.w(TAG, "pi 目录不完整 → 清空重解：${piDir(context).absolutePath}")
                     runCatching { File(dir, "@earendil-works/pi-coding-agent").deleteRecursively() }
                 }
                 dir.mkdirs()
@@ -548,7 +548,7 @@ object PiRuntime {
                     .start()
                 val out = proc.inputStream.bufferedReader().readText()
                 val code = proc.waitFor()
-                if (code != 0) Log.w(TAG, "pi 解包退出码 $code：${out.takeLast(200)}")
+                if (code != 0) PientLog.w(TAG, "pi 解包退出码 $code：${out.takeLast(200)}")
                 // /usr/bin/pi → 相对软链（与 npm 的做法一致）
                 val link = File(rootfsDir(context), "usr/bin/pi")
                 runCatching {
@@ -557,7 +557,7 @@ object PiRuntime {
                         "../lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
                         link.absolutePath,
                     )
-                }.onFailure { Log.w(TAG, "pi 软链建立失败：${it.message}") }
+                }.onFailure { PientLog.w(TAG, "pi 软链建立失败：${it.message}") }
                 // **必须显式加执行位**：Android 侧 tar 解出来的文件是 0600（umask 077），
                 // 少了 +x 就是 `/usr/bin/pi: Permission denied`（实测踩过）。
                 listOf("dist/bundle/cli.js", "dist/bundle/rpc-entry.js").forEach { rel ->
@@ -567,13 +567,13 @@ object PiRuntime {
                     }
                 }
                 runCatching { tar.delete() }
-                Log.i(
+                PientLog.i(
                     TAG,
                     "pi 预置完成 ok=${piReady(context)} version=${piVersion(context)} " +
                         "exe=${piEntry(context).canExecute()}",
                 )
             } catch (e: Exception) {
-                Log.w(TAG, "pi 解包异常：${e.message}")
+                PientLog.w(TAG, "pi 解包异常：${e.message}")
             } finally {
                 piUnpacking = false
             }

@@ -2,7 +2,7 @@ package com.pient.app.ui.chat
 
 import com.pient.app.data.i18n.L
 import androidx.compose.foundation.Canvas
-import android.util.Log
+import com.pient.app.data.PientLog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -95,7 +95,7 @@ fun TreeCanvasPanel(chatState: ChatState) {
         runCatching {
             fun count(n: SessionTreeNode?): Int = if (n == null) 0 else 1 + n.children.sumOf { count(it) }
             // 画布内容 uiautomator 取不到，这行是唯一能核「节点数 = 用户消息数」的地方（《分支功能设计》§7）
-            android.util.Log.i("PientChat", "画布数据源：${count(tree)} 节点（pi 树=${chatState.piTree != null}）")
+            PientLog.i("PientChat", "画布数据源：${count(tree)} 节点（pi 树=${chatState.piTree != null}）")
         }
     }
     // 进画布即拉一次 pi 的会话树（会话映射下这才是真相源；失败不影响本地回落）
@@ -204,7 +204,7 @@ fun TreeCanvasPanel(chatState: ChatState) {
             val x0 = -pan.x / zoom
             val x1 = (viewport.width - pan.x) / zoom
             val visible = layout.filter { xOf(it.depth) + cardW in x0..x1 || xOf(it.depth) in x0..x1 }
-            Log.i("PientChat", "画布视口 zoom=%.2f 节点 ${layout.size} 个，可见 ${visible.size} 个：" .format(zoom)
+            PientLog.i("PientChat", "画布视口 zoom=%.2f 节点 ${layout.size} 个，可见 ${visible.size} 个：" .format(zoom)
                 + visible.joinToString(" | ") { "${it.node.id.take(8)}「${it.node.userText.take(8)}」" })
         }
     }

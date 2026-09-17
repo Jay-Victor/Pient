@@ -7,7 +7,6 @@ import com.pient.app.runtime.PiKeepAlive
 import com.pient.app.runtime.PiPolish
 
 import android.content.Context
-import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -305,7 +304,7 @@ class ChatState {
         PiRuntime.setWorkspace(ctx, dir)
         val after = runCatching { PiRuntime.workspaceDir(ctx).absolutePath }.getOrNull()
         if (before == after) return
-        Log.i(TAG_CHAT, "工作区已切到：$after（原：$before）")
+        PientLog.i(TAG_CHAT, "工作区已切到：$after（原：$before）")
         bgScope.launch { applyPendingWorkspaceRestart() }
     }
 
@@ -331,7 +330,7 @@ class ChatState {
         }
         if (PiRpc.isStreamingNow(timeoutMs = 600) == true) {
             workspaceRestartPending = true
-            Log.i(TAG_CHAT, "工作区已换，但 pi 正忙：等它收尾后重启通道")
+            PientLog.i(TAG_CHAT, "工作区已换，但 pi 正忙：等它收尾后重启通道")
             return
         }
         workspaceRestartPending = false
@@ -340,7 +339,7 @@ class ChatState {
         if (PiRpc.start(target.first, target.second)) {
             bindPiSession()   // 新进程要重新绑回本会话的 pi 文件（否则 get_state 落在别的会话上）
             val name = AppCtx.get()?.let { runCatching { PiRuntime.workspaceDir(it).name }.getOrNull() }.orEmpty()
-            Log.i(TAG_CHAT, "pi 通道已按新工作区重启（工作区=$name）")
+            PientLog.i(TAG_CHAT, "pi 通道已按新工作区重启（工作区=$name）")
         }
     }
 
@@ -470,12 +469,12 @@ class ChatState {
                     val current = PiRpc.getSessionStats()?.optString("sessionFile").orEmpty()
                     if (current == f) {
                         PiRpc.newSession()
-                        Log.i(TAG_CHAT, "删除的正是 pi 当前会话 → 已让 pi 换到新会话")
+                        PientLog.i(TAG_CHAT, "删除的正是 pi 当前会话 → 已让 pi 换到新会话")
                     }
                 }
                 val gone = PiAgentFiles.deleteSessionFile(ctx, f)
-                Log.i(TAG_CHAT, "清理 pi 侧会话记录：$f → ${if (gone) "已删除" else "文件不存在"}")
-            }.onFailure { Log.w(TAG_CHAT, "清理 pi 侧会话记录失败：${it.message}") }
+                PientLog.i(TAG_CHAT, "清理 pi 侧会话记录：$f → ${if (gone) "已删除" else "文件不存在"}")
+            }.onFailure { PientLog.w(TAG_CHAT, "清理 pi 侧会话记录失败：${it.message}") }
         }
     }
 
@@ -781,7 +780,7 @@ class ChatState {
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                Log.e(TAG_CHAT, "本轮异常逃逸：${e.message}", e)
+                PientLog.e(TAG_CHAT, "本轮异常逃逸：${e.message}", e)
                 blockedNote = L.runtime.turnException(e.message ?: L.common.unknownError)
             }
         }
@@ -912,7 +911,7 @@ class ChatState {
             val result = withContext(Dispatchers.IO) { probePiReadiness(ctx) }
             piReadiness = result.first
             piUnreadyReason = result.second
-            Log.i(TAG_CHAT, "pi 就绪态：${result.first}${if (result.second.isBlank()) "" else "（${result.second}）"}")
+            PientLog.i(TAG_CHAT, "pi 就绪态：${result.first}${if (result.second.isBlank()) "" else "（${result.second}）"}")
             if (result.first == PiReadiness.Ready) syncThinkingToPi()
         }
     }
@@ -961,7 +960,7 @@ class ChatState {
         // 已知未就绪 → 明确阻断：不发送、不落任何条目、草稿留在输入栏（ChatScreen 给提示）
         if (piReadiness == PiReadiness.Unready) {
             blockedNote = L.runtime.piNotReadyNotSent
-            Log.w(TAG_CHAT, "发送被阻断：pi 未就绪（$piUnreadyReason）")
+            PientLog.w(TAG_CHAT, "发送被阻断：pi 未就绪（$piUnreadyReason）")
             return
         }
         // **pi 侧还在跑就别硬发**（2026-09-16 真机实测）：pi 对「流式中且未指定 streamingBehavior」的
@@ -973,7 +972,7 @@ class ChatState {
         if (PiRpc.isStreamingNow() == true) {
             draftRestore = userText
             blockedNote = L.runtime.blockedPiBusy
-            Log.w(TAG_CHAT, "发送被拦：pi 仍在处理上一轮（isStreaming=true）")
+            PientLog.w(TAG_CHAT, "发送被拦：pi 仍在处理上一轮（isStreaming=true）")
             return
         }
         isStreaming = true
@@ -1098,7 +1097,7 @@ class ChatState {
         // ── pi 起不来：**不换路**（2026-09-15 拍板 B + 收口）────────────────────────
         // 直连没有任何工具能力，落回去会让用户以为自己在用 agent；§8.3 作废后本地也不存在
         // 「只在本地的新消息」这种状态 —— 所以只有一条路：如实报错，让用户去修环境。
-        Log.w(TAG_CHAT, "pi 通道不可用，本轮没走 pi：${PiRpc.stderrText().takeLast(300)}")
+        PientLog.w(TAG_CHAT, "pi 通道不可用，本轮没走 pi：${PiRpc.stderrText().takeLast(300)}")
         piReadiness = PiReadiness.Unready
         if (piUnreadyReason.isBlank()) piUnreadyReason = L.runtime.piChannelStartFailedHint
         throw AiException(L.runtime.piNotReadyTurnNotSent)
@@ -1170,7 +1169,7 @@ class ChatState {
                 val newFile = PiRpc.getSessionStats()?.optString("sessionFile").orEmpty()
                 if (newFile.isNotBlank()) {
                     updateSessionPiFile(id, newFile)
-                    Log.i(TAG_CHAT, "会话已映射到 pi 文件：$newFile")
+                    PientLog.i(TAG_CHAT, "会话已映射到 pi 文件：$newFile")
                 }
             } else {
                 // **同一个会话文件不要重载**：switch_session 会按文件末尾重新定位活跃叶，
@@ -1185,13 +1184,13 @@ class ChatState {
             val piName = PiRpc.getState()?.optString("sessionName").orEmpty()
             if (piName.isNotBlank() && piName != rec.title) {
                 renameSession(id, piName)
-                Log.i(TAG_CHAT, "会话标题按 pi 回流：$piName")
+                PientLog.i(TAG_CHAT, "会话标题按 pi 回流：$piName")
             }
             refreshPiTree()
             syncMessagesFromPi()
             // 位置对账（T1/T2/T3）：通道重启、切会话后 pi 的叶会回到文件末尾 —— 拉回 Pient 记的位置
             reconcilePiLeaf(id)
-        }.onFailure { Log.w(TAG_CHAT, "绑 pi 会话失败：${it.message}") }
+        }.onFailure { PientLog.w(TAG_CHAT, "绑 pi 会话失败：${it.message}") }
         // 思考档位同步（2026-09-17）：通道就绪 / 换会话后把界面的开关与档位推给 pi（不等 = no-op）
         syncThinkingToPi()
     }
@@ -1243,15 +1242,15 @@ class ChatState {
     private suspend fun reconcilePiLeaf(sid: String) {
         val want = piDesiredLeaf[sid] ?: return
         if (!piEntryById.containsKey(want)) {
-            Log.w(TAG_CHAT, "位置对账：目标条目 $want 不在当前树里 → 丢弃该期望位置")
+            PientLog.w(TAG_CHAT, "位置对账：目标条目 $want 不在当前树里 → 丢弃该期望位置")
             piDesiredLeaf.remove(sid)
             return
         }
         val have = normalizedPiLeaf()
         if (have == want) return
-        Log.i(TAG_CHAT, "位置对账：pi 叶 $have ≠ 目标 $want → /pient-nav")
+        PientLog.i(TAG_CHAT, "位置对账：pi 叶 $have ≠ 目标 $want → /pient-nav")
         runCatching { PiRpc.navigate(want, summarize = false) }
-            .onFailure { Log.w(TAG_CHAT, "位置对账失败：${it.message}") }
+            .onFailure { PientLog.w(TAG_CHAT, "位置对账失败：${it.message}") }
         refreshPiTree()
         syncMessagesFromPi()
     }
@@ -1276,7 +1275,7 @@ class ChatState {
         // 而 pi 是在更后面的 `prompt` 里才记录这条消息 —— 此刻 clear+addAll 会把它冲掉，
         // 表现为「画布创建分支后回聊天页，第一条消息不显示在聊天页（但回答照收、画布节点也在）」。
         if (isStreaming) {
-            Log.i(TAG_CHAT, "本轮在飞：跳过按 pi 重建消息流（保住刚上屏的用户消息）")
+            PientLog.i(TAG_CHAT, "本轮在飞：跳过按 pi 重建消息流（保住刚上屏的用户消息）")
             return
         }
         val arr = PiRpc.getMessages()?.optJSONArray("messages") ?: return
@@ -1301,7 +1300,7 @@ class ChatState {
                 rebuilt[i] = r
                 restored++
             }
-            if (restored > 0) Log.i(TAG_CHAT, "按 pi 重建后还原用户消息（引用/附件）：$restored 条")
+            if (restored > 0) PientLog.i(TAG_CHAT, "按 pi 重建后还原用户消息（引用/附件）：$restored 条")
         }
         if (rebuilt.isEmpty()) return
         val list = messagesBySession.getOrPut(id) { mutableStateListOf() }
@@ -1314,11 +1313,11 @@ class ChatState {
         list.addAll(rebuilt)
         if (pending != null && pending.text.isNotBlank() && !known) {
             list += pending
-            Log.i(TAG_CHAT, "重建后补回未被 pi 记录的用户消息：${pending.text.take(24)}")
+            PientLog.i(TAG_CHAT, "重建后补回未被 pi 记录的用户消息：${pending.text.take(24)}")
         }
         // 位置**不进本地条目树**（2026-09-15）：pi 的条目 id 与本地镜像 id 不同源，写进来会让
         // leafPath 落空、会话在界面上变空白（实测踩过）。pi 侧位置由 [piDesiredLeaf] 单独记。
-        Log.i(TAG_CHAT, "消息流已按 pi 上下文重建：${rebuilt.size} 条")
+        PientLog.i(TAG_CHAT, "消息流已按 pi 上下文重建：${rebuilt.size} 条")
     }
 
     /** 解析 get_tree 的产物：画布树 + 锚点表 + 条目索引（锚点/对账都要原始 id 空间） */
@@ -1530,7 +1529,7 @@ class ChatState {
                 val nodeId = piNodeIdForUserIndex(userIdx)
                 if (nodeId == null) {
                     blockedNote = L.chat.forkUnavailable
-                    Log.w(TAG_CHAT, "会话外分支：消息 #$messageIndex 在 pi 树里定位不到，已放弃")
+                    PientLog.w(TAG_CHAT, "会话外分支：消息 #$messageIndex 在 pi 树里定位不到，已放弃")
                     return@launch
                 }
                 PiRpc.navigate(piAnchorOf[nodeId] ?: nodeId)     // 活跃叶 → 该回合末尾（含这条消息及其回答）
@@ -1553,12 +1552,12 @@ class ChatState {
                 syncMessagesFromPi()
                 AppCtx.get()?.let { ChatStore.save(it, this@ChatState) }
                 blockedNote = L.chat.sessionCreated
-                Log.i(TAG_CHAT, "会话外分支已建（pi 原生 navigate+clone，含 fork 点）：节点 $nodeId → $file")
+                PientLog.i(TAG_CHAT, "会话外分支已建（pi 原生 navigate+clone，含 fork 点）：节点 $nodeId → $file")
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 blockedNote = L.chat.forkUnavailable
-                Log.w(TAG_CHAT, "会话外分支失败：${e.message}")
+                PientLog.w(TAG_CHAT, "会话外分支失败：${e.message}")
             }
         }
     }
@@ -1640,9 +1639,9 @@ class ChatState {
         )
         val res = runCatching { PiRpc.prompt("/pient-meta $b64") }.getOrNull()
         if (res == null || !res.optBoolean("success", true)) {
-            Log.w(TAG_CHAT, "消息元数据未写入 pi（本轮照发）：${res?.optString("error").orEmpty()}")
+            PientLog.w(TAG_CHAT, "消息元数据未写入 pi（本轮照发）：${res?.optString("error").orEmpty()}")
         } else {
-            Log.i(TAG_CHAT, "消息元数据已写入 pi 会话（引用=${quote != null} 附件=${attachments.size} 个）")
+            PientLog.i(TAG_CHAT, "消息元数据已写入 pi 会话（引用=${quote != null} 附件=${attachments.size} 个）")
         }
     }
 
@@ -1858,7 +1857,7 @@ class ChatState {
             PiRpc.events.collect { ev ->
                 val evType = ev.optString("type")
                 // 打点：非流式事件都记一行（message_update 太多不记）——排查"工具事件有没有到收集器"
-                if (evType != "message_update") Log.i(TAG_CHAT, "pi 事件：$evType")
+                if (evType != "message_update") PientLog.i(TAG_CHAT, "pi 事件：$evType")
                 when (evType) {
                     "message_update" -> {
                         ev.optJSONObject("usage")?.let { u -> piUsage(u)?.let { usage = it } }
@@ -1904,7 +1903,7 @@ class ChatState {
                         // 通知卡片明细（2026-09-16）：工具调用数 +1，顺手刷一次卡片
                         toolCallsThisTurn += 1
                         PiKeepAlive.detailChanged(AppCtx.get())
-                        Log.i(TAG_CHAT, "pi 工具开始：$name")
+                        PientLog.i(TAG_CHAT, "pi 工具开始：$name")
                         // 终端镜像（2026-09-16）：与 Operit 的观感对齐 —— AI 在 Ubuntu 里跑什么，终端页看得见
                         AppCtx.get()?.let {
                             com.pient.app.runtime.TerminalSessions.mirror(it, mirrorStartLine(name, ev.optJSONObject("args")))
@@ -1943,7 +1942,7 @@ class ChatState {
                                 ),
                             )
                         }
-                        Log.i(TAG_CHAT, "pi 工具结束：$name 失败=$failed")
+                        PientLog.i(TAG_CHAT, "pi 工具结束：$name 失败=$failed")
                         AppCtx.get()?.let {
                             com.pient.app.runtime.TerminalSessions.mirror(it, mirrorEndLine(name, failed, text))
                         }
@@ -1991,7 +1990,7 @@ class ChatState {
         if (out.isNotEmpty()) onDelta(out)
         // 期望位置跟随后端（§4.3）：本轮追加后 pi 的叶就是新的"当前所在"（不跟则下次绑定会拉回旧位置）
         runCatching { refreshPiTree(follow = true) }
-            .onFailure { Log.w(TAG_CHAT, "回合结束刷新 pi 树失败：${it.message}") }
+            .onFailure { PientLog.w(TAG_CHAT, "回合结束刷新 pi 树失败：${it.message}") }
         ChatOutcome(out, usage?.takeIf { it.inTokens + it.outTokens > 0 }, think.toString())
     }
 
@@ -2085,7 +2084,7 @@ class ChatState {
             // 压缩后上下文换了形态（pi 重建了活跃消息）→ 画布与上屏流都要跟上
             runCatching { refreshPiTree(follow = true) }
             runCatching { syncMessagesFromPi() }
-            Log.i(TAG_CHAT, "上下文已压缩（pi 原生 compact）：${res.toString().take(200)}")
+            PientLog.i(TAG_CHAT, "上下文已压缩（pi 原生 compact）：${res.toString().take(200)}")
             null
         } catch (e: Exception) {
             L.runtime.compactFailedPrefix + (e.message ?: L.runtime.unknownError)
@@ -2121,7 +2120,7 @@ class ChatState {
         val text = runCatching { file.takeIf { it.isFile }?.readText() }.getOrNull()?.trim().orEmpty()
         if (text.isEmpty()) return L.runtime.systemPromptEmpty
         systemPrompt = text
-        Log.i(TAG_CHAT, "系统提示词已按 pi 回流：${text.length} 字")
+        PientLog.i(TAG_CHAT, "系统提示词已按 pi 回流：${text.length} 字")
         return null
     }
 
@@ -2143,7 +2142,7 @@ class ChatState {
         if (cur == null && entries.isNotEmpty()) {
             cur = entries.last()
             leafBySession[sid] = cur.id
-            Log.w(TAG_CHAT, "叶自愈：会话 $sid 的 leaf 不在条目树里 → 回退到末条目 ${cur.id}")
+            PientLog.w(TAG_CHAT, "叶自愈：会话 $sid 的 leaf 不在条目树里 → 回退到末条目 ${cur.id}")
         }
         while (cur != null) {
             path += cur
@@ -2220,7 +2219,7 @@ class ChatState {
             }
             runCatching { refreshPiTree(follow = true) }   // 位置跟随后端（叶若落到本回合条目上就记住它）
             runCatching { syncMessagesFromPi() }           // 上屏流按 pi 重建（含中止时的部分回答）
-            Log.i(TAG_CHAT, "已终止本轮：位置跟随后端（叶=$piLeafId，等待 ${waited}ms）")
+            PientLog.i(TAG_CHAT, "已终止本轮：位置跟随后端（叶=$piLeafId，等待 ${waited}ms）")
         }
     }
 
@@ -2409,10 +2408,10 @@ class ChatState {
             bgScope.launch {
                 // 纯切分支：不带 --summarize（分支摘要按设计不生成，不额外花一次模型调用）
                 runCatching { PiRpc.navigate(target) }
-                    .onFailure { Log.w(TAG_CHAT, "pi 会话内分支跳转失败：${it.message}") }
+                    .onFailure { PientLog.w(TAG_CHAT, "pi 会话内分支跳转失败：${it.message}") }
                 refreshPiTree()
                 syncMessagesFromPi()
-                Log.i(TAG_CHAT, "会话内分支跳转：节点 $nodeId → 目标 $target（pi 叶=$piLeafId）")
+                PientLog.i(TAG_CHAT, "会话内分支跳转：节点 $nodeId → 目标 $target（pi 叶=$piLeafId）")
             }
             return true
         }

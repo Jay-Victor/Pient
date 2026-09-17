@@ -3,7 +3,7 @@ package com.pient.app.runtime
 import com.pient.app.data.i18n.L
 import android.content.Context
 import android.net.Uri
-import android.util.Log
+import com.pient.app.data.PientLog
 import java.io.File
 import java.util.zip.ZipInputStream
 
@@ -56,7 +56,7 @@ object PiSkills {
             val disabled = File(root, DISABLED_DIR)
             if (disabled.isDirectory) scanRoot(disabled, root, global, out, insideDisabled = true)
         }
-        Log.i(TAG, "技能扫描：${out.count { it.enabled }} 个启用 / ${out.count { !it.enabled }} 个停用")
+        PientLog.i(TAG, "技能扫描：${out.count { it.enabled }} 个启用 / ${out.count { !it.enabled }} 个停用")
         return out.sortedWith(compareByDescending<Local> { it.enabled }.thenBy { it.name })
     }
 
@@ -100,7 +100,7 @@ object PiSkills {
         val from = File(item.root, if (enabled) relRaw else relPlain)
         val target = File(item.root, if (enabled) relPlain else "$DISABLED_DIR/$relPlain")
         if (!from.exists()) {
-            Log.w(TAG, "技能开关：源不存在 ${from.absolutePath}")
+            PientLog.w(TAG, "技能开关：源不存在 ${from.absolutePath}")
             return false
         }
         return runCatching {
@@ -112,9 +112,9 @@ object PiSkills {
                 else from.copyTo(target, overwrite = true)
                 from.deleteRecursively()
             }
-            Log.i(TAG, "技能${if (enabled) "启用" else "停用"}：${item.name} → ${target.absolutePath}（rename=$moved）")
+            PientLog.i(TAG, "技能${if (enabled) "启用" else "停用"}：${item.name} → ${target.absolutePath}（rename=$moved）")
             true
-        }.getOrElse { Log.w(TAG, "技能开关失败：${it.message}"); false }
+        }.getOrElse { PientLog.w(TAG, "技能开关失败：${it.message}"); false }
     }
 
     /** 技能条目相对外层 skills 根的路径：目录型 = 那个目录（relPath 去掉尾部 SKILL.md）；单文件型 = 那个 .md */
@@ -129,7 +129,7 @@ object PiSkills {
             item.file.name == "SKILL.md" -> item.file.parentFile?.deleteRecursively() ?: false
             else -> item.file.delete()
         }
-        Log.i(TAG, "技能删除：${item.name} ok=$ok")
+        PientLog.i(TAG, "技能删除：${item.name} ok=$ok")
         ok
     }.getOrElse { false }
 
@@ -150,7 +150,7 @@ object PiSkills {
         return runCatching {
             dir.mkdirs()
             File(dir, "SKILL.md").writeText(content)
-            Log.i(TAG, "技能导入：$slug → ${dir.absolutePath}")
+            PientLog.i(TAG, "技能导入：$slug → ${dir.absolutePath}")
             null
         }.getOrElse { it.message ?: L.runtime.writeFailed }
     }
@@ -209,7 +209,7 @@ object PiSkills {
             f.writeBytes(bytes)
             written++
         }
-        Log.i(TAG, "技能 ZIP 导入：$slug → ${dir.absolutePath}（$written 个文件）")
+        PientLog.i(TAG, "技能 ZIP 导入：$slug → ${dir.absolutePath}（$written 个文件）")
         null to slug
     }.getOrElse { (it.message ?: L.runtime.unzipFailed) to "" }
 
@@ -225,7 +225,7 @@ object PiSkills {
                 f.parentFile?.mkdirs()
                 f.writeText(text)
             }
-            Log.i(TAG, "技能目录导入：$name（${files.size} 个文件）")
+            PientLog.i(TAG, "技能目录导入：$name（${files.size} 个文件）")
             null
         }.getOrElse { it.message ?: L.runtime.writeFailed }
     }

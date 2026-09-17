@@ -122,7 +122,7 @@ object ChatStore {
                     // 2026-09-14 用户拍板移除 SAF「选择本地文件夹」→ 旧的 SAF 项目（uri != null）不再可用
                     // （没有物化副本、也没有 ContentResolver 通路）：这里直接跳过，别让它以坏状态出现在列表里。
                     if (!uri.isNullOrEmpty()) {
-                        android.util.Log.i(
+                        PientLog.i(
                             "Pient",
                             "跳过遗留的 SAF 项目「${p.optString("name")}」（SAF 支持已移除）",
                         )
@@ -144,7 +144,7 @@ object ChatStore {
                         // LazyColumn 的 key 重复 → `Key "s-…" was already used` 直接闪退（实测踩过）。
                         // 载入时按 id 去重（保留先出现的那条），并把 state 里其余同名键留给它们各自的表。
                         if (sid.isBlank() || list.any { it.id == sid }) {
-                            android.util.Log.w("Pient", "载入时丢弃重复/空 id 的会话记录：$sid")
+                            PientLog.w("Pient", "载入时丢弃重复/空 id 的会话记录：$sid")
                             continue
                         }
                         val updatedAt = s.optLong("updatedAt", 0)
@@ -197,7 +197,7 @@ object ChatStore {
                         )
                     }
                     if (dropped > 0) {
-                        android.util.Log.w("Pient", "载入去重：会话 $key 丢弃 $dropped 条重复/无效条目（保留 ${list.size} 条）")
+                        PientLog.w("Pient", "载入去重：会话 $key 丢弃 $dropped 条重复/无效条目（保留 ${list.size} 条）")
                     }
                     state.entriesBySession[key] = list
                 }

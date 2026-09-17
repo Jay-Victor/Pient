@@ -1,7 +1,7 @@
 package com.pient.app.runtime
 
 import com.pient.app.data.i18n.L
-import android.util.Log
+import com.pient.app.data.PientLog
 import com.pient.app.AppCtx
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.BufferOverflow
@@ -71,6 +71,9 @@ object PiRpc {
             stderrTail.addLast(line)
             while (stderrTail.size > 40) stderrTail.removeFirst()
         }
+        // 同时进应用日志（2026-09-17）：内存尾巴只服务 UI 的 40 行提示，落盘这份才留得住
+        //（pi 在 RPC 模式下不写日志文件，stderr 就是它唯一的报错出口）
+        PientLog.w("PiStderr", line)
     }
 
     // ─────────────────────── 就绪判断 / 启停 ───────────────────────
@@ -97,7 +100,7 @@ object PiRpc {
 
     fun markConfigDirty() {
         configDirty = true
-        Log.i(TAG, "配置已改动：pi 通道将在下次启动时重启（重读 models.json / auth.json / settings.json）")
+        PientLog.i(TAG, "配置已改动：pi 通道将在下次启动时重启（重读 models.json / auth.json / settings.json）")
     }
 
     /**
@@ -108,7 +111,7 @@ object PiRpc {
      */
     @Synchronized
     fun start(provider: String, model: String): Boolean {
-        Log.i(TAG, "start() 进入：key=[$provider/$model](len=${provider.length + 1 + model.length})；现有进程 alive=${process?.isAlive} 状态=${_state.value}")
+        PientLog.i(TAG, "start() 进入：key=[$provider/$model](len=${provider.length + 1 + model.length})；现有进程 alive=${process?.isAlive} 状态=${_state.value}")
         val key = "$provider/$model"
         process?.let { p ->
             val st = _state.value
@@ -126,7 +129,7 @@ object PiRpc {
             val caller = Throwable().stackTrace
                 .firstOrNull { it.className.startsWith("com.pient.app") && !it.className.endsWith("PiRpc") }
                 ?.let { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }.orEmpty()
-            Log.i(TAG, "通道重启：$why；调用方=$caller")
+            PientLog.i(TAG, "通道重启：$why；调用方=$caller")
         }
         configDirty = false   // 无论走哪条路，这次启动之后读到的都是新文件
         stop()
@@ -163,13 +166,13 @@ object PiRpc {
             Thread({ readStdout(proc) }, "pient-pi-rpc-out").apply { isDaemon = true }.start()
             Thread({ readStderr(proc) }, "pient-pi-rpc-err").apply { isDaemon = true }.start()
             _state.value = PiRpcState.Running(provider, model)
-            Log.i(TAG, "pi 通道已启动：$cmd")
+            PientLog.i(TAG, "pi 通道已启动：$cmd")
             true
         } catch (t: Throwable) {
             process = null
             writer = null
             _state.value = PiRpcState.Failed(t.message ?: t.javaClass.simpleName)
-            Log.w(TAG, "pi 通道启动失败：${t.message}")
+            PientLog.w(TAG, "pi 通道启动失败：${t.message}")
             false
         }
     }
@@ -187,7 +190,7 @@ object PiRpc {
             if (!proc.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) proc.destroyForcibly()
         }
         _state.value = PiRpcState.Stopped
-        Log.i(TAG, "pi 通道已停止")
+        PientLog.i(TAG, "pi 通道已停止")
     }
 
     // ─────────────────────── 命令 ───────────────────────
@@ -208,7 +211,7 @@ object PiRpc {
             }
             withTimeoutOrNull(awaitMs) { deferred.await() }
         } catch (t: Throwable) {
-            Log.w(TAG, "命令发送失败：${t.message}")
+            PientLog.w(TAG, "命令发送失败：${t.message}")
             null
         } finally {
             pending.remove(id)
@@ -323,7 +326,7 @@ object PiRpc {
         val res = send(JSONObject().put("type", "set_auto_compaction").put("enabled", enabled))
         // 留一行回包（这命令没有别处可观察的副作用：pi 只把开关状态放进 `get_state.autoCompactionEnabled`）——
         // 验「配置页拨开关 → 运行中的会话真的热改」时读这一行。
-        Log.i(TAG, "set_auto_compaction($enabled) 回包：${res?.toString()?.take(200) ?: "无响应（通道没起）"}")
+        PientLog.i(TAG, "set_auto_compaction($enabled) 回包：${res?.toString()?.take(200) ?: "无响应（通道没起）"}")
         return res
     }
 
@@ -416,11 +419,11 @@ object PiRpc {
                 dispatch(String(line.toByteArray(), StandardCharsets.UTF_8).trimEnd('\r'))
             }
         } catch (t: Throwable) {
-            Log.w(TAG, "读 stdout 结束：${t.message}")
+            PientLog.w(TAG, "读 stdout 结束：${t.message}")
             // 进程退出的现场（2026-09-15）：exit 码 + stderr 末行 —— 通道 churn 排查靠它
             val code = runCatching { proc.exitValue() }.getOrNull()
             val tail = stderrText().lines().lastOrNull { it.isNotBlank() }.orEmpty()
-            Log.w(TAG, "pi 进程 stdout 结束（exit=$code）" + if (tail.isBlank()) "" else " · stderr 末行：$tail")
+            PientLog.w(TAG, "pi 进程 stdout 结束（exit=$code）" + if (tail.isBlank()) "" else " · stderr 末行：$tail")
             _events.tryEmit(JSONObject().put("type", "channel_closed"))
         }
     }
@@ -429,14 +432,14 @@ object PiRpc {
         runCatching {
             proc.errorStream.bufferedReader(StandardCharsets.UTF_8).forEachLine {
                 noteStderr(it)
-                Log.w(TAG, "stderr: $it")
+                PientLog.w(TAG, "stderr: $it")
             }
         }
     }
 
     private fun dispatch(text: String) {
         val obj = runCatching { JSONObject(text) }.getOrElse {
-            Log.w(TAG, "非 JSON 行：${text.take(200)}")
+            PientLog.w(TAG, "非 JSON 行：${text.take(200)}")
             return
         }
         if (obj.optString("type") == "response") {

@@ -2,7 +2,7 @@ package com.pient.app.runtime
 
 import com.pient.app.data.i18n.L
 import android.content.Context
-import android.util.Log
+import com.pient.app.data.PientLog
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -112,10 +112,10 @@ object EnvProvision {
             |
             """.trimMargin(),
         )
-        Log.i(TAG, "apt 镜像源已写入：${mirror.name} → $uri（本机架构 ${PiRuntime.hostMachine()}）")
+        PientLog.i(TAG, "apt 镜像源已写入：${mirror.name} → $uri（本机架构 ${PiRuntime.hostMachine()}）")
         true
     }.getOrElse {
-        Log.w(TAG, "apt 镜像源写入失败：${it.message}")
+        PientLog.w(TAG, "apt 镜像源写入失败：${it.message}")
         false
     }
 
@@ -202,7 +202,7 @@ object EnvProvision {
             running = false
             step = ""
             lastExitCode = code
-            Log.i(TAG, "环境配置脚本结束，退出码 $code")
+            PientLog.i(TAG, "环境配置脚本结束，退出码 $code")
         }
         return session
     }

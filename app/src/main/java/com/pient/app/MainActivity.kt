@@ -1,5 +1,7 @@
 package com.pient.app
 
+import com.pient.app.data.PientLog
+
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
@@ -42,7 +44,7 @@ class MainActivity : ComponentActivity() {
         val panel = intent?.getStringExtra(PiKeepAliveService.EXTRA_PANEL) ?: return
         intent.removeExtra(PiKeepAliveService.EXTRA_PANEL)
         PientRuntime.pendingPanel = panel
-        android.util.Log.i("PientMain", "收到面板请求：$panel")
+        PientLog.i("PientMain", "收到面板请求：$panel")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,6 +54,13 @@ class MainActivity : ComponentActivity() {
 
         // 恢复持久化主题（必须在 setContent 前，否则首帧用默认暗色渲染再闪切）
         SettingsStore.load(this)
+
+        // 应用日志（2026-09-17）：此后所有 PientLog.* 同时落 files/logs/pient.log
+        //（「设置 → 数据与权限 → 应用日志管理」导出的就是它）+ 崩溃栈自动记录。
+        // 放在 SettingsStore.load 之后：启动标记那行要写真实档位（load 前读到的还是默认值）；
+        // 放在解包 / 前台服务 / 回桥之前：后面几步的日志都要进文件。
+        PientLog.install(this)
+
         // 后台常驻通知（行为设置，2026-09-16）：开着就在每次启动时把常驻档重新挂上
         //（进程被杀 / 换包后常驻通知要自己回来；关着则什么都不做，维持按需前台化）。
         if (SettingsStore.residentNotification) {
