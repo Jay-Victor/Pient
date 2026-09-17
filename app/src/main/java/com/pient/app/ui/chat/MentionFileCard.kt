@@ -20,7 +20,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -293,11 +292,11 @@ fun MentionFileCard(
     query: String = "",
     modifier: Modifier = Modifier,
 ) {
-    val maxCardHeight = (LocalConfiguration.current.screenHeightDp * 0.40f).dp
+    val maxCardHeight = pickerCardMaxHeight()
     PientPanel(
         modifier = modifier
             .padding(start = 6.dp, bottom = bottomOffset)
-            .width(268.8.dp) // 与右下浮层同宽；左对齐、左距屏 6dp 对称
+            .width(InputPickerCardWidth) // 与右下浮层同宽；左对齐、左距屏 6dp 对称
             .heightIn(max = maxCardHeight),
         shape = RoundedCornerShape(12.dp),
     ) {
