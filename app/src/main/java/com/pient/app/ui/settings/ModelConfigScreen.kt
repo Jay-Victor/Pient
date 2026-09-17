@@ -35,6 +35,7 @@ import androidx.compose.material.icons.outlined.Api
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Compress
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Dns
@@ -89,6 +90,7 @@ import com.pient.app.data.ProviderCatalog
 import com.pient.app.data.ProviderConfig
 import com.pient.app.data.ReasoningFormat
 import com.pient.app.data.ProviderInfo
+import com.pient.app.runtime.PiRpc
 import com.pient.app.ui.components.DividerLine
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.components.PientDialog
@@ -98,7 +100,18 @@ import com.pient.app.ui.components.SectionHeader
 import com.pient.app.ui.theme.LocalPientIsDark
 import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+
+/**
+ * 逐模型测试的一行（[ok] = null 表示还没测到）。
+ */
+private data class TestRow(val model: String, val ok: Boolean?, val detail: String? = null)
+
+/** 逐模型测试的并发批大小（全串行太慢、全并发容易被服务商限流 → 429 会误判成「模型不可用」） */
+private const val TEST_BATCH = 3
 
 /**
  * 服务商与模型配置（2026-08-30 整体重制；2026-09-09 真实化）：
@@ -140,6 +153,11 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     var modelPickerOpen by remember { mutableStateOf(false) }
     var keyVisible by remember { mutableStateOf(false) }       // API密钥显隐
     var testState by remember { mutableStateOf<String?>(null) } // 测试连接/刷新反馈
+    /** 反馈口径：true = 全通过（主色）/ false = 失败（error 色）/ null = 进行中或中性提示 */
+    var testOk by remember { mutableStateOf<Boolean?>(null) }
+    /** 逐模型测试结果（null = 本次没跑逐模型测试；列表非空即渲染明细行） */
+    var testRows by remember { mutableStateOf<List<TestRow>?>(null) }
+    var testing by remember { mutableStateOf(false) }          // 逐模型测试进行中（防重入）
     var refreshing by remember { mutableStateOf(false) }       // 模型列表刷新中
     var reasoningFormatOpen by remember { mutableStateOf(false) } // 思考参数格式下拉
     var apiTypeOpen by remember { mutableStateOf(false) }        // API 类型下拉（pi-ai 的 provider.api）
@@ -171,6 +189,13 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             )
         }
         PiAgentFiles.writeSettings(context, AiConfigStore.configs.values.firstOrNull())
+        // **即时生效**（2026-09-17）：pi 的 settings.json 只在进程启动时读一次，运行中的会话
+        // 不会察觉我们刚写的文件 —— 官方给的热改入口就是 RPC `set_auto_compaction`
+        // （`PiRpc.setAutoCompaction`，原先全仓无调用点）。通道没起来就不发（下次启动自然读到）。
+        // 另两参（reserve/keep）pi 没有对应的 RPC，仍需等通道重启才生效 —— 页面 hint 已说明。
+        if (enabled != null && PiRpc.usable()) {
+            scope.launch { PiRpc.setAutoCompaction(enabled) }
+        }
     }
 
     /**
@@ -190,6 +215,8 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
         }
         selectedId = id
         testState = null
+        testOk = null
+        testRows = null
         providerPickerOpen = false
     }
 
@@ -199,6 +226,8 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
         AiConfigStore.configs.remove(id)
         selectedId = AiConfigStore.configs.keys.firstOrNull()
         testState = null
+        testOk = null
+        testRows = null
         confirmDeleteOpen = false
     }
 
@@ -226,6 +255,74 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             } catch (e: Exception) {
                 onMessage(L.models.connectFailedDetail(e.message ?: L.common.unknownError))
             }
+        }
+    }
+
+    /**
+     * **「测试连接」= 模型列表里的每一个模型都真发一次推理请求**（2026-09-17 用户口径）。
+     *
+     * 旧实现只 GET `/models`（= 只证明「能列模型」），套餐不含某模型 / 模型名写错 / 权限不对
+     * 一律测不出来 —— 那不算「可用」。现在逐模型发 `max_tokens=16` 的最小请求，逐行给结果。
+     *
+     * 三个分支：
+     * ① 模型列表为空 → 退回老的「列模型」探活，并如实说明没逐一测；
+     * ② API 类型是应用测不了的（google / bedrock / mistral / pi-messages）→ 如实上报，
+     *    **不假装失败**（这些协议的应用内请求构造不在本轮范围内）；
+     * ③ 有模型 + 协议可测 → 每批 3 个并发（全串行太慢；全并发容易被限流 429 误判成不可用）。
+     */
+    fun startTest() {
+        val cur = cfg ?: return
+        testRows = null
+        if (cur.endpoint.isBlank()) {
+            testState = L.models.needEndpoint
+            testOk = false
+            return
+        }
+        if (cur.apiKey.isBlank()) {
+            testState = L.models.needApiKey
+            testOk = false
+            return
+        }
+        val entries = cur.models
+        if (AiBackend.chatProtocol(cur) == AiBackend.ChatProtocol.UNSUPPORTED) {
+            testState = L.models.modelsTestUnsupported(
+                cur.apiType.trim().ifBlank { ProviderCatalog.apiOf(cur.providerId) },
+            )
+            testOk = null
+            return
+        }
+        if (entries.isEmpty()) {
+            testState = L.models.testing
+            testOk = null
+            callModels { models ->
+                testState = if (models.isEmpty()) L.models.connectionOkNoModels else L.models.connectionOk
+                testOk = true
+                chatState.aiConfigured = true
+            }
+            return
+        }
+        if (testing) return
+        testing = true
+        testState = L.models.testing
+        testOk = null
+        testRows = entries.map { TestRow(it.substringBefore('=').trim(), null) }
+        scope.launch {
+            val done = ArrayList<TestRow>(entries.size)
+            for (chunk in entries.chunked(TEST_BATCH)) {
+                val got = coroutineScope {
+                    chunk.map { e -> async { AiBackend.testModel(cur, e) } }.awaitAll()
+                }
+                got.forEach { p -> done += TestRow(p.model, p.ok, p.detail) }
+                // 已测的在下、未测的保持转圈（列表顺序 = 用户填的顺序）
+                testRows = done + entries.drop(done.size).map { TestRow(it.substringBefore('=').trim(), null) }
+            }
+            testing = false
+            val ok = done.count { it.ok == true }
+            testState = if (ok == done.size) L.models.modelsAllOk(done.size)
+            else L.models.modelsTestPartial(ok, done.size)
+            testOk = ok == done.size
+            // 「AI 配置完成」= 至少一个模型真跑通（比旧口径「能列模型」严格；首启引导第二步靠它）
+            if (ok > 0) chatState.aiConfigured = true
         }
     }
 
@@ -339,6 +436,8 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                         onClick = {
                                             selectedId = id
                                             testState = null
+                                            testOk = null
+                                            testRows = null
                                             configuredMenuOpen = false
                                         },
                                     )
@@ -362,15 +461,8 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 ActionChipButton(
                                     icon = Icons.Outlined.Dns, // 对齐 Operit ModelConfigScreen 测试连接按钮（Icons.Default.Dns）
                                     text = L.models.testConnection,
-                                    onClick = {
-                                        testState = L.models.testing
-                                        callModels { models ->
-                                            testState = if (models.isEmpty()) L.models.connectionOkNoModels
-                                            else L.models.connectionOk
-                                            // 连接成功 = AI 配置完成（2026-09-08：聊天页首次引导第二步）
-                                            chatState.aiConfigured = true
-                                        }
-                                    },
+                                    // 2026-09-17：改为**逐一测试模型列表里的每个模型**（见 startTest）
+                                    onClick = { startTest() },
                                 )
                             }
                         }
@@ -378,16 +470,63 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                             Text(
                                 testState.orEmpty(),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = when {
-                                    testState == L.models.connectionOk || testState == L.models.connectionOkNoModels ->
-                                        MaterialTheme.colorScheme.primary
-                                    testState?.startsWith(L.models.connectFailed) == true ||
-                                        testState?.startsWith(L.models.fillFirstPrefix) == true ->
-                                        MaterialTheme.colorScheme.error
-                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                // 颜色只认 testOk（不再按文案前缀判：文案随语言变，前缀判法会失效）
+                                color = when (testOk) {
+                                    true -> MaterialTheme.colorScheme.primary
+                                    false -> MaterialTheme.colorScheme.error
+                                    null -> MaterialTheme.colorScheme.onSurfaceVariant
                                 },
                                 modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
                             )
+                        }
+                        // 逐模型明细：执行中就渲染（未测到的行是转圈），测完每行给 ✓ / ✕ + 失败原因
+                        testRows?.let { rows ->
+                            Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp)) {
+                                for (r in rows) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                    ) {
+                                        Box(Modifier.size(14.dp), contentAlignment = Alignment.Center) {
+                                            when (r.ok) {
+                                                null -> CircularProgressIndicator(
+                                                    modifier = Modifier.size(11.dp),
+                                                    strokeWidth = 2.dp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                                true -> Icon(
+                                                    Icons.Outlined.Check, null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(14.dp),
+                                                )
+                                                false -> Icon(
+                                                    Icons.Outlined.Close, null,
+                                                    tint = MaterialTheme.colorScheme.error,
+                                                    modifier = Modifier.size(14.dp),
+                                                )
+                                            }
+                                        }
+                                        Column(Modifier.weight(1f).padding(start = 6.dp)) {
+                                            Text(
+                                                r.model,
+                                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFont),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            if (r.detail != null) {
+                                                Text(
+                                                    r.detail,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.error,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.padding(top = 1.dp),
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -558,7 +697,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 onValueChange = { v ->
                                     updateConfig { it.copy(ctxLenK = v.filter { c -> c.isDigit() }) }
                                 },
-                                placeholder = "200",
+                                placeholder = "128",
                             )
                             DividerLine()
                             // 3.2 最大输出长度
@@ -569,7 +708,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 onValueChange = { v ->
                                     updateConfig { it.copy(maxOutK = v.filter { c -> c.isDigit() }) }
                                 },
-                                placeholder = "64",
+                                placeholder = "16",
                             )
                         }
                     }
@@ -671,12 +810,29 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                     Column {
                         SectionHeader(L.models.paramSettings, icon = Icons.Outlined.Tune)
                         ConfigCard {
+                            // 该 API 类型下 pi 不转发采样参数（2026-09-17）：如实说明 + 三个开关置灰。
+                            // 口径：只有 openai 系（completions / responses / azure-responses）会把
+                            // `models[].samplingParams` 写进请求体；anthropic / google / bedrock / mistral /
+                            // codex 路径不读它（见 AiBackend.samplingSupported）。配的值仍会写入 models.json，
+                            // 换成 openai 兼容的 API 类型后即生效。
+                            val samplingOk = AiBackend.samplingSupported(cfg)
+                            if (!samplingOk) {
+                                Text(
+                                    L.models.samplingUnsupported(
+                                        cfg.apiType.trim().ifBlank { ProviderCatalog.apiOf(cfg.providerId) },
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp),
+                                )
+                            }
                             // 4.1 温度
                             ParamBlock(
                                 label = L.models.temperature,
                                 hint = L.models.temperatureHint,
                                 enabled = cfg.tempEnabled,
                                 onToggle = { updateConfig { it.copy(tempEnabled = !it.tempEnabled) } },
+                                switchEnabled = samplingOk,
                             )
                             if (cfg.tempEnabled) {
                                 ParamInputField(
@@ -693,6 +849,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 hint = L.models.topKHint,
                                 enabled = cfg.topKEnabled,
                                 onToggle = { updateConfig { it.copy(topKEnabled = !it.topKEnabled) } },
+                                switchEnabled = samplingOk,
                             )
                             if (cfg.topKEnabled) {
                                 ParamInputField(
@@ -709,6 +866,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 hint = L.models.topPHint,
                                 enabled = cfg.topPEnabled,
                                 onToggle = { updateConfig { it.copy(topPEnabled = !it.topPEnabled) } },
+                                switchEnabled = samplingOk,
                             )
                             if (cfg.topPEnabled) {
                                 ParamInputField(
@@ -970,6 +1128,8 @@ private fun ParamBlock(
     hint: String,
     enabled: Boolean,
     onToggle: () -> Unit,
+    /** 开关本身是否可操作（false = 该 API 类型下 pi 不转发这类参数 → 置灰，不摆假控件） */
+    switchEnabled: Boolean = true,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -981,17 +1141,18 @@ private fun ParamBlock(
             Text(
                 label,
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (switchEnabled) 1f else 0.5f),
             )
             Text(
                 hint,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (switchEnabled) 0.8f else 0.4f),
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
         Switch(
             checked = enabled,
+            enabled = switchEnabled,
             onCheckedChange = { onToggle() },
             colors = SwitchDefaults.colors(
                 checkedTrackColor = MaterialTheme.colorScheme.primary,

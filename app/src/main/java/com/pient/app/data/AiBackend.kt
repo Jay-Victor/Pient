@@ -46,6 +46,17 @@ object AiBackend {
 
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
+    /**
+     * 「测试连接」逐一测模型专用客户端：诊断场景要**快速失败** —— 不能沿用对话那套
+     * 300s 读超时（十几个模型串行跑会挂上几十分钟、界面一直转圈）。
+     */
+    private val probeClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .callTimeout(40, TimeUnit.SECONDS)
+        .build()
+
     /** 端点是否走 Anthropic Messages 协议（其余一律 OpenAI chat/completions） */
     fun isAnthropicProtocol(endpoint: String): Boolean {
         val e = endpoint.trim().trimEnd('/')
@@ -94,6 +105,94 @@ object AiBackend {
                 }
                 out
             }
+        }
+    }
+
+    // ───────────────────────── 模型逐一测试（配置页「测试连接」） ─────────────────────────
+
+    /**
+     * 端点走哪套对话协议（决定「逐一测试」怎么发请求）。
+     *
+     * **判定顺序照 pi 的实际行为**：pi 严格按 `models[].api` / `providers.<id>.api` 发请求，
+     * 所以先看页面上的「API 类型」（空 = pi 的事实表 [ProviderCatalog.apiOf]）；
+     * 只有该类型应用测不了时（google / bedrock / mistral / pi-messages），才回落到
+     * 「端点含 anthropic」这条老判据；都不匹配 = 应用内无法逐一测试（如实上报，不假装失败）。
+     */
+    enum class ChatProtocol { OPENAI, ANTHROPIC, UNSUPPORTED }
+
+    fun chatProtocol(cfg: ProviderConfig): ChatProtocol {
+        val api = cfg.apiType.trim().ifBlank { ProviderCatalog.apiOf(cfg.providerId) }
+        return when {
+            api == "anthropic-messages" -> ChatProtocol.ANTHROPIC
+            api.startsWith("openai") || api == "azure-openai-responses" -> ChatProtocol.OPENAI
+            isAnthropicProtocol(cfg.endpoint) -> ChatProtocol.ANTHROPIC
+            else -> ChatProtocol.UNSUPPORTED
+        }
+    }
+
+    /** 单个模型的测试结果（[ok] = 真发过一次推理请求并拿到 2xx；[detail] = 失败原因） */
+    data class ModelProbe(val model: String, val ok: Boolean, val detail: String? = null)
+
+    /** pi 把 `models[].samplingParams` 写进请求体的 API 类型（其余路径不读，见 [samplingSupported]） */
+    private val SAMPLING_APIS = setOf("openai-completions", "openai-responses", "azure-openai-responses")
+
+    /**
+     * pi 会不会把 `models[].samplingParams`（温度 / Top-K / Top-P）真的写进请求体。
+     *
+     * 口径（2026-09-17 读 pi-0.85.1 源码）：只有 **openai-completions / openai-responses /
+     * azure-openai-responses** 三条路径 `Object.assign(params, options.samplingParams)`；
+     * anthropic-messages / google(±vertex) / bedrock / mistral / openai-codex-responses 虽然都调
+     * `buildBaseOptions`（把 samplingParams 并进 options），但请求体构造里**不读它** ——
+     * 配了也不生效。页面据此置灰并说明，不摆「看着能调、其实不转发」的假旋钮。
+     */
+    fun samplingSupported(cfg: ProviderConfig): Boolean {
+        val api = cfg.apiType.trim().ifBlank { ProviderCatalog.apiOf(cfg.providerId) }
+        return api in SAMPLING_APIS
+    }
+
+    /** 探测请求的输出上限：只要「服务端认这个模型 + 鉴权通过」，不需要真回答 */
+    private const val PROBE_MAX_TOKENS = 16
+
+    /**
+     * 对**单个模型**发一条极短的推理请求（`max_tokens=16`）。
+     *
+     * 为什么不能只 GET `/models`（2026-09-17 用户口径）：那条只证明「能列模型」——
+     * 套餐不含该模型、模型名写错、权限不对都发现不了。逐模型真发一次才叫「可用」。
+     *
+     * URL 口径**逐字照 pi**（pi 把 baseUrl 原样交给官方 SDK，由 SDK 拼路径）：
+     * openai 兼容 = `{endpoint}/chat/completions`、anthropic = `{endpoint}/v1/messages`。
+     */
+    suspend fun testModel(cfg: ProviderConfig, modelEntry: String): ModelProbe {
+        // 页面语法 `id=别名`：发给服务商的是 id（别名只进 pi 的 models[].name）
+        val id = modelEntry.substringBefore('=').trim()
+        val base = cfg.endpoint.trim().trimEnd('/')
+        val body = JSONObject()
+            .put("model", id)
+            .put("max_tokens", PROBE_MAX_TOKENS)
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "ping")))
+        return try {
+            val req = when (chatProtocol(cfg)) {
+                ChatProtocol.ANTHROPIC -> Request.Builder()
+                    .url("$base/v1/messages")
+                    .post(body.toString().toRequestBody(JSON))
+                    .apply { authHeaders(cfg, this) }
+                    .build()
+                else -> Request.Builder()
+                    .url("$base/chat/completions")
+                    // stream=false：非流式才是一次完整请求-响应，SSE 断在半路不好判
+                    .post(body.put("stream", false).toString().toRequestBody(JSON))
+                    .apply { authHeaders(cfg, this) }
+                    .build()
+            }
+            val resp = execute(req, probeClient)
+            withContext(Dispatchers.IO) {
+                resp.use { r ->
+                    if (r.isSuccessful) ModelProbe(id, true)
+                    else ModelProbe(id, false, httpError(r.code, r.body?.string().orEmpty()))
+                }
+            }
+        } catch (e: Exception) {
+            ModelProbe(id, false, e.message ?: L.common.unknownError)
         }
     }
 
@@ -227,7 +326,7 @@ object AiBackend {
         return "HTTP $code${msg?.let { "：$it" } ?: ""}"
     }
 
-    private suspend fun execute(request: Request): Response =
+    private suspend fun execute(request: Request, client: OkHttpClient = this.client): Response =
         suspendCancellableCoroutine { cont ->
             val call = client.newCall(request)
             cont.invokeOnCancellation { call.cancel() }

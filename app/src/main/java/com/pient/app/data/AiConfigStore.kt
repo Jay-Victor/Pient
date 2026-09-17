@@ -30,10 +30,16 @@ data class ProviderConfig(
     val apiType: String = "",
     /** 模型列表（英文分号分隔，与配置页输入框同口径） */
     val modelList: String = "",
-    /** 上下文长度（K Tokens；字符串承载输入框态） */
-    val ctxLenK: String = "200",
-    /** 最大输出长度（K Tokens） */
-    val maxOutK: String = "64",
+    /**
+     * 上下文长度（K Tokens；字符串承载输入框态）。
+     *
+     * **默认空**（2026-09-17 改）：空 = 不写 pi 的 `models[].contextWindow`，由 pi 用自己的
+     * 默认值（未写时 128000）。旧默认 "200" 会把每个模型默默写成 200K，真实窗口小的模型
+     * 会被 pi 当成 200K（压缩触发过晚、服务端可能报上下文超限）。
+     */
+    val ctxLenK: String = "",
+    /** 最大输出长度（K Tokens）；空 = 不写 `models[].maxTokens`（pi 默认 16384） */
+    val maxOutK: String = "",
     val tempEnabled: Boolean = false,
     val tempValue: String = "1.0",
     val topKEnabled: Boolean = false,
@@ -152,8 +158,8 @@ object AiConfigStore {
                 endpoint = o.optString("endpoint"),
                 apiKey = o.optString("apiKey"),
                 modelList = o.optString("modelList"),
-                ctxLenK = o.optString("ctxLenK", "200"),
-                maxOutK = o.optString("maxOutK", "64"),
+                ctxLenK = o.optString("ctxLenK", ""),
+                maxOutK = o.optString("maxOutK", ""),
                 tempEnabled = o.optBoolean("tempEnabled", false),
                 tempValue = o.optString("tempValue", "1.0"),
                 topKEnabled = o.optBoolean("topKEnabled", false),

@@ -229,9 +229,16 @@ object PiAgentFiles {
         return m
     }
 
-    /** 思考写法 → pi 的 `compat.thinkingFormat`（拿不准的返回 null = 不写这个键） */
+    /** 思考写法 → pi 的 `compat.thinkingFormat`（拿不准的返回 null = 不写这个键）
+     *
+     *  `OPENAI → "openai"`（2026-09-17 修）：pi 的 models.json schema 里 thinkingFormat 的合法字面量
+     *  是 `openai`；旧的 `reasoning_effort` 只在 pi 文档里出现过、代码枚举里没有。实测（用随包 pi
+     *  的 `dist/core/model-config.js` + typebox 1.3.7 跑真校验）它**碰巧也能过**——compat 是三选一
+     *  union 且不禁止额外键，怪值落进「OpenAI 风格」那末支，效果与 `openai` 相同；但那是运气，
+     *  改用规范字面量。
+     */
     private fun reasoningCompat(format: ReasoningFormat): Map<String, Any>? = when (format) {
-        ReasoningFormat.OPENAI -> mapOf("thinkingFormat" to "reasoning_effort")
+        ReasoningFormat.OPENAI -> mapOf("thinkingFormat" to "openai")
         ReasoningFormat.DEEPSEEK -> mapOf("thinkingFormat" to "deepseek")
         ReasoningFormat.ZAI -> mapOf("thinkingFormat" to "zai")
         ReasoningFormat.QWEN -> mapOf("thinkingFormat" to "qwen")
@@ -248,7 +255,8 @@ object PiAgentFiles {
     private fun reasoningFormatOf(compat: JSONObject?): ReasoningFormat {
         val wire = compat?.optString("thinkingFormat", "").orEmpty()
         return when (wire) {
-            "reasoning_effort" -> ReasoningFormat.OPENAI
+            // 旧版 Pient 写过 `reasoning_effort`（读侧继续认，避免老配置被降级成 AUTO）
+            "openai", "reasoning_effort" -> ReasoningFormat.OPENAI
             "deepseek" -> ReasoningFormat.DEEPSEEK
             "zai" -> ReasoningFormat.ZAI
             "qwen" -> if (compat?.has("thinkingTokenBudgetField") == true) {
@@ -275,7 +283,15 @@ object PiAgentFiles {
         return ids.joinToString(";")
     }
 
-    private fun kTokens(value: Int): String = if (value > 0) (value / 1000).toString() else "200"
+    /**
+     * 模型条目里的 tokens → 页面输入框口径（**0/缺省 = 空串**，2026-09-17 改）。
+     *
+     * 改理由：旧版回退 "200"/"64" 会让「页面上没填过」的模型被**默默写成 200K 上下文 /
+     * 64K 输出**（保存一次即落盘），而真实窗口小的模型会被 pi 当成 200K —— 压缩触发过晚、
+     * 有服务端上下文超限的风险。现在的口径：**空 = 不写该键**，由 pi 用它自己的默认
+     * （models.json 未写时 pi 取 contextWindow 128000 / maxTokens 16384）。
+     */
+    private fun kTokens(value: Int): String = if (value > 0) (value / 1000).toString() else ""
 
     private fun readJson(f: File): JSONObject? = runCatching {
         if (f.isFile) JSONObject(f.readText()) else null
