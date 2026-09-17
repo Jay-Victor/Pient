@@ -212,6 +212,7 @@ object PtChat : ChatStrings {
     override val levelUnsupported: String = "O provedor atual não oferece ajuste de nível (apenas ligado / desligado)"
     override val thinkingSingleLevel: String = "Este modelo tem apenas este nível de raciocínio"
     override val thinkingAlwaysOn: String = "Este modelo não permite desativar o raciocínio (pi o mantém ativo)"
+    override val thinkingEffortNotSent: String = "Este modelo é apenas ativado/desativado — o nível não é enviado ao provedor"
     override val thinkingUnsupportedModel: String = "Este modelo não suporta raciocínio (o pi só oferece off)"
     override val noModelsAvailable: String = "Nenhum modelo disponível · Adicione um provedor e preencha a lista de modelos em \"Provedores e modelos\""
     override val manageModels: String = "Gerenciar modelos"

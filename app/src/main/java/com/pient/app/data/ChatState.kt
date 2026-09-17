@@ -2472,13 +2472,21 @@ class ChatState {
      *
      * 这样模型面板切模型时**立刻**按新模型的档位表重画，不再出现「明明 3 档却画回退表 4 档」。
      */
-    fun selectedThinkingLevels(): List<String>? {
+    fun selectedThinkingInfo(): ThinkingInfo? {
         val ctx = AppCtx.get() ?: return null
         val m = selectedModel ?: return null
         val c = AiConfigStore.configs[m.provider] ?: return null
         val entry = m.name.ifBlank { m.id.substringAfter('/') }
-        return runCatching { PiAgentFiles.effectiveThinkingLevels(ctx, c, entry) }.getOrNull()
+        return runCatching {
+            ThinkingInfo(
+                levels = PiAgentFiles.effectiveThinkingLevels(ctx, c, entry),
+                effortSupported = PiAgentFiles.effectiveEffortSupported(ctx, c, entry),
+            )
+        }.getOrNull()
     }
+
+    /** 面板要的两件事：该模型有哪些档位、以及**档位会不会真发上线** */
+    data class ThinkingInfo(val levels: List<String>, val effortSupported: Boolean)
 
     /**
      * 该发给 pi 的档位：关思考 = `off`，开 = 偏好本身（偏好就是 pi 的档位字面量，**不用再映射**）。

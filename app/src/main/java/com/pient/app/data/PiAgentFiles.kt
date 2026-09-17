@@ -79,8 +79,16 @@ object PiAgentFiles {
             pj.put("api", c.apiType.trim().ifBlank { ProviderCatalog.apiOf(c.providerId) })
             // radius = pi 的 OAuth 网关：provider 级要写 `oauth` 标记（docs/models.md「Provider Configuration」）
             if (c.providerId == "radius") pj.put("oauth", "radius")
-            reasoningCompat(c.reasoningFormat)?.let { compat ->
-                pj.put("compat", JSONObject(compat))
+            // 服务商级 compat：**目录里 pi 自己给了逐模型 thinkingFormat 时不写** ——
+            // provider 级 compat 在 pi 的 mergeCompat 里排在模型的后面（会盖掉逐模型的正确写法）。
+            // 实测：moonshotai 的 k3 在目录里是 openai 写法（K3 官方明确「不应传 thinking 参数」），
+            // 应用的服务商级 deepseek 写法会把它带偏。
+            val mine = c.reasoningFormat.name.lowercase()
+            val piFmts = catalogModels(context)[c.providerId]?.values?.mapNotNull { it.thinkingFormat }?.distinct().orEmpty()
+            if (piFmts.none { it != mine }) {
+                reasoningCompat(c.reasoningFormat)?.let { compat ->
+                    pj.put("compat", JSONObject(compat))
+                }
             }
             // 分流（2026-09-17）：pi 内置目录里**有**这个 id → 写 `modelOverrides[id]`（逐字段覆盖，
             // 目录里的 `thinkingLevelMap`/`cost`/`name`/`api`/`baseUrl` 全部保住）；目录里没有
@@ -93,10 +101,12 @@ object PiAgentFiles {
             val known = catalogModelIds(context)[c.providerId].orEmpty()
             c.models.forEach { entry ->
                 val id = entry.substringBefore('=').trim()
+                // 这个模型在目录里有没有 pi 自己给的写法：有 ⇒ 应用不写模型级 compat
+                val piFmt = catalogModels(context)[c.providerId]?.get(id)?.thinkingFormat != null
                 if (id.isNotEmpty() && id in known) {
-                    overrides.put(id, overrideJson(entry, c, oldOverrides))
+                    overrides.put(id, overrideJson(entry, c, oldOverrides, !piFmt))
                 } else {
-                    models.put(modelJson(entry, c, oldModels))
+                    models.put(modelJson(entry, c, oldModels, !piFmt))
                 }
             }
             if (models.length() > 0) pj.put("models", models)
@@ -233,8 +243,26 @@ object PiAgentFiles {
         "name", "contextWindow", "maxTokens", "input", "reasoning", "samplingParams", "compat",
     )
 
-    /** 目录里某个模型的档位相关事实（pi 的 `getSupportedThinkingLevels` 只看这两样） */
-    data class CatalogModel(val reasoning: Boolean, val thinkingLevelMap: Map<String, String?>)
+    /** 目录里某个模型的档位相关事实（pi 的 `getSupportedThinkingLevels` 只看前两样） */
+    data class CatalogModel(
+        val reasoning: Boolean,
+        val thinkingLevelMap: Map<String, String?>,
+        /**
+         * `compat.supportsReasoningEffort`：**false ⇒ 档位不上线**（pi 只发思考开关，不发档位）。
+         * null = 目录没写，按 pi 默认（true）处理。
+         */
+        val supportsEffort: Boolean?,
+        /** `compat.thinkingFormat`：目录自己给的写法。非 null 时**应用不要盖它**（见 writeModels）。 */
+        val thinkingFormat: String?,
+    )
+
+    /** 目录条目 → [CatalogModel]（两个来源共用） */
+    private fun catalogModelOf(m: JSONObject): CatalogModel = CatalogModel(
+        reasoning = m.optBoolean("reasoning", false),
+        thinkingLevelMap = thinkingMapOf(m),
+        supportsEffort = m.optJSONObject("compat")?.let { if (it.has("supportsReasoningEffort")) it.optBoolean("supportsReasoningEffort") else null },
+        thinkingFormat = m.optJSONObject("compat")?.optString("thinkingFormat", "")?.takeIf { it.isNotBlank() },
+    )
 
     /** pi 内置目录（进程内缓存一次）：providerId → modelId → 事实 */
     private var catalogCache: Map<String, Map<String, CatalogModel>>? = null
@@ -272,7 +300,7 @@ object PiAgentFiles {
                     for (id in group.keys()) {
                         val m = group.optJSONObject(id) ?: continue
                         if (id.isBlank()) continue
-                        models[id] = CatalogModel(m.optBoolean("reasoning", false), thinkingMapOf(m))
+                        models[id] = catalogModelOf(m)
                     }
                 }
                 if (models.isNotEmpty()) out[f.name.removeSuffix(".json")] = models
@@ -292,7 +320,7 @@ object PiAgentFiles {
                     val m = arr.optJSONObject(i) ?: continue
                     val id = m.optString("id", "").trim()
                     if (id.isEmpty()) continue
-                    merged[id] = CatalogModel(m.optBoolean("reasoning", false), thinkingMapOf(m))
+                    merged[id] = catalogModelOf(m)
                     storeCount++
                 }
                 if (merged.isNotEmpty()) out[pid] = merged
@@ -342,7 +370,22 @@ object PiAgentFiles {
             base = emptyMap()
         }
         val map = HashMap<String, String?>(base).also { it.putAll(catalogFixOf(c, id)) }
-        return levelsOf(reasoning, map)
+        val levels = levelsOf(reasoning, map)
+        // 目录明说「档位不上线」（`compat.supportsReasoningEffort=false`）⇒ 面板只给「开 / 关 + 一个档」，
+        // 不摆有刻度却没效果的假档位。官方依据：Kimi「kimi-k2.6 / kimi-k2.7-code：reasoning_effort Not supported」；
+        // Z.ai「reasoning_effort only supported by GLM-5.2 and above」（GLM-4.7 因此只支持开关）。
+        if (cat?.supportsEffort == false) {
+            val only = levels.lastOrNull { it != "off" } ?: "high"
+            return if (levels.contains("off")) listOf("off", only) else listOf(only)
+        }
+        return levels
+    }
+
+    /** 该模型的档位会不会真发给服务商（目录没写 = 按 pi 默认 true；自建模型 = 按应用自己的写法，算支持） */
+    fun effectiveEffortSupported(context: Context, c: ProviderConfig, entry: String): Boolean {
+        val id = entry.substringBefore('=').trim()
+        val cat = catalogModels(context)[c.providerId]?.get(id) ?: return true
+        return cat.supportsEffort ?: true
     }
 
     /** `thinkingLevelMap` 解析：键保留、值 `null` 记成 null（= 砍掉该档），缺席即「没写」 */
@@ -384,13 +427,18 @@ object PiAgentFiles {
      * 模型条目语法：`id` 或 **`id=别名`**（别名写进 pi 的 `models[].name` —— 它用作 `--model` 匹配
      * 与副标题展示；`id` 本身才是发给服务商的东西，两者不要混）。
      */
-    private fun modelJson(entry: String, c: ProviderConfig, oldModels: JSONArray? = null): JSONObject {
+    private fun modelJson(
+        entry: String,
+        c: ProviderConfig,
+        oldModels: JSONArray? = null,
+        writeCompat: Boolean = true,
+    ): JSONObject {
         val id = entry.substringBefore('=').trim()
         val old = oldModels?.let { arr ->
             (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
                 .firstOrNull { it.optString("id").trim() == id }
         }
-        val m = modelFieldsJson(entry, c, old, MANAGED_MODEL_KEYS)
+        val m = modelFieldsJson(entry, c, old, MANAGED_MODEL_KEYS, writeCompat)
         m.put("id", id)
         return m
     }
@@ -399,10 +447,15 @@ object PiAgentFiles {
      * 目录里已有的模型 → `modelOverrides[id]` 的内容：与 [modelJson] 同一套字段，但**不写 id**
      * （id 是对象键）、也不写 api / baseUrl（这两样由目录那份提供）。
      */
-    private fun overrideJson(entry: String, c: ProviderConfig, oldOverrides: JSONObject?): JSONObject {
+    private fun overrideJson(
+        entry: String,
+        c: ProviderConfig,
+        oldOverrides: JSONObject?,
+        writeCompat: Boolean = true,
+    ): JSONObject {
         val id = entry.substringBefore('=').trim()
         val old = oldOverrides?.optJSONObject(id)
-        val m = modelFieldsJson(entry, c, old, MANAGED_OVERRIDE_KEYS)
+        val m = modelFieldsJson(entry, c, old, MANAGED_OVERRIDE_KEYS, writeCompat)
         // 目录勘误（见 [CATALOG_FIXES]）：pi 目录里写错的档位表，用覆盖层就地修正。
         // pi 的 applyModelOverride 对 thinkingLevelMap 是**浅合并**（{...目录, ...覆盖}），
         // 所以只写要改的那几个键：字符串 = 补/改一档，JSON null = 砍一档。
@@ -473,6 +526,7 @@ object PiAgentFiles {
         c: ProviderConfig,
         old: JSONObject?,
         managed: Set<String>,
+        writeCompat: Boolean,
     ): JSONObject {
         val id = entry.substringBefore('=').trim()
         val alias = entry.substringAfter('=', "").trim()
@@ -515,7 +569,7 @@ object PiAgentFiles {
         val reasoningOn = s.reasoning ?: (fmt != ReasoningFormat.NONE)
         if (reasoningOn) {
             m.put("reasoning", true)
-            if (fmt != c.reasoningFormat) {
+            if (fmt != c.reasoningFormat && writeCompat) {
                 // 并入（不是覆盖）：旧 compat 里保留下来的键不能丢
                 reasoningCompat(fmt)?.let { compat ->
                     val merged = m.optJSONObject("compat")?.let { JSONObject(it.toString()) } ?: JSONObject()

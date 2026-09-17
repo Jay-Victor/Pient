@@ -99,11 +99,12 @@ fun ModelSelectorSheet(
         val piLevels = chatState.piThinkingLevels
         val piNow = chatState.piThinkingLevel
         // 档位表：pi 对**当前模型**的回答优先；没有（没通道 / 刚切完模型）就用目录/配置本地算。
-        // 只有本地也算不出来（目录读不到 + 模型不在配置里）才退回内置表 —— 见 ChatState.selectedThinkingLevels。
-        val offlineLevels = remember(chatState.selectedModel, chatState.piThinkingLevels) {
-            chatState.selectedThinkingLevels()
+        // 只有本地也算不出来（目录读不到 + 模型不在配置里）才退回内置表 —— 见 ChatState.selectedThinkingInfo。
+        val info = remember(chatState.selectedModel, chatState.piThinkingLevels) {
+            chatState.selectedThinkingInfo()
         }
-        val levels = piLevels ?: offlineLevels
+        val levels = piLevels ?: info?.levels
+        val effortSupported = info?.effortSupported ?: true
         val piSupportsThinking = levels == null || levels.any { it != "off" }
         // **模型不支持思考 → 整项不出现**（2026-09-17 用户拍板）：pi 只回 `["off"]` 时，折叠栏、
         // 开关、滑轨、说明全都不画 —— 一个用不上的功能项比一条解释更干扰（用户原话：不用出现「思考」一项）。
@@ -116,9 +117,15 @@ fun ModelSelectorSheet(
         if (piSupportsThinking) {
             ThinkingModeRow(
                 enabled = thinkingOn,
-                // 折叠栏显示**生效档位**：pi 的真值优先（它可能把偏好夹到别的档），还没回读就先用偏好
+                // 折叠栏显示**生效档位**：pi 的真值优先（它可能把偏好夹到别的档），还没回读就先用偏好；
+                // 偏好不在该模型的档位表里时**收敛到最高档**（同展开面板口径：不显示这个模型没有的档位）
                 levelLabel = if (thinkingOn) {
-                    ThinkingLevel.labelOf(piNow?.takeIf { it != "off" } ?: chatState.thinkingLevel)
+                    ThinkingLevel.labelOf(
+                        piNow?.takeIf { it != "off" }
+                            ?: chatState.thinkingLevel.takeIf { levels == null || it in levels }
+                            ?: levels?.lastOrNull { it != "off" }
+                            ?: chatState.thinkingLevel
+                    )
                 } else "off",
                 expanded = thinkingExpanded,
                 onClick = { thinkingExpanded = !thinkingExpanded },
@@ -168,12 +175,25 @@ fun ModelSelectorSheet(
                         ?: THINKING_LEVEL_FALLBACK.let { fb ->
                             if (chatState.thinkingLevel in fb) fb else fb + chatState.thinkingLevel
                         }
-                    // 选中态：pi 的真值优先（可能已把偏好夹到别的档），其次用户偏好
-                    val selected = piNow?.takeIf { it != "off" && it in stops } ?: chatState.thinkingLevel
+                    // 选中态：pi 的真值优先（可能已把偏好夹到别的档），其次用户偏好；
+                    // **偏好不在该模型的档位表里时收敛到最后一档**（例：偏好 `max` 切到最高只有 `high`
+                    // 的模型 —— 否则标签会显示这个模型根本没有的档位，与旁边的说明自相矛盾）。
+                    // 这里只影响显示：应用不写偏好，pi 收到越界档位时自己会夹取。
+                    val selected = piNow?.takeIf { it != "off" && it in stops }
+                        ?: chatState.thinkingLevel.takeIf { it in stops || it == "off" }
+                        ?: stops.last()
                     val cfg = chatState.selectedModel?.provider?.let { AiConfigStore.configs[it] }
-                    // 真值行（piNow != null）优先；否则给「预计」——估算行只在拿不到 pi 真值时出现
+                    // 真值行（piNow != null）优先；否则给「预计」——估算行只在拿不到 pi 真值时出现。
+                    // **pi 专有档位（如 `max`）不在应用枚举里** —— 不能拿 `?: MEDIUM` 兜底：
+                    // 那会把「开到最大」说成「预计服务商收到：medium」（实测踩到；DeepSeek V4.1 Flash
+                    // 的档位是 low/high/max，medium 只是官方兼容映射，根本不是真档位）。
+                    // 应用枚举里没有的档位 → 估算就是档位名原样（与 levelWire 默认分支同口径）。
                     val wire = if (piLevels == null && piNow == null) {
-                        cfg?.let { AiBackend.levelWire(it, ThinkingLevel.byPi(selected) ?: ThinkingLevel.MEDIUM) }
+                        cfg?.let { c ->
+                            ThinkingLevel.byPi(selected)
+                                ?.let { AiBackend.levelWire(c, it) }
+                                ?: AiBackend.LevelWire.Word(selected)
+                        }
                     } else null
                     if (stops.size <= 1) {
                         // 只有一档：画滑轨也没得选（2026-09-17）—— 如实说一句，不摆死控件
@@ -203,6 +223,8 @@ fun ModelSelectorSheet(
                     }
                     Text(
                         when {
+                            // 目录说这个模型的档位不上线（只发开关）→ 如实说，不装成「服务商收到 X」
+                            !effortSupported -> L.chat.thinkingEffortNotSent
                             piNow != null -> L.chat.providerReceives(piNow)
                             // 下面两条是**应用侧估算**（pi 没答上来时），措辞用「预计」——旧文案写成
                             // 「服务商实际收到」，读起来像真值（2026-09-17 自查）

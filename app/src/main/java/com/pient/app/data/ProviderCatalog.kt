@@ -74,8 +74,10 @@ object ProviderCatalog {
         // ── 国内大模型 ──
         p("deepseek", "DeepSeek", R.drawable.provider_deepseek, mono = false,
             "https://api.deepseek.com", reasoningFormat = ReasoningFormat.DEEPSEEK),
+        // 2026-09-17 修：原来是 DEEPSEEK 写法 ⇒ pi 会发 `thinking:{type:enabled}`，而 Kimi 官方对 K3 明说
+        // 「不应传 thinking 参数」，只要顶层 `reasoning_effort` —— 那正是 pi 的 openai 分支行为。
         p("kimi-coding", "Kimi For Coding", R.drawable.provider_kimi_coding, mono = false,
-            "https://api.kimi.com/coding", reasoningFormat = ReasoningFormat.DEEPSEEK,
+            "https://api.kimi.com/coding", reasoningFormat = ReasoningFormat.OPENAI,
             logoResDark = R.drawable.provider_kimi_coding_dark),
         p("moonshotai", "Moonshot AI", R.drawable.provider_moonshot, mono = true,
             "https://api.moonshot.ai/v1", reasoningFormat = ReasoningFormat.DEEPSEEK),
