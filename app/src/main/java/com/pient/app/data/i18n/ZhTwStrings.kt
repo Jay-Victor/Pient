@@ -211,6 +211,7 @@ object ZhTwChat : ChatStrings {
     override fun providerExpected(a0: Any?): String = "預計服務商收到：${a0}"
     override val levelUnsupported: String = "當前服務商不支援層級調節（只支援開 / 關）"
     override val thinkingSingleLevel: String = "該模型只有這一個思考層級"
+    override val thinkingAlwaysOn: String = "該模型無法關閉思考（pi 側始終開啟）"
     override val thinkingUnsupportedModel: String = "該模型不支援思考（pi 側只提供 off）"
     override val noModelsAvailable: String = "暫無可用模型 · 請在「服務商與模型配置」中新增服務商並填寫模型列表"
     override val manageModels: String = "管理模型配置"

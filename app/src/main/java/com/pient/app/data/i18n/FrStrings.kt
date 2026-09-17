@@ -211,6 +211,7 @@ object FrChat : ChatStrings {
     override fun providerExpected(a0: Any?): String = "Valeur prévue côté fournisseur : ${a0}"
     override val levelUnsupported: String = "Ce fournisseur ne prend pas en charge le réglage du niveau (uniquement activé / désactivé)"
     override val thinkingSingleLevel: String = "Ce modèle n’a qu’un seul niveau de réflexion"
+    override val thinkingAlwaysOn: String = "Ce modèle ne peut pas désactiver la réflexion (pi la maintient active)"
     override val thinkingUnsupportedModel: String = "Ce modèle ne prend pas en charge le raisonnement (côté pi, seulement off)"
     override val noModelsAvailable: String = "Aucun modèle disponible · Ajouter un fournisseur et renseigner sa liste de modèles dans « Fournisseurs et modèles »"
     override val manageModels: String = "Gérer les modèles"

@@ -903,10 +903,10 @@ enum class ThinkingLevel(val piValue: String) {
 
 /**
  * pi 还没答上来（通道没起 / 首次打开面板）时的**回退档位表**：应用内置这五档，
- * 与旧版滑轨一致（`max` 不主动暴露 —— pi 的 `getSupportedThinkingLevels` 也只在
+ * 与旧版滑轨一致（`off` 不在这里出：开关管开关；`xhigh`/`max` 不主动暴露 —— pi 的 `getSupportedThinkingLevels` 也只在
  * `thinkingLevelMap` 显式映射时才把它算进可用档）。pi 一旦答了就以 pi 的列表为准。
  */
-val THINKING_LEVEL_FALLBACK: List<String> = listOf("minimal", "low", "medium", "high", "xhigh")
+val THINKING_LEVEL_FALLBACK: List<String> = listOf("minimal", "low", "medium", "high")
 
 /**
  * 思考参数的**线上写法**（2026-09-12 真实化；此前只有「省略」一种行为）。

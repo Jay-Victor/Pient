@@ -105,6 +105,8 @@ interface ChatStrings {
     val levelUnsupported: String
     /** 该模型只有一个思考档位（画滑轨也没得选 → 只显示档位名 + 这句） */
     val thinkingSingleLevel: String
+    /** 模型关不掉思考（pi 的档位表里没有 off，如 gpt-5.x / claude-fable-5 / k3）—— 开关置为常开并说明 */
+    val thinkingAlwaysOn: String
     val thinkingUnsupportedModel: String
     val noModelsAvailable: String
     val manageModels: String
@@ -295,6 +297,7 @@ object ZhChat : ChatStrings {
     override fun providerExpected(a0: Any?): String = "预计服务商收到：${a0}"
     override val levelUnsupported: String = "当前服务商不支持档位调节（只支持开 / 关）"
     override val thinkingSingleLevel: String = "该模型只有这一个思考档位"
+    override val thinkingAlwaysOn: String = "该模型无法关闭思考（pi 侧始终开启）"
     override val thinkingUnsupportedModel: String = "该模型不支持思考（pi 侧只提供 off）"
     override val noModelsAvailable: String = "暂无可用模型 · 请在「服务商与模型配置」中添加服务商并填写模型列表"
     override val manageModels: String = "管理模型配置"
@@ -471,6 +474,7 @@ object EnChat : ChatStrings {
     override fun providerExpected(a0: Any?): String = "Expected provider value: ${a0}"
     override val levelUnsupported: String = "This provider doesn't support level tuning (on / off only)"
     override val thinkingSingleLevel: String = "This model has only this one thinking level"
+    override val thinkingAlwaysOn: String = "This model cannot disable thinking (pi keeps it on)"
     override val thinkingUnsupportedModel: String = "This model has no thinking support (pi only offers off)"
     override val noModelsAvailable: String = "No models available · Add a provider and fill in its model list in \"Providers & models\""
     override val manageModels: String = "Manage models"

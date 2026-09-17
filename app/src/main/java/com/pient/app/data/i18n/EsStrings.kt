@@ -211,6 +211,7 @@ object EsChat : ChatStrings {
     override fun providerExpected(a0: Any?): String = "Valor previsto para el proveedor: ${a0}"
     override val levelUnsupported: String = "Este proveedor no admite ajuste de niveles (solo activado / desactivado)"
     override val thinkingSingleLevel: String = "Este modelo solo tiene este nivel de pensamiento"
+    override val thinkingAlwaysOn: String = "Este modelo no permite desactivar el pensamiento (pi lo mantiene activo)"
     override val thinkingUnsupportedModel: String = "Este modelo no admite razonamiento (pi solo ofrece off)"
     override val noModelsAvailable: String = "No hay modelos disponibles · Añadir un proveedor y completar su lista de modelos en \"Proveedores y modelos\""
     override val manageModels: String = "Gestionar modelos"

@@ -211,6 +211,7 @@ object JaChat : ChatStrings {
     override fun providerExpected(a0: Any?): String = "プロバイダーに送られる見込み：${a0}"
     override val levelUnsupported: String = "現在のプロバイダーはレベル調整に対応していません（オン / オフのみ）"
     override val thinkingSingleLevel: String = "このモデルの思考レベルは 1 段階のみです"
+    override val thinkingAlwaysOn: String = "このモデルでは思考をオフにできません（pi 側は常にオン）"
     override val thinkingUnsupportedModel: String = "このモデルは思考に対応していません（pi 側は off のみ）"
     override val noModelsAvailable: String = "利用可能なモデルがありません · 「プロバイダーとモデルの設定」でプロバイダーを追加し、モデルリストを入力してください"
     override val manageModels: String = "モデル設定を管理"

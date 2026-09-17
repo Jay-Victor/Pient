@@ -272,16 +272,9 @@ object AiBackend {
     /**
      * 档位 → 线上形态（**请求体与 UI 提示共用同一判断**，不会出现「面板说 A、实际发 B」）：
      * Anthropic 协议固定预算；其余按格式的词表/预算；都不支持则 [LevelWire.Unsupported]。
-     * 服务商若声明了 `thinkingLevels` 覆盖（ProviderCatalog），优先用它。
      */
     fun levelWire(cfg: ProviderConfig, level: ThinkingLevel): LevelWire {
         if (cfg.reasoningFormat == ReasoningFormat.NONE) return LevelWire.Unsupported
-        val override = ProviderCatalog.byId[cfg.providerId]?.thinkingLevels
-        if (override != null) {
-            override.words?.let { return LevelWire.Word(it[sampleIndex(level, it.size)]) }
-            override.budgets?.let { return LevelWire.Budget(it[sampleIndex(level, it.size)]) }
-            return LevelWire.Unsupported
-        }
         if (isAnthropicProtocol(cfg.endpoint)) {
             return LevelWire.Budget(BUDGET_LADDER[sampleIndex(level, BUDGET_LADDER.size)])
         }

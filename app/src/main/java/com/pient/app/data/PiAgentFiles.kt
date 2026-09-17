@@ -82,10 +82,25 @@ object PiAgentFiles {
             reasoningCompat(c.reasoningFormat)?.let { compat ->
                 pj.put("compat", JSONObject(compat))
             }
+            // 分流（2026-09-17）：pi 内置目录里**有**这个 id → 写 `modelOverrides[id]`（逐字段覆盖，
+            // 目录里的 `thinkingLevelMap`/`cost`/`name`/`api`/`baseUrl` 全部保住）；目录里没有
+            // （用户自建模型）→ 仍写整条 `models[]`。原因见 [catalogModels]。
             val models = JSONArray()
-            val oldModels = oldProviders?.optJSONObject(c.providerId)?.optJSONArray("models")
-            c.models.forEach { entry -> models.put(modelJson(entry, c, oldModels)) }
-            pj.put("models", models)
+            val overrides = JSONObject()
+            val oldPj = oldProviders?.optJSONObject(c.providerId)
+            val oldModels = oldPj?.optJSONArray("models")
+            val oldOverrides = oldPj?.optJSONObject("modelOverrides")
+            val known = catalogModelIds(context)[c.providerId].orEmpty()
+            c.models.forEach { entry ->
+                val id = entry.substringBefore('=').trim()
+                if (id.isNotEmpty() && id in known) {
+                    overrides.put(id, overrideJson(entry, c, oldOverrides))
+                } else {
+                    models.put(modelJson(entry, c, oldModels))
+                }
+            }
+            if (models.length() > 0) pj.put("models", models)
+            if (overrides.length() > 0) pj.put("modelOverrides", overrides)
             providers.put(c.providerId, pj)
         }
         root.put("providers", providers)
@@ -174,12 +189,13 @@ object PiAgentFiles {
                     // 页面读回的「API 类型」= 文件里那一份（用户在页面上选过 / 手改过都在这里）
                     apiType = pj.optString("api", ""),
                     apiKey = "",
-                    modelList = buildModelList(pj.optJSONArray("models")),
+                    modelList = buildModelList(pj.optJSONArray("models"), pj.optJSONObject("modelOverrides")),
                     // 窗口 / 识图 / 采样在 pi 里都是 **per-model** 的（`models[].contextWindow` 等）：
                     // 逐条读进 modelSettings；卡面上那三个字段是「新加入列表的模型的默认值」，
                     // pi 文件里没有这个概念 —— 由 ai_config.json 里存着的那份填（见 loadExtras）。
                     // 旧实现取 `models[0]` 当整家的值：多模型时页面只看得到第一个、改一次全覆盖。
-                    modelSettings = modelSettingsOf(pj.optJSONArray("models")),
+                    modelSettings = modelSettingsOf(pj.optJSONArray("models")) +
+                        modelSettingsOf(pj.optJSONObject("modelOverrides")),
                     reasoningFormat = reasoningFormatOf(pj.optJSONObject("compat")),
                     compactionEnabled = compaction?.optBoolean("enabled", ContextPolicy.DEFAULT_COMPACTION_ENABLED)
                         ?: ContextPolicy.DEFAULT_COMPACTION_ENABLED,
@@ -210,11 +226,254 @@ object PiAgentFiles {
     )
 
     /**
+     * `modelOverrides` 条目里应用自己管理的键（= [MANAGED_MODEL_KEYS] 去掉 id —— 覆盖对象的 id 是键，
+     * api / baseUrl 则由内置目录那份提供）。
+     */
+    private val MANAGED_OVERRIDE_KEYS = setOf(
+        "name", "contextWindow", "maxTokens", "input", "reasoning", "samplingParams", "compat",
+    )
+
+    /** 目录里某个模型的档位相关事实（pi 的 `getSupportedThinkingLevels` 只看这两样） */
+    data class CatalogModel(val reasoning: Boolean, val thinkingLevelMap: Map<String, String?>)
+
+    /** pi 内置目录（进程内缓存一次）：providerId → modelId → 事实 */
+    private var catalogCache: Map<String, Map<String, CatalogModel>>? = null
+
+    /**
+     * pi 内置目录里有定义的模型 id（`providerId → ids`），用来决定一个模型**怎么写进 models.json**：
+     *
+     * - 目录里有 → `modelOverrides[id]`：pi 的 `applyModelOverride` 是逐字段合并（`override.x ?? model.x`，
+     *   `thinkingLevelMap` 还是浅合并）⇒ 目录里的档位表 / cost / name / api / baseUrl **全部保住**；
+     * - 目录里没有（用户自建模型）→ 仍写整条 `models[]`。
+     *
+     * 为什么不能一律写条目：`applyModelsJson` 对同 id 的条目是**整体替换**，而 `modelFromJson` 里
+     * `thinkingLevelMap: definition.thinkingLevelMap` / `cost ?? {0,0,0,0}` / `contextWindow ?? 128000`
+     * **都不回落到目录**（2026-09-17 对着 pi 0.85.1 源码 + 设备 rootfs 里 39 个目录 JSON 核对）——
+     * 应用写过的 `deepseek-v4-pro` 就这样从目录里的 3 档（off/high/max）被抹成 5 档。
+     *
+     * 读不到目录（pi 没装 / 布局变了）→ 空表 = 退回「整条写」的老行为，不会写坏文件。
+     */
+    private fun catalogModels(context: Context): Map<String, Map<String, CatalogModel>> = catalogCache ?: runCatching {
+        val root = PiRuntime.rootfsDir(context)
+        val candidates = listOf(
+            "usr/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/providers/data",
+            "usr/lib/node_modules/@earendil-works/pi-ai/dist/providers/data",
+        )
+        val dataDir = candidates.map { File(root, it) }.firstOrNull { it.isDirectory }
+            ?: findProvidersDataDir(File(root, "usr/lib/node_modules"), 0)
+        val out = HashMap<String, Map<String, CatalogModel>>()
+        // ① 随包目录（pi-ai 包里的 providers/data/*.json，随版本冻结）
+        dataDir?.listFiles { f -> f.isFile && f.name.endsWith(".json") }?.forEach { f ->
+            runCatching {
+                val o = JSONObject(f.readText())
+                val models = HashMap<String, CatalogModel>()
+                for (api in o.keys()) {
+                    val group = o.optJSONObject(api) ?: continue
+                    for (id in group.keys()) {
+                        val m = group.optJSONObject(id) ?: continue
+                        if (id.isBlank()) continue
+                        models[id] = CatalogModel(m.optBoolean("reasoning", false), thinkingMapOf(m))
+                    }
+                }
+                if (models.isNotEmpty()) out[f.name.removeSuffix(".json")] = models
+            }
+        }
+        // ② **联网刷新后的目录（`models-store.json`，pi 真正用的就是它）** 覆盖随包那份。
+        //    2026-09-17 实测踩坑：V4.1 Flash（id `deepseek-flash`）**只存在于刷新目录**，
+        //    随包那份没有 ⇒ 只读随包会把用户的模型误判成「自建模型」，连它的档位表一起丢掉
+        //    （表现：本该 3 停位的模型画出默认的 4 停位）。
+        var storeCount = 0
+        runCatching {
+            val store = readJson(File(agentDir(context), "models-store.json")) ?: return@runCatching
+            for (pid in store.keys()) {
+                val arr = store.optJSONObject(pid)?.optJSONArray("models") ?: continue
+                val merged = HashMap(out[pid] ?: emptyMap())
+                for (i in 0 until arr.length()) {
+                    val m = arr.optJSONObject(i) ?: continue
+                    val id = m.optString("id", "").trim()
+                    if (id.isEmpty()) continue
+                    merged[id] = CatalogModel(m.optBoolean("reasoning", false), thinkingMapOf(m))
+                    storeCount++
+                }
+                if (merged.isNotEmpty()) out[pid] = merged
+            }
+        }
+        Log.i(
+            TAG,
+            "pi 目录：随包 ${dataDir?.path?.substringAfterLast('/') ?: "未找到"} + 刷新目录 $storeCount 条" +
+                " ⇒ ${out.size} 家 / ${out.values.sumOf { it.size }} 个模型",
+        )
+        out
+    }.getOrElse {
+        Log.w(TAG, "读 pi 内置目录失败（按自建模型处理）：${it.message}")
+        emptyMap()
+    }.also { catalogCache = it }
+
+    /** 目录里的模型 id 集（写盘分流用） */
+    private fun catalogModelIds(context: Context): Map<String, Set<String>> =
+        catalogModels(context).mapValues { (_, v) -> v.keys }
+
+    /**
+     * **离线算该模型的档位表**（不依赖 pi 通道）—— 与 pi 的 `getSupportedThinkingLevels`
+     * （models.ts:915）逐字同规则：`!reasoning → ["off"]`；否则按 `thinkingLevelMap` 过滤
+     * （值为 null = 砍掉；`xhigh`/`max` 只有显式给了才有），再叠上 [CATALOG_FIXES] 勘误。
+     *
+     * 为什么要它：面板原来只认 pi 对「通道**当前**跑的模型」的回答，pi 没答（没通道 / 刚切完模型、
+     * 通道还没重启）就退回一张万能 4 档回退表 —— 于是「明明 3 档的模型画出 4 档」、切模型也不重画。
+     * 目录里有这个模型 → 直接用目录事实；没有（自建模型）→ 用应用自己写的 `reasoning`（三态里没显式
+     * 设过就跟写盘同一口径：按模型名推断写法，推断得出 = 支持）。
+     */
+    fun effectiveThinkingLevels(context: Context, c: ProviderConfig, entry: String): List<String> {
+        val id = entry.substringBefore('=').trim()
+        val cat = catalogModels(context)[c.providerId]?.get(id)
+        val reasoning: Boolean
+        val base: Map<String, String?>
+        if (cat != null) {
+            reasoning = cat.reasoning
+            base = cat.thinkingLevelMap
+        } else {
+            val s = c.settingOf(id)
+            val fmt = if (c.reasoningFormat == ReasoningFormat.AUTO) {
+                AiBackend.inferReasoningFormat(id)
+            } else {
+                c.reasoningFormat
+            }
+            reasoning = s.reasoning ?: (fmt != ReasoningFormat.NONE)
+            base = emptyMap()
+        }
+        val map = HashMap<String, String?>(base).also { it.putAll(catalogFixOf(c, id)) }
+        return levelsOf(reasoning, map)
+    }
+
+    /** `thinkingLevelMap` 解析：键保留、值 `null` 记成 null（= 砍掉该档），缺席即「没写」 */
+    private fun thinkingMapOf(m: JSONObject): Map<String, String?> =
+        m.optJSONObject("thinkingLevelMap")?.let { mp ->
+            HashMap<String, String?>().also { t ->
+                for (k in mp.keys()) t[k] = if (mp.isNull(k)) null else mp.optString(k, "")
+            }
+        }.orEmpty()
+
+    /** pi 的档位全集顺序（models.ts 的 EXTENDED_THINKING_LEVELS） */
+    private val THINKING_LEVEL_ORDER =
+        listOf("off", "minimal", "low", "medium", "high", "xhigh", "max")
+
+    private fun levelsOf(reasoning: Boolean, map: Map<String, String?>): List<String> {
+        if (!reasoning) return listOf("off")
+        return THINKING_LEVEL_ORDER.filter { lv ->
+            val has = map.containsKey(lv)
+            when {
+                has && map[lv] == null -> false
+                lv == "xhigh" || lv == "max" -> has
+                else -> true
+            }
+        }
+    }
+
+    /** 兜底：在 node_modules 里按名字找 `providers/data`（pi 的目录布局换过就别硬编码路径） */
+    private fun findProvidersDataDir(dir: File, depth: Int): File? {
+        if (depth > 4 || !dir.isDirectory) return null
+        val kids = dir.listFiles() ?: return null
+        kids.firstOrNull { it.isDirectory && it.name == "data" && it.parentFile?.name == "providers" }
+            ?.let { return it }
+        for (k in kids) if (k.isDirectory) findProvidersDataDir(k, depth + 1)?.let { return it }
+        return null
+    }
+
+    /**
      * 单个模型的 JSON（页面字段 → pi 字段）。
      * 模型条目语法：`id` 或 **`id=别名`**（别名写进 pi 的 `models[].name` —— 它用作 `--model` 匹配
      * 与副标题展示；`id` 本身才是发给服务商的东西，两者不要混）。
      */
     private fun modelJson(entry: String, c: ProviderConfig, oldModels: JSONArray? = null): JSONObject {
+        val id = entry.substringBefore('=').trim()
+        val old = oldModels?.let { arr ->
+            (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+                .firstOrNull { it.optString("id").trim() == id }
+        }
+        val m = modelFieldsJson(entry, c, old, MANAGED_MODEL_KEYS)
+        m.put("id", id)
+        return m
+    }
+
+    /**
+     * 目录里已有的模型 → `modelOverrides[id]` 的内容：与 [modelJson] 同一套字段，但**不写 id**
+     * （id 是对象键）、也不写 api / baseUrl（这两样由目录那份提供）。
+     */
+    private fun overrideJson(entry: String, c: ProviderConfig, oldOverrides: JSONObject?): JSONObject {
+        val id = entry.substringBefore('=').trim()
+        val old = oldOverrides?.optJSONObject(id)
+        val m = modelFieldsJson(entry, c, old, MANAGED_OVERRIDE_KEYS)
+        // 目录勘误（见 [CATALOG_FIXES]）：pi 目录里写错的档位表，用覆盖层就地修正。
+        // pi 的 applyModelOverride 对 thinkingLevelMap 是**浅合并**（{...目录, ...覆盖}），
+        // 所以只写要改的那几个键：字符串 = 补/改一档，JSON null = 砍一档。
+        val fix = catalogFixOf(c, id)
+        if (fix.isNotEmpty()) {
+            val map = JSONObject()
+            // 旧文件里已有的键先留住（用户手写的、以及上一次落盘的勘误）
+            old?.optJSONObject("thinkingLevelMap")?.let { o ->
+                for (k in o.keys()) map.put(k, o.get(k))
+            }
+            for ((k, v) in fix) map.put(k, if (v == null) JSONObject.NULL else v)
+            m.put("thinkingLevelMap", map)
+        }
+        return m
+    }
+
+    /** 该模型的勘误项（api 级规则 + 逐模型条目叠加）；空 = 不动它的档位表 */
+    private fun catalogFixOf(c: ProviderConfig, modelId: String): Map<String, String?> {
+        val out = LinkedHashMap<String, String?>()
+        val api = c.apiType.trim().ifBlank { ProviderCatalog.apiOf(c.providerId) }
+        CATALOG_FIXES_BY_API[api]?.let { out.putAll(it) }
+        CATALOG_FIXES[c.providerId to modelId]?.let { out.putAll(it) }
+        return out
+    }
+
+    /**
+     * **pi 内置目录的勘误表**（2026-09-17 对着各家官方文档逐条核对后加）。
+     *
+     * pi 的档位表在 `providers/data/ 下的 *.json` 的 `thinkingLevelMap` 里，是应用唯一的事实源。
+     * 核对下来总体质量很高（k3 / glm-5.3 / gpt-5.5 / kimi-k2.7-code 等逐条对上），但有几处确凿的错：
+     *
+     * - `deepseek-v4-pro`：pi 砍掉了 `low`，而官方 Thinking Mode 页明写 `low/high/max` 三档、
+     *   且「**两个 V4 模型映射完全一致**」⇒ 补回 `low`（不补的话，用户选 low 会被 pi 夹到 high）。
+     * - `MiniMax-M2.7` / `-highspeed`（官方域名与 .cn 两家）：官方 responses-create 页写
+     *   *For M2.x models, reasoning cannot be disabled* ⇒ 砍掉 `off`（不砍的话面板会摆一个关不掉的开关）。
+     * - `claude-fable-5` / `-5-1`（Anthropic 与 OpenRouter 两侧）：官方 effort 页 + Opus 5 迁移说明
+     *   写得很清楚——thinking 能关（`{"type":"disabled"}`），只是 effort 在 xhigh/max 时不允许 ⇒
+     *   恢复 `off`。Anthropic 侧 `off` 的值只被用来判「非 null」（anthropic-messages.ts:1149 固定发
+     *   `{type:"disabled"}`，不发 map 里的值）；OpenRouter 侧走 `reasoning.effort = map.off ?? "none"`，
+     *   所以给它写 `"none"`。
+     * - Anthropic Messages 协议（api 级）：官方 effort 只有 `low/medium/high/xhigh/max`，**没有 minimal**
+     *   ⇒ 无 map 的 Anthropic 模型默认 5 档里那个 `minimal` 砍掉（pi 本来也会把它回落成 low，
+     *   线上行为不变，只是界面不再多一档）。
+     *
+     * 生效方式：写进 `modelOverrides[id].thinkingLevelMap`（只对**目录里已有的模型**生效——自建模型
+     * 没有目录那份可合并）。**上游 pi 修好目录后，这里对应的条目应删掉**；每条都注了官方依据与核对日期。
+     */
+    private val CATALOG_FIXES: Map<Pair<String, String>, Map<String, String?>> = mapOf(
+        ("deepseek" to "deepseek-v4-pro") to mapOf("low" to "low"),
+        ("minimax" to "MiniMax-M2.7") to mapOf("off" to null),
+        ("minimax" to "MiniMax-M2.7-highspeed") to mapOf("off" to null),
+        ("minimax-cn" to "MiniMax-M2.7") to mapOf("off" to null),
+        ("minimax-cn" to "MiniMax-M2.7-highspeed") to mapOf("off" to null),
+        ("anthropic" to "claude-fable-5") to mapOf("off" to "off"),
+        ("anthropic" to "claude-fable-5-1") to mapOf("off" to "off"),
+        ("openrouter" to "anthropic/claude-fable-5") to mapOf("off" to "none"),
+        ("openrouter" to "anthropic/claude-fable-5.1") to mapOf("off" to "none"),
+    )
+
+    /** api 级勘误（对某个协议下所有模型生效） */
+    private val CATALOG_FIXES_BY_API: Map<String, Map<String, String?>> = mapOf(
+        "anthropic-messages" to mapOf("minimal" to null),
+    )
+
+    /** 页面字段 → pi 字段（整条条目与覆盖对象共用；`id` 由调用方补） */
+    private fun modelFieldsJson(
+        entry: String,
+        c: ProviderConfig,
+        old: JSONObject?,
+        managed: Set<String>,
+    ): JSONObject {
         val id = entry.substringBefore('=').trim()
         val alias = entry.substringAfter('=', "").trim()
         // 逐模型参数（窗口 / 识图 / 采样）：有该模型的条目用它，没有则用卡面默认值
@@ -222,20 +481,15 @@ object PiAgentFiles {
         val m = JSONObject()
         // 先按 id 搬回旧条目里**应用不管理**的字段（`thinkingLevelMap` / `cost` / pi 新增键）——
         // 应用管理的键不能这样合并（页面留空 = 不写该键，合并会把旧值留下），所以分两张表。
-        oldModels?.let { arr ->
-            val o = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
-                .firstOrNull { it.optString("id").trim() == id }
-            o?.let { old ->
-                for (k in old.keys()) if (k !in MANAGED_MODEL_KEYS) m.put(k, old.get(k))
-                // compat 是混合的：应用只写 thinkingFormat，其余（chatTemplateKwargs 等）留住
-                old.optJSONObject("compat")?.let { oc ->
-                    val keep = JSONObject()
-                    for (k in oc.keys()) if (k != "thinkingFormat") keep.put(k, oc.get(k))
-                    if (keep.length() > 0) m.put("compat", keep)
-                }
+        old?.let { o ->
+            for (k in o.keys()) if (k !in managed) m.put(k, o.get(k))
+            // compat 是混合的：应用只写 thinkingFormat，其余（chatTemplateKwargs 等）留住
+            o.optJSONObject("compat")?.let { oc ->
+                val keep = JSONObject()
+                for (k in oc.keys()) if (k != "thinkingFormat") keep.put(k, oc.get(k))
+                if (keep.length() > 0) m.put("compat", keep)
             }
         }
-        m.put("id", id)
         if (alias.isNotEmpty()) m.put("name", alias)
         s.ctxLenK.trim().toIntOrNull()?.takeIf { it > 0 }?.let { m.put("contextWindow", it * 1000) }
         s.maxOutK.trim().toIntOrNull()?.takeIf { it > 0 }?.let { m.put("maxTokens", it * 1000) }
@@ -321,15 +575,22 @@ object PiAgentFiles {
         }
     }
 
-    /** 模型清单 → 页面输入框口径：`id`，别名不同时写 `id=别名`（与 [modelJson] 同一套语法） */
-    private fun buildModelList(models: JSONArray?): String {
-        if (models == null) return ""
+    /**
+     * 模型清单 → 页面输入框口径：`id`，别名不同时写 `id=别名`（与 [modelJson] 同一套语法）。
+     * 两个来源都算：`models[]`（自建模型整条）+ `modelOverrides`（目录已有模型的覆盖，id 是键）。
+     */
+    private fun buildModelList(models: JSONArray?, overrides: JSONObject? = null): String {
         val ids = ArrayList<String>()
-        for (i in 0 until models.length()) {
+        if (models != null) for (i in 0 until models.length()) {
             val o = models.optJSONObject(i) ?: continue
             val id = o.optString("id", "")
             if (id.isBlank()) continue
             val name = o.optString("name", "").trim()
+            ids += if (name.isNotEmpty() && name != id) "$id=$name" else id
+        }
+        if (overrides != null) for (id in overrides.keys()) {
+            if (id.isBlank()) continue
+            val name = overrides.optJSONObject(id)?.optString("name", "")?.trim().orEmpty()
             ids += if (name.isNotEmpty() && name != id) "$id=$name" else id
         }
         return ids.joinToString(";")
@@ -373,6 +634,17 @@ object PiAgentFiles {
             )
         }
         return out
+    }
+
+    /** [modelSettingsOf] 的覆盖重载：`modelOverrides` 是 `id → 字段` 的对象 */
+    private fun modelSettingsOf(overrides: JSONObject?): Map<String, ModelSetting> {
+        if (overrides == null) return emptyMap()
+        val arr = JSONArray()
+        for (id in overrides.keys()) {
+            val o = overrides.optJSONObject(id) ?: continue
+            arr.put(JSONObject(o.toString()).put("id", id))
+        }
+        return modelSettingsOf(arr)
     }
 
     private fun readJson(f: File): JSONObject? = runCatching {

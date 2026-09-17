@@ -98,12 +98,21 @@ fun ModelSelectorSheet(
         LaunchedEffect(Unit) { chatState.syncThinkingToPi() }
         val piLevels = chatState.piThinkingLevels
         val piNow = chatState.piThinkingLevel
-        val piSupportsThinking = piLevels == null || piLevels.any { it != "off" }
+        // 档位表：pi 对**当前模型**的回答优先；没有（没通道 / 刚切完模型）就用目录/配置本地算。
+        // 只有本地也算不出来（目录读不到 + 模型不在配置里）才退回内置表 —— 见 ChatState.selectedThinkingLevels。
+        val offlineLevels = remember(chatState.selectedModel, chatState.piThinkingLevels) {
+            chatState.selectedThinkingLevels()
+        }
+        val levels = piLevels ?: offlineLevels
+        val piSupportsThinking = levels == null || levels.any { it != "off" }
         // **模型不支持思考 → 整项不出现**（2026-09-17 用户拍板）：pi 只回 `["off"]` 时，折叠栏、
         // 开关、滑轨、说明全都不画 —— 一个用不上的功能项比一条解释更干扰（用户原话：不用出现「思考」一项）。
         // `piLevels == null`（通道没起 / 还没答）时按支持渲染，避免刚开机闪一下消失、或无谓地藏起来。
         // 用户的偏好（`thinkingEnabled` / `thinkingLevel`）照旧保留，切回支持思考的模型自动恢复。
-        val thinkingOn = chatState.thinkingEnabled && piSupportsThinking
+        // 模型**关不掉思考**（pi 的档位表里没有 off，1354 个模型里 334 个）→ 开关置为常开 + 说明，
+        // 不能摆一个按下去无效的假开关（用户口径：假控件零容忍）。未知（通道没起）时按可关处理。
+        val canDisable = (levels?.contains("off") ?: true) && piSupportsThinking
+        val thinkingOn = if (canDisable) chatState.thinkingEnabled && piSupportsThinking else piSupportsThinking
         if (piSupportsThinking) {
             ThinkingModeRow(
                 enabled = thinkingOn,
@@ -128,6 +137,7 @@ fun ModelSelectorSheet(
                     )
                     Switch(
                         checked = thinkingOn,
+                        enabled = canDisable,
                         onCheckedChange = {
                             chatState.thinkingEnabled = it
                             chatState.syncThinkingToPi()
@@ -137,8 +147,16 @@ fun ModelSelectorSheet(
                         ),
                     )
                 }
+                if (!canDisable) {
+                    Text(
+                        L.chat.thinkingAlwaysOn,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
                 // 到这里必然是「模型支持思考」（不支持时整项不出现）
-                if (chatState.thinkingEnabled) {
+                if (thinkingOn) {
                     // **档位 = pi 报的可用档位**（2026-09-17 照 pi-web 改）：pi 只列该模型真能用的档，
                     // 界面就画几个停位 —— 不再拿固定五档去等距映射（那会在 `thinkingLevelMap` 砍过档、
                     // 或只有一两档的模型上出现两个停位等价、「拖了没变化」的观感）。
@@ -146,14 +164,15 @@ fun ModelSelectorSheet(
                     // pi 沉默时用内置回退表；**偏好不在表里也补进去**（如 `max`）—— 否则滑块会默默落到
                     // 首档、与旁边那行档位名对不上（2026-09-17 自查的边角；pi 答了就以 pi 的列表为准，
                     // 那时偏好不在列表里是正常的：pi 会夹取，真值由 `piNow` 显示）
-                    val stops = piLevels?.filter { it != "off" }?.takeIf { it.isNotEmpty() }
+                    val stops = levels?.filter { it != "off" }?.takeIf { it.isNotEmpty() }
                         ?: THINKING_LEVEL_FALLBACK.let { fb ->
                             if (chatState.thinkingLevel in fb) fb else fb + chatState.thinkingLevel
                         }
                     // 选中态：pi 的真值优先（可能已把偏好夹到别的档），其次用户偏好
                     val selected = piNow?.takeIf { it != "off" && it in stops } ?: chatState.thinkingLevel
                     val cfg = chatState.selectedModel?.provider?.let { AiConfigStore.configs[it] }
-                    val wire = if (piLevels == null) {
+                    // 真值行（piNow != null）优先；否则给「预计」——估算行只在拿不到 pi 真值时出现
+                    val wire = if (piLevels == null && piNow == null) {
                         cfg?.let { AiBackend.levelWire(it, ThinkingLevel.byPi(selected) ?: ThinkingLevel.MEDIUM) }
                     } else null
                     if (stops.size <= 1) {

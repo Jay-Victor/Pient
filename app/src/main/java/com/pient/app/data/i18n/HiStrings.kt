@@ -211,6 +211,7 @@ object HiChat : ChatStrings {
     override fun providerExpected(a0: Any?): String = "प्रदाता को भेजा जाने वाला अनुमानित मान: ${a0}"
     override val levelUnsupported: String = "यह प्रोवाइडर स्तर बदलने की सुविधा नहीं देता (सिर्फ़ चालू / बंद)"
     override val thinkingSingleLevel: String = "इस मॉडल में सोच का केवल यही एक स्तर है"
+    override val thinkingAlwaysOn: String = "यह मॉडल सोच बंद नहीं कर सकता (pi इसे चालू रखता है)"
     override val thinkingUnsupportedModel: String = "यह मॉडल सोच का समर्थन नहीं करता (pi केवल off देता है)"
     override val noModelsAvailable: String = "अभी कोई मॉडल उपलब्ध नहीं · \"प्रोवाइडर और मॉडल\" में जाकर प्रोवाइडर जोड़ें और उसकी मॉडल सूची भरें"
     override val manageModels: String = "मॉडल कॉन्फ़िगरेशन प्रबंधित करें"

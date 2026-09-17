@@ -2467,11 +2467,33 @@ class ChatState {
     var piThinkingLevels by mutableStateOf<List<String>?>(null)
 
     /**
+     * **当前选中模型的档位表**：pi 的回答（只属于通道**正在跑**的那个模型，切完模型要等下次发送才换）
+     * 对不上时，用目录/配置本地算（[PiAgentFiles.effectiveThinkingLevels]）。null = 连本地也算不出来。
+     *
+     * 这样模型面板切模型时**立刻**按新模型的档位表重画，不再出现「明明 3 档却画回退表 4 档」。
+     */
+    fun selectedThinkingLevels(): List<String>? {
+        val ctx = AppCtx.get() ?: return null
+        val m = selectedModel ?: return null
+        val c = AiConfigStore.configs[m.provider] ?: return null
+        val entry = m.name.ifBlank { m.id.substringAfter('/') }
+        return runCatching { PiAgentFiles.effectiveThinkingLevels(ctx, c, entry) }.getOrNull()
+    }
+
+    /**
      * 该发给 pi 的档位：关思考 = `off`，开 = 偏好本身（偏好就是 pi 的档位字面量，**不用再映射**）。
      * 偏好不在当前模型的可用档里时由 pi 夹取（`clampThinkingLevel`），界面再回读真值上屏。
+     *
+     * 例外：模型**关不掉思考**（档位表里没有 `off`）时，发**最低那档**而不是 `off` —— pi 的
+     * `clampThinkingLevel` 从 off 往上找第一个可用档，结果一样，但显式发出去后界面回读到的就是
+     * 同一档，不会出现「开关显示关、实际在思考」的错觉。
      */
-    fun targetPiLevel(): String =
-        if (!thinkingEnabled) "off" else thinkingLevel
+    fun targetPiLevel(): String {
+        if (thinkingEnabled) return thinkingLevel
+        val levels = piThinkingLevels
+        if (levels != null && "off" !in levels) return levels.firstOrNull() ?: "off"
+        return "off"
+    }
 
     /** 记录 pi 报的可用档位（**不改用户存的偏好**：模型不支持思考时由界面按 `pref && support` 渲染成关） */
     private fun applyPiLevels(levels: List<String>) {
