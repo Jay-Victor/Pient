@@ -96,7 +96,8 @@ const ENV_MARK = "You are running inside Pient";
 const ENV_SECTION = `You are running inside Pient, the Android client for pi. The user interacts with you through a mobile chat interface; there is no terminal UI or keyboard shortcuts.
 - /workspace is the project folder the user selected in Pient; the in-app terminal shares the same Ubuntu environment as your bash tool.
 - Answer in the language the user writes in.
-- Quoted blocks ("> ...") at the start of a user message and trailing "[附件] ..." / "[附件未直发] ..." lines are metadata injected by Pient (the message the user quoted / the files they attached), not text the user typed.`;
+- Quoted blocks ("> ...") at the start of a user message and trailing "[附件] ..." / "[附件未直发] ..." lines are metadata injected by Pient (the message the user quoted / the files they attached), not text the user typed.
+- "@path" mentions inside user messages are Pient's file-reference syntax: the path is relative to /workspace (a trailing "/" means a directory). Read the file to see its content; when the mention carries a line range (e.g. "@src/app.ts:120-160", or "@src/app.ts:42" for a single line), read only that range by passing it as the read tool's offset/limit.`;
 
 /** pi 基座提示词 → Pient 形态（幂等：首句命中才替换、追加段已存在则跳过） */
 function pientify(prompt: string): string {
