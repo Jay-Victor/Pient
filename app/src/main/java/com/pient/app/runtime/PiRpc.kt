@@ -303,6 +303,30 @@ object PiRpc {
     suspend fun setAutoCompaction(enabled: Boolean): JSONObject? =
         send(JSONObject().put("type", "set_auto_compaction").put("enabled", enabled))
 
+    // ─────────────── 思考档位（2026-09-17：界面开关/滑轨真正作用到 pi）───────────────
+
+    /**
+     * 设 pi 侧的思考档位（`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`）。
+     *
+     * pi 会按模型能力**自动夹取**（`session.setThinkingLevel` → `clampThinkingLevel`），不会报错；
+     * 且只在档位真的变化时才往会话里 append 一条 `thinking_level_change`（agent-session.ts:1808）
+     * —— 所以重复推同一档位是 no-op、不污染会话文件。
+     */
+    suspend fun setThinkingLevel(level: String): JSONObject? =
+        send(JSONObject().put("type", "set_thinking_level").put("level", level))
+
+    /** 当前模型支持的档位（含 `off`；无推理能力的模型只回 `["off"]`）。通道不可用 = null */
+    suspend fun availableThinkingLevels(): List<String>? =
+        dataOf(send(JSONObject().put("type", "get_available_thinking_levels")))
+            ?.optJSONArray("levels")
+            ?.let { arr -> (0 until arr.length()).map { arr.optString(it) } }
+
+    /** pi 此刻的档位（`get_state.thinkingLevel`）；未知 = null */
+    suspend fun thinkingLevelNow(): String? =
+        dataOf(send(JSONObject().put("type", "get_state")))
+            ?.optString("thinkingLevel")
+            ?.takeIf { it.isNotBlank() && it != "null" }
+
     /**
      * 起得来 ≠ 活着（2026-09-15 实测）：rootfs 不可执行 / proot 报错时进程会**秒退**，
      * 而 `start()` 只看 ProcessBuilder 是否成功 → 会误报可用。这里给进程一个露馅窗口。

@@ -907,6 +907,7 @@ class ChatState {
             piReadiness = result.first
             piUnreadyReason = result.second
             Log.i(TAG_CHAT, "pi 就绪态：${result.first}${if (result.second.isBlank()) "" else "（${result.second}）"}")
+            if (result.first == PiReadiness.Ready) syncThinkingToPi()
         }
     }
 
@@ -1076,6 +1077,9 @@ class ChatState {
         val target = piChannelTarget()
         if (target != null && PiRpc.usable() && PiRpc.start(target.first, target.second)) {
             bindPiSession()          // 会话映射：懒建 / 切到本会话对应的 pi 会话文件（失败不阻断本轮）
+            // **发送前把思考档位推给 pi 并等它落地**：通道可能刚重启（pi 的档位回到默认 medium），
+            // 不 await 的话本轮会跑在旧档位上（异步推送与 prompt 赛跑，2026-09-17 实测）。
+            syncThinkingToPiNow()
             if (piReadiness != PiReadiness.Ready) {
                 piReadiness = PiReadiness.Ready
                 piUnreadyReason = ""
@@ -1179,6 +1183,8 @@ class ChatState {
             // 位置对账（T1/T2/T3）：通道重启、切会话后 pi 的叶会回到文件末尾 —— 拉回 Pient 记的位置
             reconcilePiLeaf(id)
         }.onFailure { Log.w(TAG_CHAT, "绑 pi 会话失败：${it.message}") }
+        // 思考档位同步（2026-09-17）：通道就绪 / 换会话后把界面的开关与档位推给 pi（不等 = no-op）
+        syncThinkingToPi()
     }
 
     private fun updateSessionPiFile(id: String, file: String) {
@@ -2426,6 +2432,71 @@ class ChatState {
     var selectedModelId by mutableStateOf("")
     var thinkingEnabled by mutableStateOf(false)
     var thinkingLevel by mutableStateOf(ThinkingLevel.MEDIUM)
+
+    /**
+     * **pi 侧此刻的档位**（真值在 pi：`get_state.thinkingLevel`）。null = 未知（通道没起 / 还没问过）。
+     *
+     * 为什么要这份镜像（2026-09-17）：思考参数是**由 pi 发出去的**（应用侧不再拼请求体），
+     * 所以开关与滑轨若不推到 pi 就只是界面装饰 —— 关掉开关 ≠ 真关思考。现在的口径 =
+     * 界面存的是「用户偏好」、[syncThinkingToPi] 推给 pi、再回读 pi 的夹取结果上屏。
+     */
+    var piThinkingLevel by mutableStateOf<String?>(null)
+
+    /** pi 报的当前模型可用档位（含 `off`）；null = 未知 */
+    var piThinkingLevels by mutableStateOf<List<String>?>(null)
+
+    /**
+     * 五档 → pi 支持的档位（按比例等距落位：`floor(ordinal×(n−1)/4)`）。
+     *
+     * 用**向下取整**而不是四舍五入：并列（n=3 时「低」正好落在 low/high 中间）时取低档 ——
+     * 否则会出现「界面显示『低』、pi 实际拿到 high」这种与直觉相反的对应（已实测到）。
+     * pi 只回 `["off"]`（模型不支持思考）= `off`；档位未知（还没问过 pi / 通道没起）时按 1:1 送，
+     * 由 pi 自己夹取。
+     */
+    fun piLevelFor(level: ThinkingLevel, levels: List<String>?): String {
+        val usable = levels.orEmpty().filter { it != "off" }
+        if (levels != null && usable.isEmpty()) return "off"
+        if (usable.isEmpty()) return level.piValue
+        return usable[level.ordinal * (usable.size - 1) / 4]
+    }
+
+    /** 当前界面口径该发给 pi 的档位（关闭思考 = `off`） */
+    fun targetPiLevel(): String =
+        if (!thinkingEnabled) "off" else piLevelFor(thinkingLevel, piThinkingLevels)
+
+    /** 记录 pi 报的可用档位（**不改用户存的偏好**：模型不支持思考时由界面按 `pref && support` 渲染成关） */
+    private fun applyPiLevels(levels: List<String>) {
+        piThinkingLevels = levels
+    }
+
+    /**
+     * **把界面的思考开关/档位同步给 pi**（执行方是 pi，界面只是偏好）：
+     * - 通道不可用 → 清空镜像（下次通道就绪时会再推一次）；
+     * - 只在目标 ≠ pi 现值时才推（每变一次 pi 会往会话 append 一条 `thinking_level_change`）；
+     * - 推完**回读**真值（pi 会按模型能力夹取，界面据此显示实际档位）。
+     */
+    fun syncThinkingToPi() {
+        if (!PiRpc.usable()) {
+            piThinkingLevel = null
+            piThinkingLevels = null
+            return
+        }
+        bgScope.launch { syncThinkingToPiNow() }
+    }
+
+    /**
+     * 上一条的**挂起版**：发送路径必须 `await` 它（2026-09-17 实测发现）——
+     * 通道刚重启时 pi 的档位还是默认 `medium`，若推送与 `prompt` 并行发出，**本轮会跑在旧档位上**
+     * （只有下一条消息才对）。所以发送前一律先 await 同步完再发。
+     */
+    suspend fun syncThinkingToPiNow() {
+        if (!PiRpc.usable()) return
+        PiRpc.availableThinkingLevels()?.let { applyPiLevels(it) }
+        val target = targetPiLevel()
+        val now = PiRpc.thinkingLevelNow()
+        if (now != target) PiRpc.setThinkingLevel(target)
+        piThinkingLevel = PiRpc.thinkingLevelNow() ?: now ?: target
+    }
 
     /** 聊天页可用模型 = 已配置服务商模型列表（模型切换数据源） */
     val availableModels: List<AiModel>

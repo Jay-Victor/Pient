@@ -28,6 +28,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -90,9 +91,18 @@ fun ModelSelectorSheet(
             .padding(12.dp),
     ) {
         // ① 思考折叠栏（Operit ClassicThinkingSettingsItem 风格）
+        // 2026-09-17：思考参数由 **pi** 发出去，所以这里的开关/滑轨必须推到 pi 才算数。
+        // 打开面板 = 把界面偏好推给 pi 并回读（pi 会按模型能力夹取）；通道没起时自动跳过。
+        LaunchedEffect(Unit) { chatState.syncThinkingToPi() }
+        val piLevels = chatState.piThinkingLevels
+        val piNow = chatState.piThinkingLevel
+        val piSupportsThinking = piLevels == null || piLevels.any { it != "off" }
+        // **生效态 = 用户偏好 && 模型支持**：模型不支持思考时按「关」渲染，但**不覆写用户的偏好**
+        // （否则切到不支持思考的模型再切回来，用户原本开着的开关会被静默关掉）
+        val thinkingOn = chatState.thinkingEnabled && piSupportsThinking
         ThinkingModeRow(
-            enabled = chatState.thinkingEnabled,
-            levelLabel = if (chatState.thinkingEnabled) chatState.thinkingLevel.label else "off",
+            enabled = thinkingOn,
+            levelLabel = if (thinkingOn) chatState.thinkingLevel.label else "off",
             expanded = thinkingExpanded,
             onClick = { thinkingExpanded = !thinkingExpanded },
         )
@@ -108,28 +118,46 @@ fun ModelSelectorSheet(
                         modifier = Modifier.weight(1f),
                     )
                     Switch(
-                        checked = chatState.thinkingEnabled,
-                        onCheckedChange = { chatState.thinkingEnabled = it },
+                        checked = thinkingOn,
+                        // 模型不支持思考（pi 只给 off）→ 开关不可点，不摆假控件
+                        enabled = piSupportsThinking,
+                        onCheckedChange = {
+                            chatState.thinkingEnabled = it
+                            chatState.syncThinkingToPi()
+                        },
                         colors = SwitchDefaults.colors(
                             checkedTrackColor = MaterialTheme.colorScheme.primary,
                         ),
                     )
                 }
-                if (chatState.thinkingEnabled) {
-                    // 档位是否对该服务商有效（2026-09-12）：与请求体共用 AiBackend.levelWire 的判断，
-                    // 面板不出现「说 A 实际发 B」；不支持档位的服务商滑轨置灰并明确说明。
+                // 模型不支持思考（pi 只给 off）→ 说明**常显**：开关按「关」渲染（`thinkingOn`），
+                // 不能只让用户看到「开关没打开」而不知道原因。
+                if (!piSupportsThinking) {
+                    Text(
+                        L.chat.thinkingUnsupportedModel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                } else if (chatState.thinkingEnabled) {
+                    // 档位判据：**以 pi 为准**（`get_available_thinking_levels` + `get_state`）；
+                    // pi 还没答上来（通道没起/首次）才回落到旧的 AiBackend.levelWire 估算。
                     val cfg = chatState.selectedModel?.provider?.let { AiConfigStore.configs[it] }
-                    val wire = cfg?.let { AiBackend.levelWire(it, chatState.thinkingLevel) }
+                    val wire = if (piLevels == null) cfg?.let { AiBackend.levelWire(it, chatState.thinkingLevel) } else null
                     ThinkingLevelSlider(
                         level = chatState.thinkingLevel,
-                        onChange = { chatState.thinkingLevel = it },
-                        enabled = wire != null && wire != AiBackend.LevelWire.Unsupported,
+                        onChange = {
+                            chatState.thinkingLevel = it
+                            chatState.syncThinkingToPi()
+                        },
+                        enabled = wire != AiBackend.LevelWire.Unsupported,
                         modifier = Modifier.padding(top = 12.dp),
                     )
                     Text(
-                        when (wire) {
-                            is AiBackend.LevelWire.Word -> L.chat.providerReceives(wire.value)
-                            is AiBackend.LevelWire.Budget -> L.chat.thinkingBudget(wire.tokens)
+                        when {
+                            piNow != null -> L.chat.providerReceives(piNow)
+                            wire is AiBackend.LevelWire.Word -> L.chat.providerReceives(wire.value)
+                            wire is AiBackend.LevelWire.Budget -> L.chat.thinkingBudget(wire.tokens)
                             else -> L.chat.levelUnsupported
                         },
                         style = MaterialTheme.typography.labelSmall,
