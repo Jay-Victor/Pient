@@ -46,7 +46,7 @@ object SessionExport {
      * 实现见 [DownloadsOut]（与日志导出共用一份：同一语义不写第二遍）。
      */
     fun writeToDownloads(context: Context, fileName: String, content: String): String? =
-        DownloadsOut.writeText(context, fileName, "text/markdown", content)
+        DownloadsOut.writeText(context, fileName, "text/markdown", content)?.location
 
     /** 文件名：pient-sessions-20260916-0102.md（毫秒 + 会话数，避免重名覆盖） */
     fun fileName(count: Int): String {

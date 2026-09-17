@@ -431,8 +431,8 @@ object PiRpc {
     private fun readStderr(proc: Process) {
         runCatching {
             proc.errorStream.bufferedReader(StandardCharsets.UTF_8).forEachLine {
+                // 落盘/内存尾巴都在 noteStderr 里（一处写，别在这里再记一遍 —— 2026-09-17 去重）
                 noteStderr(it)
-                PientLog.w(TAG, "stderr: $it")
             }
         }
     }

@@ -65,7 +65,9 @@ import com.pient.app.data.Session
 import com.pient.app.ui.components.DetailRow
 import com.pient.app.ui.components.DividerLine
 import com.pient.app.ui.components.PientButton
+import com.pient.app.ui.components.PientChoiceRow
 import com.pient.app.ui.components.PientDialog
+import com.pient.app.ui.components.PientSearchField
 import com.pient.app.ui.components.ProjectInfo
 import com.pient.app.ui.components.SectionHeader
 import com.pient.app.ui.components.computeProjectInfo
@@ -174,7 +176,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
                 ) {
                     // 搜索框
-                    RecordSearchField(
+                    PientSearchField(
                         value = projectQuery,
                         onValueChange = { projectQuery = it },
                         placeholder = L.project.searchProjects,
@@ -245,7 +247,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
                 ) {
                     // 搜索框
-                    RecordSearchField(
+                    PientSearchField(
                         value = sessionQuery,
                         onValueChange = { sessionQuery = it },
                         placeholder = L.session.searchSessions,
@@ -359,7 +361,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
                 ) {
                     // 搜索框
-                    RecordSearchField(
+                    PientSearchField(
                         value = unbindQuery,
                         onValueChange = { unbindQuery = it },
                         placeholder = L.project.searchUnbound,
@@ -526,13 +528,13 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                     modifier = Modifier.padding(top = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    ActionChoiceRow(
+                    PientChoiceRow(
                         icon = Icons.Outlined.FileDownload,
                         label = L.project.exportSessions,
                         selected = actionChoice == 0,
                         onClick = { actionChoice = 0 },
                     )
-                    ActionChoiceRow(
+                    PientChoiceRow(
                         icon = Icons.Outlined.Delete,
                         label = L.session.deleteSession,
                         selected = actionChoice == 1,
@@ -768,13 +770,13 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                     modifier = Modifier.padding(top = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    ActionChoiceRow(
+                    PientChoiceRow(
                         icon = Icons.Outlined.Link,
                         label = L.project.rebind,
                         selected = unboundActionChoice == 0,
                         onClick = { unboundActionChoice = 0 },
                     )
-                    ActionChoiceRow(
+                    PientChoiceRow(
                         icon = Icons.Outlined.Delete,
                         label = L.common.delete,
                         selected = unboundActionChoice == 1,
@@ -946,59 +948,6 @@ private fun SessionRowMenu(
         },
         onClick = onDelete,
     )
-}
-
-/** 记录卡内搜索框（surfaceContainerHigh 底 + 圆角 10 + Search 图案 + placeholder + 有输入时 × 清空） */
-@Composable
-private fun RecordSearchField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    placeholder: String,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(10.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-    ) {
-        Icon(
-            Icons.Outlined.Search, null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(18.dp),
-        )
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onBackground),
-            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-            singleLine = true,
-            decorationBox = { innerTextField ->
-                Box {
-                    if (value.isEmpty()) {
-                        Text(
-                            placeholder,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        )
-                    }
-                    innerTextField()
-                }
-            },
-            modifier = Modifier.weight(1f).padding(start = 8.dp),
-        )
-        if (value.isNotEmpty()) {
-            Icon(
-                Icons.Outlined.Close, L.project.clearSearchField,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .size(16.dp)
-                    .clickable(onClick = { onValueChange("") }),
-            )
-        }
-    }
 }
 
 /** 项目记录行：名称 + 路径小字；点击单选高亮（再点取消）；行尾竖直三点菜单 */
@@ -1252,53 +1201,6 @@ private fun UnboundProjectRow(
                     onClick = onDelete,
                 )
             }
-        }
-    }
-}
-
-/** 弹窗操作选择行：图标 + 文字；选中 = accent 0.10 底 + 描边 + 右侧 √ */
-@Composable
-private fun ActionChoiceRow(
-    icon: ImageVector,
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    danger: Boolean = false,
-) {
-    val accent = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                if (selected) accent.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceContainerLow,
-                RoundedCornerShape(10.dp),
-            )
-            .border(
-                1.dp,
-                if (selected) accent.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant,
-                RoundedCornerShape(10.dp),
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-    ) {
-        Icon(
-            icon, null,
-            tint = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(18.dp),
-        )
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.weight(1f).padding(start = 10.dp),
-        )
-        if (selected) {
-            Icon(
-                Icons.Outlined.Check, null,
-                tint = accent,
-                modifier = Modifier.size(16.dp),
-            )
         }
     }
 }

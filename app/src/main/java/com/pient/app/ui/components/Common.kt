@@ -34,7 +34,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -793,4 +795,110 @@ fun PientTextArea(
             }
         },
     )
+}
+
+/**
+ * 卡片内搜索框（2026-09-17 从项目管理页抽成共用组件）：surfaceContainerHigh 底 + 圆角 10 +
+ * Search 图案 + placeholder + 有输入时右侧 × 清空。项目管理页三处与日志查看页共用（同一语义一份实现）。
+ */
+@Composable
+fun PientSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(10.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        Icon(
+            Icons.Outlined.Search, null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onBackground),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            singleLine = true,
+            decorationBox = { innerTextField ->
+                Box {
+                    if (value.isEmpty()) {
+                        Text(
+                            placeholder,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        )
+                    }
+                    innerTextField()
+                }
+            },
+            modifier = Modifier.weight(1f).padding(start = 8.dp),
+        )
+        if (value.isNotEmpty()) {
+            Icon(
+                Icons.Outlined.Close, L.common.clearSearch,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(16.dp)
+                    .clickable(onClick = { onValueChange("") }),
+            )
+        }
+    }
+}
+
+/**
+ * 弹窗操作选择行（2026-09-17 从项目管理页抽成共用组件）：图标 + 文字；
+ * 选中 = accent 0.10 底 + 描边 + 右侧 √；danger = 红字（删除类）。
+ */
+@Composable
+fun PientChoiceRow(
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    danger: Boolean = false,
+) {
+    val accent = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                if (selected) accent.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceContainerLow,
+                RoundedCornerShape(10.dp),
+            )
+            .border(
+                1.dp,
+                if (selected) accent.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant,
+                RoundedCornerShape(10.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+    ) {
+        Icon(
+            icon, null,
+            tint = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.weight(1f).padding(start = 10.dp),
+        )
+        if (selected) {
+            Icon(
+                Icons.Outlined.Check, null,
+                tint = accent,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+    }
 }

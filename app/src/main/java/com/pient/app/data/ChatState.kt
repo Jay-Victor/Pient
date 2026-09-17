@@ -1313,7 +1313,8 @@ class ChatState {
         list.addAll(rebuilt)
         if (pending != null && pending.text.isNotBlank() && !known) {
             list += pending
-            PientLog.i(TAG_CHAT, "重建后补回未被 pi 记录的用户消息：${pending.text.take(24)}")
+            // 只记「条数 + 长度」，不记正文（2026-09-17 用户拍板的隐私口径：日志里不留用户内容）
+            PientLog.i(TAG_CHAT, "重建后补回未被 pi 记录的用户消息：1 条（${pending.text.length} 字）")
         }
         // 位置**不进本地条目树**（2026-09-15）：pi 的条目 id 与本地镜像 id 不同源，写进来会让
         // leafPath 落空、会话在界面上变空白（实测踩过）。pi 侧位置由 [piDesiredLeaf] 单独记。

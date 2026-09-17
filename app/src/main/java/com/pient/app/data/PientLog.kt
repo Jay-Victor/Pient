@@ -251,6 +251,88 @@ object PientLog {
     private fun isStamp(s: String): Boolean =
         s.length == 23 && s[4] == '-' && s[10] == ' ' && s[13] == ':' && s[16] == ':'
 
+    // ───────────────────────── 行解析（查看页 / 导出范围过滤共用一份） ─────────────────────────
+
+    /**
+     * 一条日志记录：`level`/`timeMs`/`tag` 取首行（续行 —— 堆栈、轮转标记 —— 为 null），
+     * `lines` 是整条（含续行）。切段规则与文件格式同口径，见本对象头注释。
+     */
+    data class Record(val level: Char?, val timeMs: Long?, val tag: String?, val lines: List<String>)
+
+    /** `2026-09-17 20:45:12.123 I/PientChat: 正文` → 'I'；不是行首前缀返回 null */
+    fun levelOf(line: String): Char? {
+        if (line.length < 26) return null
+        if (line[4] != '-' || line[7] != '-' || line[10] != ' ' || line[13] != ':' ||
+            line[16] != ':' || line[19] != '.' || line[23] != ' ' || line[25] != '/'
+        ) {
+            return null
+        }
+        val lv = line[24]
+        return if (lv in "VDIWEA") lv else null
+    }
+
+    private fun timeOf(line: String): Long? {
+        if (levelOf(line) == null) return null
+        return synchronized(timeFormat) {
+            runCatching { timeFormat.parse(line.take(23))?.time }.getOrNull()
+        }
+    }
+
+    private fun tagOf(line: String): String? {
+        if (levelOf(line) == null) return null
+        val rest = line.substring(26)
+        val idx = rest.indexOf(':')
+        return if (idx <= 0) null else rest.take(idx)
+    }
+
+    fun parseRecords(raw: List<String>): List<Record> {
+        val out = ArrayList<Record>()
+        var cur: MutableList<String>? = null
+        var level: Char? = null
+        var timeMs: Long? = null
+        var tag: String? = null
+        fun flush() {
+            cur?.let { out.add(Record(level, timeMs, tag, it)) }
+            cur = null
+        }
+        raw.forEach { rawLine ->
+            val line = rawLine.trimEnd('\r')
+            val lv = levelOf(line)
+            when {
+                lv != null -> {
+                    flush()
+                    cur = mutableListOf(line)
+                    level = lv
+                    timeMs = timeOf(line)
+                    tag = tagOf(line)
+                }
+                // 轮转标记自成一"条"（别把 `---- pient.log.1 ----` 粘到上一条的正文里）
+                line.startsWith("---- ") -> {
+                    flush()
+                    out.add(Record(null, null, null, listOf(line)))
+                }
+                cur == null -> out.add(Record(null, null, null, listOf(line)))
+                else -> cur!!.add(line)
+            }
+        }
+        flush()
+        return out
+    }
+
+    fun render(records: List<Record>): String =
+        records.joinToString("\n") { it.lines.joinToString("\n") }
+
+    /** 级别过滤：`minLevel = 'W'` 时保留 W/E 与其续行（整条一起进出） */
+    fun atLeastLevel(records: List<Record>, minLevel: Char): List<Record> {
+        val order = "VDIWEA"
+        val min = order.indexOf(minLevel)
+        return records.filter { it.level != null && order.indexOf(it.level) >= min }
+    }
+
+    /** 时间过滤：首行时间戳 ≥ [sinceMs] 的整条（时间戳缺失的行只在 sinceMs 为 0 时保留） */
+    fun since(records: List<Record>, sinceMs: Long): List<Record> =
+        records.filter { (it.timeMs ?: Long.MIN_VALUE) >= sinceMs }
+
     private fun stamp(): String = synchronized(timeFormat) { timeFormat.format(Date()) }
 
     // ───────────────────────── 写入线程 ─────────────────────────

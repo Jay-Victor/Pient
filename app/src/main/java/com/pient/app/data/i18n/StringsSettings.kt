@@ -84,12 +84,43 @@ interface SettingsStrings {
     val logExportTimeLabel: String
     val logSectionEnv: String
     fun logSectionStderr(a0: Any?): String
-    fun logSectionApp(a0: Any?): String
+    fun logSectionAppScoped(a0: Any?, a1: Any?): String
     val logSectionSystem: String
     fun logSystemNeedTier(a0: Any?): String
     val logSystemSelf: String
     val logSystemEmpty: String
     fun logSystemFailed(a0: Any?): String
+
+    // ── 应用日志管理 · 第二批（2026-09-17）：导出范围 / 分享 / 诊断摘要 / 上次运行 / 查看器筛选 ──
+    val logScopeLabel: String
+    val logScopeAll: String
+    val logScopeWarn: String
+    val logScopeRecent: String
+    val logScopeTitle: String
+    val logSectionExit: String
+    val logCopyDiag: String
+    val logCopyDiagSubtitle: String
+    val logExportDoneTitle: String
+    val logShare: String
+    val logSearchHint: String
+    val logFilterLevelLabel: String
+    val logFilterTagLabel: String
+    val logFilterAllTags: String
+    val logFilterReset: String
+    val logExitTitle: String
+    val logExitUnsupported: String
+    val logExitNone: String
+    fun logExitReason(a0: Any?): String
+    fun logExitTimeAndNote(a0: Any?, a1: Any?): String
+    val logExitHasTrace: String
+    val logExitCrash: String
+    val logExitCrashNative: String
+    val logExitAnr: String
+    val logExitLowMemory: String
+    val logExitSignaled: String
+    val logExitSelf: String
+    val logExitUser: String
+    val logExitOther: String
 }
 
 object ZhSettings : SettingsStrings {
@@ -155,7 +186,7 @@ object ZhSettings : SettingsStrings {
     override val logExportSubtitle: String = "生成到系统「下载/Pient/」，可发给开发者分析"
     override val logExporting: String = "正在导出…"
     override val logView: String = "查看最近日志"
-    override val logViewSubtitle: String = "只读查看最近 2000 行，可按级别筛选"
+    override val logViewSubtitle: String = "只读查看最近 2000 行，可按级别 / tag / 关键字筛选"
     override val logClear: String = "清空日志"
     override val logClearSubtitle: String = "删除已记录的全部运行日志"
     override val logClearTitle: String = "清空日志？"
@@ -164,7 +195,7 @@ object ZhSettings : SettingsStrings {
     override fun logExported(a0: Any?): String = "日志已导出：${a0}"
     override val logExportEmpty: String = "还没有可导出的日志"
     override val logExportFailed: String = "导出失败，请重试"
-    override val logNote: String = "日志记录应用运行过程（含 pi 报错原文与环境信息）。不含 API 密钥与会话内容 —— 会话导出见「项目与会话记录」。"
+    override val logNote: String = "日志记录应用运行过程（含 pi 报错原文与环境信息），不含 API 密钥、不记录会话正文（导出前还会对疑似密钥的字符串加掩码）；「上次运行」来自系统退出记录。会话内容请用「项目与会话记录 → 导出会话」。"
     override val logViewerTitle: String = "日志"
     override val logFilterAll: String = "全部"
     override val logFilterWarn: String = "警告以上"
@@ -175,12 +206,43 @@ object ZhSettings : SettingsStrings {
     override val logExportTimeLabel: String = "导出时间："
     override val logSectionEnv: String = "环境报告"
     override fun logSectionStderr(a0: Any?): String = "pi stderr（最近 ${a0} 行）"
-    override fun logSectionApp(a0: Any?): String = "应用日志（${a0} 行）"
+    override fun logSectionAppScoped(a0: Any?, a1: Any?): String = "应用日志（${a0} · ${a1} 行）"
     override val logSectionSystem: String = "系统日志（logcat）"
     override fun logSystemNeedTier(a0: Any?): String = "系统日志需要调试 / Root 档；当前档位 ${a0} 没有特权通道"
     override val logSystemSelf: String = "应用自身 logcat 尾部（无特权通道：只有本应用的日志行；系统其它进程的日志需要调试 / Root 档）"
     override val logSystemEmpty: String = "这次抓取没有匹配到日志行"
     override fun logSystemFailed(a0: Any?): String = "系统日志读取失败：${a0}"
+
+    // ── 第二批（2026-09-17）──
+    override val logScopeLabel: String = "范围："
+    override val logScopeAll: String = "全部"
+    override val logScopeWarn: String = "仅警告以上"
+    override val logScopeRecent: String = "最近 30 分钟"
+    override val logScopeTitle: String = "导出范围"
+    override val logSectionExit: String = "上次退出（系统记录）"
+    override val logCopyDiag: String = "复制诊断摘要"
+    override val logCopyDiagSubtitle: String = "把版本与环境信息复制到剪贴板（不含日志正文）"
+    override val logExportDoneTitle: String = "日志已导出"
+    override val logShare: String = "分享"
+    override val logSearchHint: String = "搜索日志…"
+    override val logFilterLevelLabel: String = "级别"
+    override val logFilterTagLabel: String = "tag"
+    override val logFilterAllTags: String = "全部 tag"
+    override val logFilterReset: String = "重置"
+    override val logExitTitle: String = "上次运行"
+    override val logExitUnsupported: String = "本机不支持（Android 11 起系统才记录这项）"
+    override val logExitNone: String = "未检测到异常退出"
+    override fun logExitReason(a0: Any?): String = "上次退出：${a0}"
+    override fun logExitTimeAndNote(a0: Any?, a1: Any?): String = "${a0} · 系统记录${a1}"
+    override val logExitHasTrace: String = " · 含 ANR 轨迹（随导出带走）"
+    override val logExitCrash: String = "崩溃（未捕获异常）"
+    override val logExitCrashNative: String = "原生崩溃"
+    override val logExitAnr: String = "无响应（ANR）"
+    override val logExitLowMemory: String = "被系统回收内存杀掉"
+    override val logExitSignaled: String = "被系统信号终止"
+    override val logExitSelf: String = "应用主动退出"
+    override val logExitUser: String = "被用户强制停止"
+    override val logExitOther: String = "其它原因"
 }
 
 object EnSettings : SettingsStrings {
@@ -246,7 +308,7 @@ object EnSettings : SettingsStrings {
     override val logExportSubtitle: String = "Writes to the system “Downloads/Pient/” folder — send it to the developer for analysis"
     override val logExporting: String = "Exporting…"
     override val logView: String = "View recent log"
-    override val logViewSubtitle: String = "Read-only, last 2000 lines, filterable by level"
+    override val logViewSubtitle: String = "Read-only, last 2000 lines, filterable by level / tag / keyword"
     override val logClear: String = "Clear log"
     override val logClearSubtitle: String = "Delete all recorded runtime log"
     override val logClearTitle: String = "Clear log?"
@@ -255,7 +317,7 @@ object EnSettings : SettingsStrings {
     override fun logExported(a0: Any?): String = "Log exported: ${a0}"
     override val logExportEmpty: String = "Nothing to export yet"
     override val logExportFailed: String = "Export failed, please retry"
-    override val logNote: String = "The log records the app's runtime (including pi's raw errors and environment info). It contains no API keys and no session content — export sessions from “Project & session records”."
+    override val logNote: String = "The log records the app's runtime (including pi's raw errors and environment info). It contains no API keys and no session text (suspected key-like strings are masked before export); “Last run” comes from the system's exit record. Use “Project & session records → Export sessions” for session content."
     override val logViewerTitle: String = "Log"
     override val logFilterAll: String = "All"
     override val logFilterWarn: String = "Warning+"
@@ -266,10 +328,41 @@ object EnSettings : SettingsStrings {
     override val logExportTimeLabel: String = "Exported at: "
     override val logSectionEnv: String = "Environment report"
     override fun logSectionStderr(a0: Any?): String = "pi stderr (last ${a0} lines)"
-    override fun logSectionApp(a0: Any?): String = "App log (${a0} lines)"
+    override fun logSectionAppScoped(a0: Any?, a1: Any?): String = "App log (${a0} · ${a1} lines)"
     override val logSectionSystem: String = "System log (logcat)"
     override fun logSystemNeedTier(a0: Any?): String = "System log needs the Debugger / Root tier; tier ${a0} has no privileged channel"
     override val logSystemSelf: String = "The app's own logcat tail (no privileged channel: this app's lines only; other processes' logs need the Debugger / Root tier)"
     override val logSystemEmpty: String = "No matching log lines were captured this time"
     override fun logSystemFailed(a0: Any?): String = "Failed to read the system log: ${a0}"
+
+    // ── Batch 2 (2026-09-17) ──
+    override val logScopeLabel: String = "Scope: "
+    override val logScopeAll: String = "Everything"
+    override val logScopeWarn: String = "Warnings and errors only"
+    override val logScopeRecent: String = "Last 30 minutes"
+    override val logScopeTitle: String = "Export scope"
+    override val logSectionExit: String = "Last exit (system record)"
+    override val logCopyDiag: String = "Copy diagnostic summary"
+    override val logCopyDiagSubtitle: String = "Copy version and environment info to the clipboard (no log body)"
+    override val logExportDoneTitle: String = "Log exported"
+    override val logShare: String = "Share"
+    override val logSearchHint: String = "Search log…"
+    override val logFilterLevelLabel: String = "Level"
+    override val logFilterTagLabel: String = "tag"
+    override val logFilterAllTags: String = "All tags"
+    override val logFilterReset: String = "Reset"
+    override val logExitTitle: String = "Last run"
+    override val logExitUnsupported: String = "Not available here (the system records this from Android 11 on)"
+    override val logExitNone: String = "No abnormal exit detected"
+    override fun logExitReason(a0: Any?): String = "Last exit: ${a0}"
+    override fun logExitTimeAndNote(a0: Any?, a1: Any?): String = "${a0} · system record${a1}"
+    override val logExitHasTrace: String = " · includes the ANR trace (travels with the export)"
+    override val logExitCrash: String = "Crash (uncaught exception)"
+    override val logExitCrashNative: String = "Native crash"
+    override val logExitAnr: String = "Not responding (ANR)"
+    override val logExitLowMemory: String = "Killed by the system to reclaim memory"
+    override val logExitSignaled: String = "Terminated by a system signal"
+    override val logExitSelf: String = "App exited on its own"
+    override val logExitUser: String = "Force-stopped by the user"
+    override val logExitOther: String = "Other reason"
 }

@@ -2,4 +2,6 @@
 <!-- FileProvider 可共享路径（\"+\" 附件菜单拍照：相机应用经 content URI 写入缓存文件） -->
 <paths>
     <cache-path name="camera_cache" path="camera/" />
+    <!-- 日志/会话导出（API 26~28 落在应用外部下载目录，分享时走 FileProvider） -->
+    <external-files-path name="pient_export" path="Download/" />
 </paths>

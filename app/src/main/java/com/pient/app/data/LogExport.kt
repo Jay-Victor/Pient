@@ -34,21 +34,40 @@ object LogExport {
 
     private const val TAG = "PientExport"
 
+    /** 导出范围（用户拍板三选，2026-09-17）：全部 / 仅警告以上 / 最近 30 分钟 —— 作用于**应用日志段** */
+    enum class LogScope(val minutes: Long) {
+        ALL(0L),
+        WARN(0L),
+        RECENT(30L);
+
+        val label: String
+            get() = when (this) {
+                ALL -> L.settings.logScopeAll
+                WARN -> L.settings.logScopeWarn
+                RECENT -> L.settings.logScopeRecent
+            }
+    }
+
     fun fileName(): String =
         "pient-log-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".txt"
 
     // ───────────────────────── 组装 ─────────────────────────
 
     /** 组装导出文本（系统日志由调用方先取好 —— 那段要跑特权通道，是阻塞调用） */
-    fun build(context: Context, systemLog: String): String {
+    fun build(context: Context, systemLog: String, scope: LogScope = LogScope.ALL): String {
         val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
         val sb = StringBuilder()
         sb.append("=== ").append(L.settings.logDocTitle).append(" ===\n")
         sb.append(L.settings.logExportTimeLabel).append(stamp).append('\n')
+        sb.append(L.settings.logScopeLabel).append(scope.label).append('\n')
         sb.append('\n')
 
         sb.append(section(L.settings.logSectionEnv)).append('\n')
         sb.append(envReport(context)).append('\n')
+
+        // 上次退出（系统记录，Android 11+）：崩溃 / ANR / 被系统杀 —— 我们自己的崩溃 handler 看不到那几种
+        sb.append(section(L.settings.logSectionExit)).append('\n')
+        sb.append(ExitHistory.exportSection(context)).append("\n\n")
 
         val stderr = PiRpc.stderrText().trim()
         sb.append(section(L.settings.logSectionStderr(stderr.count { it == '\n' } + if (stderr.isEmpty()) 0 else 1)))
@@ -56,15 +75,62 @@ object LogExport {
         sb.append(stderr.ifBlank { "-" }).append("\n\n")
 
         val all = PientLog.readAll(context)
-        sb.append(section(L.settings.logSectionApp(all.count { it == '\n' }))).append('\n')
-        sb.append(all.ifBlank { "-" }).append('\n')
+        val scoped = applyScope(PientLog.parseRecords(all.lines()), scope)
+        sb.append(section(L.settings.logSectionAppScoped(scope.label, scoped.size))).append('\n')
+        sb.append(PientLog.render(scoped).ifBlank { "-" }).append('\n')
 
         sb.append(section(L.settings.logSectionSystem)).append('\n')
         sb.append(systemLog.ifBlank { "-" }).append('\n')
-        return sb.toString()
+        return mask(sb.toString())
+    }
+
+    /** 范围过滤（应用日志段）：全部 / 仅警告以上 / 最近 30 分钟 */
+    private fun applyScope(records: List<PientLog.Record>, scope: LogScope): List<PientLog.Record> = when (scope) {
+        LogScope.ALL -> records
+        LogScope.WARN -> PientLog.atLeastLevel(records, 'W')
+        LogScope.RECENT -> PientLog.since(records, System.currentTimeMillis() - scope.minutes * 60_000L)
     }
 
     private fun section(title: String) = "──── $title ────"
+
+    // ───────────────────────── 脱敏（导出前的最后一道） ─────────────────────────
+
+    /**
+     * 密钥类字符串掩码（defense in depth）：日志里本不该有密钥（auth.json 的凭据从不进日志），
+     * 但 pi 的 stderr / 平台日志可能带出别的东西 —— 导出是「要发给外人」的动作，这里再兜一层。
+     * 只掩明显的凭据形态，不动普通文本（免得把排障要看的 id 也糊掉）。
+     */
+    private val MASK_RULES: List<Pair<Regex, String>> = listOf(
+        Regex("""\bsk-[A-Za-z0-9_\-]{12,}""") to "sk-***",
+        Regex("""\b(?:ghp|gho|ghu|ghs|github_pat)_[A-Za-z0-9_]{16,}""") to "gh_***",
+        Regex("""\bAIza[A-Za-z0-9_\-]{20,}""") to "AIza***",
+        Regex("""(?i)\b(bearer)\s+[A-Za-z0-9._\-]{12,}""") to "$1 ***",
+        Regex("""(?i)\b(api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|password|passwd|secret)\b\s*[=:]\s*["']?[A-Za-z0-9._\-]{8,}["']?""") to "$1=***",
+        Regex("""(?i)\b(authorization)\b\s*[=:]\s*["']?[A-Za-z0-9._\-]{12,}["']?""") to "$1=***",
+    )
+
+    private fun mask(text: String): String {
+        var out = text
+        MASK_RULES.forEach { (re, rep) -> out = re.replace(out, rep) }
+        return out
+    }
+
+    /**
+     * 诊断摘要（复制到剪贴板用）：版本 + 设备 + ABI + 档位/通道 + rootfs/pi/node + 通道状态 +
+     * 服务商与模型 + 项目 + 上次退出 —— 就是历次排障真正要问的那十几行，不含日志正文。
+     */
+    fun diagnosticSummary(context: Context): String {
+        val sb = StringBuilder()
+        sb.append("=== ").append(L.settings.logDocTitle).append(" ===\n")
+        sb.append(envReport(context))
+        val exit = ExitHistory.last(context)?.let { "${it.label} · ${formatTime(it.timeMs)}" }
+            ?: if (ExitHistory.supported()) "-" else "unsupported"
+        sb.append("last_exit: ").append(exit).append('\n')
+        return sb.toString()
+    }
+
+    private fun formatTime(ms: Long): String =
+        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(ms))
 
     /**
      * 环境报告：`key: value` 一行一条。
@@ -211,13 +277,13 @@ object LogExport {
     // ───────────────────────── 导出 ─────────────────────────
 
     /**
-     * 导出并返回落点描述（失败 null）。调用方放 IO 线程（系统日志那段是阻塞的）。
+     * 导出并返回落点（失败 null）。调用方放 IO 线程（系统日志那段是阻塞的）。
      */
-    fun export(context: Context): String? {
-        val text = build(context, systemLogTail(context))
+    fun export(context: Context, scope: LogScope = LogScope.ALL): DownloadsOut.Written? {
+        val text = build(context, systemLogTail(context), scope)
         val where = DownloadsOut.writeText(context, fileName(), "text/plain", text)
         if (where != null) {
-            PientLog.i(TAG, "日志已导出：$where（${text.length} 字）")
+            PientLog.i(TAG, "日志已导出：${where.location}（${text.length} 字，范围=${scope.name}）")
         }
         return where
     }
