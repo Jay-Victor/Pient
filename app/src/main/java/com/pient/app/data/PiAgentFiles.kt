@@ -65,6 +65,10 @@ object PiAgentFiles {
      * 返回**内容是否真有变化**（不是「写成功」）—— 供配置页决定要不要让 pi 通道重读，见 [write]。
      */
     fun writeModels(context: Context, configs: Collection<ProviderConfig>): Boolean = runCatching {
+        // 旧文件：用来**保留应用不管理的模型字段**（`thinkingLevelMap` / `cost` / pi 将来新增的键）。
+        // 旧实现整条重建 —— 用户手写的 `thinkingLevelMap`（砍档、加 xhigh/max）撞上应用启动那次落盘
+        // 就被静默抹掉（2026-09-17 真机实测：夹具里的映射开机后消失）。
+        val oldProviders = readJson(modelsFile(context))?.optJSONObject("providers")
         val root = JSONObject()
         val providers = JSONObject()
         configs.forEach { c ->
@@ -79,7 +83,8 @@ object PiAgentFiles {
                 pj.put("compat", JSONObject(compat))
             }
             val models = JSONArray()
-            c.models.forEach { entry -> models.put(modelJson(entry, c)) }
+            val oldModels = oldProviders?.optJSONObject(c.providerId)?.optJSONArray("models")
+            c.models.forEach { entry -> models.put(modelJson(entry, c, oldModels)) }
             pj.put("models", models)
             providers.put(c.providerId, pj)
         }
@@ -197,16 +202,40 @@ object PiAgentFiles {
     // ─────────────────────────── 内部 ───────────────────────────
 
     /**
+     * 应用自己管理的 `models[]` 键：写盘时按页面值重写（留空 = 不写，所以是**先清后写**，不是合并）。
+     * 不在表里的键（`thinkingLevelMap` / `cost` / pi 将来新增的）**原样保留** —— 见 [modelJson]。
+     */
+    private val MANAGED_MODEL_KEYS = setOf(
+        "id", "name", "contextWindow", "maxTokens", "input", "reasoning", "samplingParams", "compat",
+    )
+
+    /**
      * 单个模型的 JSON（页面字段 → pi 字段）。
      * 模型条目语法：`id` 或 **`id=别名`**（别名写进 pi 的 `models[].name` —— 它用作 `--model` 匹配
      * 与副标题展示；`id` 本身才是发给服务商的东西，两者不要混）。
      */
-    private fun modelJson(entry: String, c: ProviderConfig): JSONObject {
+    private fun modelJson(entry: String, c: ProviderConfig, oldModels: JSONArray? = null): JSONObject {
         val id = entry.substringBefore('=').trim()
         val alias = entry.substringAfter('=', "").trim()
         // 逐模型参数（窗口 / 识图 / 采样）：有该模型的条目用它，没有则用卡面默认值
         val s = c.settingOf(id)
-        val m = JSONObject().put("id", id)
+        val m = JSONObject()
+        // 先按 id 搬回旧条目里**应用不管理**的字段（`thinkingLevelMap` / `cost` / pi 新增键）——
+        // 应用管理的键不能这样合并（页面留空 = 不写该键，合并会把旧值留下），所以分两张表。
+        oldModels?.let { arr ->
+            val o = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+                .firstOrNull { it.optString("id").trim() == id }
+            o?.let { old ->
+                for (k in old.keys()) if (k !in MANAGED_MODEL_KEYS) m.put(k, old.get(k))
+                // compat 是混合的：应用只写 thinkingFormat，其余（chatTemplateKwargs 等）留住
+                old.optJSONObject("compat")?.let { oc ->
+                    val keep = JSONObject()
+                    for (k in oc.keys()) if (k != "thinkingFormat") keep.put(k, oc.get(k))
+                    if (keep.length() > 0) m.put("compat", keep)
+                }
+            }
+        }
+        m.put("id", id)
         if (alias.isNotEmpty()) m.put("name", alias)
         s.ctxLenK.trim().toIntOrNull()?.takeIf { it > 0 }?.let { m.put("contextWindow", it * 1000) }
         s.maxOutK.trim().toIntOrNull()?.takeIf { it > 0 }?.let { m.put("maxTokens", it * 1000) }
@@ -233,7 +262,12 @@ object PiAgentFiles {
         if (reasoningOn) {
             m.put("reasoning", true)
             if (fmt != c.reasoningFormat) {
-                reasoningCompat(fmt)?.let { compat -> m.put("compat", JSONObject(compat)) }
+                // 并入（不是覆盖）：旧 compat 里保留下来的键不能丢
+                reasoningCompat(fmt)?.let { compat ->
+                    val merged = m.optJSONObject("compat")?.let { JSONObject(it.toString()) } ?: JSONObject()
+                    for (k in compat.keys) merged.put(k, compat[k])
+                    m.put("compat", merged)
+                }
             }
         } else if (s.reasoning == false) {
             m.put("reasoning", false)

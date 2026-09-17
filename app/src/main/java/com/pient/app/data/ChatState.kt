@@ -134,7 +134,7 @@ class ChatState {
         PiKeepAlive.detailProvider = {
             KeepAliveDetail(
                 model = selectedModel?.name,
-                thinking = if (thinkingEnabled) thinkingLevel.label else "off",
+                thinking = if (thinkingEnabled) ThinkingLevel.labelOf(thinkingLevel) else "off",
                 sessions = runCatching {
                     com.pient.app.runtime.TerminalSessions.sessions.count { !it.aiMirror }
                 }.getOrDefault(0),
@@ -1826,7 +1826,7 @@ class ChatState {
             }
             val started = streamThinkingStartedAt
             val duration = if (started > 0L) System.currentTimeMillis() - started else null
-            val level = if (thinkingEnabled) thinkingLevel.piValue else "off"
+            val level = if (thinkingEnabled) thinkingLevel else "off"
             // 上屏下标 = live preview latch：刚落下的这块保持展开，历史载入的一律收起
             liveThinkingIndex = appendEntry(Msg.Thinking(level, t, duration))
             streamThinkingStartedAt = 0L
@@ -2354,7 +2354,7 @@ class ChatState {
                     when (b.optString("type")) {
                         // 思考块：pi 条目里没有时长（durationMs = null → 折叠行按「已思考」呈现）
                         "thinking" -> b.optString("thinking").trim().takeIf { it.isNotEmpty() }?.let {
-                            val level = if (thinkingEnabled) thinkingLevel.piValue else "off"
+                            val level = if (thinkingEnabled) thinkingLevel else "off"
                             out += Msg.Thinking(level, it, null)
                         }
                         "text" -> b.optString("text").trim().takeIf { it.isNotEmpty() }
@@ -2443,7 +2443,15 @@ class ChatState {
     // id = "providerId/modelName"。
     var selectedModelId by mutableStateOf("")
     var thinkingEnabled by mutableStateOf(false)
-    var thinkingLevel by mutableStateOf(ThinkingLevel.MEDIUM)
+
+    /**
+     * 用户偏好档位 = **pi 的档位字面量**（`minimal`…`max`，2026-09-17 改）。
+     *
+     * 为什么不再用应用的五档枚举存偏好：界面现在**按 pi 报的档位渲染**（pi-web 口径），
+     * 存字面量就不需要「五档 ↔ n 档」的等距映射（那层映射会让档位少的模型出现两个停位等价、
+     * 「拖了没变化」的观感）。切到档位少的模型时 pi 会夹取并回读，偏好本身不被改写。
+     */
+    var thinkingLevel by mutableStateOf("medium")
 
     /**
      * **pi 侧此刻的档位**（真值在 pi：`get_state.thinkingLevel`）。null = 未知（通道没起 / 还没问过）。
@@ -2458,23 +2466,11 @@ class ChatState {
     var piThinkingLevels by mutableStateOf<List<String>?>(null)
 
     /**
-     * 五档 → pi 支持的档位（按比例等距落位：`floor(ordinal×(n−1)/4)`）。
-     *
-     * 用**向下取整**而不是四舍五入：并列（n=3 时「低」正好落在 low/high 中间）时取低档 ——
-     * 否则会出现「界面显示『低』、pi 实际拿到 high」这种与直觉相反的对应（已实测到）。
-     * pi 只回 `["off"]`（模型不支持思考）= `off`；档位未知（还没问过 pi / 通道没起）时按 1:1 送，
-     * 由 pi 自己夹取。
+     * 该发给 pi 的档位：关思考 = `off`，开 = 偏好本身（偏好就是 pi 的档位字面量，**不用再映射**）。
+     * 偏好不在当前模型的可用档里时由 pi 夹取（`clampThinkingLevel`），界面再回读真值上屏。
      */
-    fun piLevelFor(level: ThinkingLevel, levels: List<String>?): String {
-        val usable = levels.orEmpty().filter { it != "off" }
-        if (levels != null && usable.isEmpty()) return "off"
-        if (usable.isEmpty()) return level.piValue
-        return usable[level.ordinal * (usable.size - 1) / 4]
-    }
-
-    /** 当前界面口径该发给 pi 的档位（关闭思考 = `off`） */
     fun targetPiLevel(): String =
-        if (!thinkingEnabled) "off" else piLevelFor(thinkingLevel, piThinkingLevels)
+        if (!thinkingEnabled) "off" else thinkingLevel
 
     /** 记录 pi 报的可用档位（**不改用户存的偏好**：模型不支持思考时由界面按 `pref && support` 渲染成关） */
     private fun applyPiLevels(levels: List<String>) {
@@ -2507,7 +2503,10 @@ class ChatState {
         val target = targetPiLevel()
         val now = PiRpc.thinkingLevelNow()
         if (now != target) PiRpc.setThinkingLevel(target)
-        piThinkingLevel = PiRpc.thinkingLevelNow() ?: now ?: target
+        // **只记 pi 确认过的值**：不能再 `?: target` 回落 —— 那样通道没起时界面会把「偏好」当成
+        // pi 的真值念出来（2026-09-17 真机自查：没通道时那行写「服务商实际收到：low」）。
+        // 拿不到就留 null，由界面走「预计…」的估算分支（见 ModelSelectorSheet）。
+        piThinkingLevel = PiRpc.thinkingLevelNow() ?: now
     }
 
     /** 聊天页可用模型 = 已配置服务商模型列表（模型切换数据源） */

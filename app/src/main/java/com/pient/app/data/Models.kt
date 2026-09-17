@@ -890,10 +890,23 @@ enum class ThinkingLevel(val piValue: String) {
     }
 
     companion object {
-        fun fromPi(v: String): ThinkingLevel =
-            entries.firstOrNull { it.piValue == v } ?: MEDIUM
+        /** pi 档位名 → 枚举；pi 有而应用没有的（如 `max`）返回 null */
+        fun byPi(v: String): ThinkingLevel? = entries.firstOrNull { it.piValue == v }
+
+        /**
+         * pi 档位名 → 本地化标签；应用枚举里没有的名字**原样显示字面量**
+         * （pi-web 同款口径：它也是 `mappedVal ?? lvl` 直接露出档位名）。
+         */
+        fun labelOf(piValue: String): String = byPi(piValue)?.label ?: piValue
     }
 }
+
+/**
+ * pi 还没答上来（通道没起 / 首次打开面板）时的**回退档位表**：应用内置这五档，
+ * 与旧版滑轨一致（`max` 不主动暴露 —— pi 的 `getSupportedThinkingLevels` 也只在
+ * `thinkingLevelMap` 显式映射时才把它算进可用档）。pi 一旦答了就以 pi 的列表为准。
+ */
+val THINKING_LEVEL_FALLBACK: List<String> = listOf("minimal", "low", "medium", "high", "xhigh")
 
 /**
  * 思考参数的**线上写法**（2026-09-12 真实化；此前只有「省略」一种行为）。

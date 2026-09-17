@@ -100,7 +100,11 @@ interface ChatStrings {
     val thinkingMode: String
     fun providerReceives(a0: Any?): String
     fun thinkingBudget(a0: Any?): String
+    /** pi 还没答上来时的**应用侧估算**（措辞与真值 [providerReceives] 区分开） */
+    fun providerExpected(a0: Any?): String
     val levelUnsupported: String
+    /** 该模型只有一个思考档位（画滑轨也没得选 → 只显示档位名 + 这句） */
+    val thinkingSingleLevel: String
     val thinkingUnsupportedModel: String
     val noModelsAvailable: String
     val manageModels: String
@@ -288,7 +292,9 @@ object ZhChat : ChatStrings {
     override val thinkingMode: String = "思考模式"
     override fun providerReceives(a0: Any?): String = "服务商实际收到：${a0}"
     override fun thinkingBudget(a0: Any?): String = "思考预算：${a0} tokens"
+    override fun providerExpected(a0: Any?): String = "预计服务商收到：${a0}"
     override val levelUnsupported: String = "当前服务商不支持档位调节（只支持开 / 关）"
+    override val thinkingSingleLevel: String = "该模型只有这一个思考档位"
     override val thinkingUnsupportedModel: String = "该模型不支持思考（pi 侧只提供 off）"
     override val noModelsAvailable: String = "暂无可用模型 · 请在「服务商与模型配置」中添加服务商并填写模型列表"
     override val manageModels: String = "管理模型配置"
@@ -462,7 +468,9 @@ object EnChat : ChatStrings {
     override val thinkingMode: String = "Thinking mode"
     override fun providerReceives(a0: Any?): String = "Provider receives: ${a0}"
     override fun thinkingBudget(a0: Any?): String = "Thinking budget: ${a0} tokens"
+    override fun providerExpected(a0: Any?): String = "Expected provider value: ${a0}"
     override val levelUnsupported: String = "This provider doesn't support level tuning (on / off only)"
+    override val thinkingSingleLevel: String = "This model has only this one thinking level"
     override val thinkingUnsupportedModel: String = "This model has no thinking support (pi only offers off)"
     override val noModelsAvailable: String = "No models available · Add a provider and fill in its model list in \"Providers & models\""
     override val manageModels: String = "Manage models"

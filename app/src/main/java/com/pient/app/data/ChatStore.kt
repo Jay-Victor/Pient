@@ -23,7 +23,8 @@ object ChatStore {
             root.put("currentSessionId", state.currentSessionId ?: JSONObject.NULL)
             root.put("selectedModelId", state.selectedModelId)
             root.put("thinkingEnabled", state.thinkingEnabled)
-            root.put("thinkingLevel", state.thinkingLevel.name)
+            // 存的是 pi 的档位字面量（`minimal`…`max`；旧文件是枚举名，载入侧有迁移）
+            root.put("thinkingLevel", state.thinkingLevel)
 
             val projects = JSONArray()
             state.projects.forEach { p ->
@@ -231,9 +232,13 @@ object ChatStore {
             state.currentSessionId = root.optString("currentSessionId").takeIf { it.isNotEmpty() }
             state.selectedModelId = root.optString("selectedModelId")
             state.thinkingEnabled = root.optBoolean("thinkingEnabled", false)
+            // 迁移（2026-09-17 起偏好存 **pi 的档位字面量**）：老文件里是应用枚举名（MINIMAL…XHIGH）
+            // → 换成对应档位名；已经是档位名（含 pi 才有的 `max`）就原样留下。
             state.thinkingLevel = runCatching {
-                ThinkingLevel.valueOf(root.optString("thinkingLevel", "MEDIUM"))
-            }.getOrDefault(ThinkingLevel.MEDIUM)
+                val raw = root.optString("thinkingLevel", "medium").trim()
+                runCatching { ThinkingLevel.valueOf(raw.uppercase()) }.getOrNull()?.piValue
+                    ?: raw.lowercase()
+            }.getOrDefault("medium")
             state.normalizeAfterLoad()
         } catch (e: Exception) {
             // 记录损坏：忽略（按全新状态处理）

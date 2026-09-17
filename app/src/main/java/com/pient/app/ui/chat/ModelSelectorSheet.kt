@@ -47,6 +47,8 @@ import com.pient.app.data.AiConfigStore
 import com.pient.app.data.AiModel
 import com.pient.app.data.ChatState
 import com.pient.app.data.ProviderCatalog
+import com.pient.app.data.THINKING_LEVEL_FALLBACK
+import com.pient.app.data.ThinkingLevel
 import com.pient.app.ui.components.ThinkingLevelSlider
 import com.pient.app.ui.theme.PientPanel
 
@@ -97,16 +99,23 @@ fun ModelSelectorSheet(
         val piLevels = chatState.piThinkingLevels
         val piNow = chatState.piThinkingLevel
         val piSupportsThinking = piLevels == null || piLevels.any { it != "off" }
-        // **生效态 = 用户偏好 && 模型支持**：模型不支持思考时按「关」渲染，但**不覆写用户的偏好**
-        // （否则切到不支持思考的模型再切回来，用户原本开着的开关会被静默关掉）
+        // **模型不支持思考 → 整项不出现**（2026-09-17 用户拍板）：pi 只回 `["off"]` 时，折叠栏、
+        // 开关、滑轨、说明全都不画 —— 一个用不上的功能项比一条解释更干扰（用户原话：不用出现「思考」一项）。
+        // `piLevels == null`（通道没起 / 还没答）时按支持渲染，避免刚开机闪一下消失、或无谓地藏起来。
+        // 用户的偏好（`thinkingEnabled` / `thinkingLevel`）照旧保留，切回支持思考的模型自动恢复。
         val thinkingOn = chatState.thinkingEnabled && piSupportsThinking
-        ThinkingModeRow(
-            enabled = thinkingOn,
-            levelLabel = if (thinkingOn) chatState.thinkingLevel.label else "off",
-            expanded = thinkingExpanded,
-            onClick = { thinkingExpanded = !thinkingExpanded },
-        )
-        if (thinkingExpanded) {
+        if (piSupportsThinking) {
+            ThinkingModeRow(
+                enabled = thinkingOn,
+                // 折叠栏显示**生效档位**：pi 的真值优先（它可能把偏好夹到别的档），还没回读就先用偏好
+                levelLabel = if (thinkingOn) {
+                    ThinkingLevel.labelOf(piNow?.takeIf { it != "off" } ?: chatState.thinkingLevel)
+                } else "off",
+                expanded = thinkingExpanded,
+                onClick = { thinkingExpanded = !thinkingExpanded },
+            )
+        }
+        if (piSupportsThinking && thinkingExpanded) {
             Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -119,8 +128,6 @@ fun ModelSelectorSheet(
                     )
                     Switch(
                         checked = thinkingOn,
-                        // 模型不支持思考（pi 只给 off）→ 开关不可点，不摆假控件
-                        enabled = piSupportsThinking,
                         onCheckedChange = {
                             chatState.thinkingEnabled = it
                             chatState.syncThinkingToPi()
@@ -130,34 +137,58 @@ fun ModelSelectorSheet(
                         ),
                     )
                 }
-                // 模型不支持思考（pi 只给 off）→ 说明**常显**：开关按「关」渲染（`thinkingOn`），
-                // 不能只让用户看到「开关没打开」而不知道原因。
-                if (!piSupportsThinking) {
-                    Text(
-                        L.chat.thinkingUnsupportedModel,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
-                } else if (chatState.thinkingEnabled) {
-                    // 档位判据：**以 pi 为准**（`get_available_thinking_levels` + `get_state`）；
-                    // pi 还没答上来（通道没起/首次）才回落到旧的 AiBackend.levelWire 估算。
+                // 到这里必然是「模型支持思考」（不支持时整项不出现）
+                if (chatState.thinkingEnabled) {
+                    // **档位 = pi 报的可用档位**（2026-09-17 照 pi-web 改）：pi 只列该模型真能用的档，
+                    // 界面就画几个停位 —— 不再拿固定五档去等距映射（那会在 `thinkingLevelMap` 砍过档、
+                    // 或只有一两档的模型上出现两个停位等价、「拖了没变化」的观感）。
+                    // pi 还没答上来（通道没起 / 首次打开）时回退到内置档位表 [THINKING_LEVEL_FALLBACK]。
+                    // pi 沉默时用内置回退表；**偏好不在表里也补进去**（如 `max`）—— 否则滑块会默默落到
+                    // 首档、与旁边那行档位名对不上（2026-09-17 自查的边角；pi 答了就以 pi 的列表为准，
+                    // 那时偏好不在列表里是正常的：pi 会夹取，真值由 `piNow` 显示）
+                    val stops = piLevels?.filter { it != "off" }?.takeIf { it.isNotEmpty() }
+                        ?: THINKING_LEVEL_FALLBACK.let { fb ->
+                            if (chatState.thinkingLevel in fb) fb else fb + chatState.thinkingLevel
+                        }
+                    // 选中态：pi 的真值优先（可能已把偏好夹到别的档），其次用户偏好
+                    val selected = piNow?.takeIf { it != "off" && it in stops } ?: chatState.thinkingLevel
                     val cfg = chatState.selectedModel?.provider?.let { AiConfigStore.configs[it] }
-                    val wire = if (piLevels == null) cfg?.let { AiBackend.levelWire(it, chatState.thinkingLevel) } else null
-                    ThinkingLevelSlider(
-                        level = chatState.thinkingLevel,
-                        onChange = {
-                            chatState.thinkingLevel = it
-                            chatState.syncThinkingToPi()
-                        },
-                        enabled = wire != AiBackend.LevelWire.Unsupported,
-                        modifier = Modifier.padding(top = 12.dp),
-                    )
+                    val wire = if (piLevels == null) {
+                        cfg?.let { AiBackend.levelWire(it, ThinkingLevel.byPi(selected) ?: ThinkingLevel.MEDIUM) }
+                    } else null
+                    if (stops.size <= 1) {
+                        // 只有一档：画滑轨也没得选（2026-09-17）—— 如实说一句，不摆死控件
+                        Text(
+                            ThinkingLevel.labelOf(selected),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                        Text(
+                            L.chat.thinkingSingleLevel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    } else {
+                        ThinkingLevelSlider(
+                            levels = stops,
+                            selected = selected,
+                            onChange = {
+                                chatState.thinkingLevel = it
+                                chatState.syncThinkingToPi()
+                            },
+                            enabled = piLevels != null || wire != AiBackend.LevelWire.Unsupported,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    }
                     Text(
                         when {
                             piNow != null -> L.chat.providerReceives(piNow)
-                            wire is AiBackend.LevelWire.Word -> L.chat.providerReceives(wire.value)
-                            wire is AiBackend.LevelWire.Budget -> L.chat.thinkingBudget(wire.tokens)
+                            // 下面两条是**应用侧估算**（pi 没答上来时），措辞用「预计」——旧文案写成
+                            // 「服务商实际收到」，读起来像真值（2026-09-17 自查）
+                            wire is AiBackend.LevelWire.Word -> L.chat.providerExpected(wire.value)
+                            wire is AiBackend.LevelWire.Budget -> L.chat.providerExpected("${wire.tokens} tokens")
                             else -> L.chat.levelUnsupported
                         },
                         style = MaterialTheme.typography.labelSmall,
