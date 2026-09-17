@@ -8,7 +8,8 @@
  *  4. `android_shell` **工具** —— 让 AI 能在 **Android 系统**里执行命令（Ubuntu 做不到的那些：
  *     `pm`/`am`/`cmd`/`dumpsys` 等系统命令、装应用、改系统设置、读别的 app 私有数据、操作硬件）；
  *  5. **系统提示词的 Pient 化** —— `before_agent_start` 每轮改写（Pient 身份句 + 运行环境段）；
- *     `/pient-sysprompt` 回流时套同一个改写函数，保证面板显示的 = 模型真实收到的那一份。
+ *     `/pient-sysprompt` 回流时套同一个改写函数，保证面板显示的 = 模型真实收到的那一份；
+ *  6. `/pient-reload` —— 让 pi 重扫技能 / 插件 / 设置（技能页导入、插件页装包后，输入栏命令面立刻跟上磁盘）。
  *
  * ── 为什么 `/pient-nav` 要自己写 ─────────────────────────────────────────────
  * pi 的官方 RPC 暴露了会话/树/分叉的**大部分**能力
@@ -363,6 +364,30 @@ export default function (pi: ExtensionAPI) {
         `pient-nav: ${before ?? "(空)"} → ${after ?? "(空)"}${via}${summarize ? " （含分支摘要）" : ""}`,
         "info",
       );
+    },
+  });
+
+  /**
+   * `/pient-reload` —— 让 pi 重扫技能 / 插件 / 设置（`ctx.reload()`）。
+   *
+   * 为什么需要它：pi 只在**进程启动**时扫描技能与插件目录（`DefaultResourceLoader.reload()`
+   * 由启动、项目信任变更、以及扩展的 `ctx.reload()` 触发；0.85.1 的 RPC 面里**没有** reload 命令）。
+   * Pient 的技能页 / 插件页都是直接改磁盘（写 `SKILL.md` / 跑 `pi install`），
+   * 而输入栏 `/`、`!` 两张候选卡的数据源是 RPC `get_commands`（pi 此刻真认的命令面）——
+   * 不重扫就会滞后到下次重启。这条命令补上这个缺口：页面上改完磁盘后由 App 发一次。
+   *
+   * 安全性：扩展命令在 pi 里**立即执行**、不落会话条目、不进 LLM 上下文
+   * （`agent-session.ts` 的 `prompt()` 先走 `_tryExecuteExtensionCommand`，handled 即 return）；
+   * App 侧只在**空闲**（没在流式）时发 —— reload 会重建扩展运行时，不插进正在跑的一轮里。
+   */
+  pi.registerCommand("pient-reload", {
+    description: "Pient: 重新加载技能 / 插件 / 设置（让输入栏命令面立刻跟上磁盘变化）",
+    handler: async (_args, ctx) => {
+      // ★ **不能在 `await ctx.reload()` 之后再碰 ctx** —— pi 明确声明 reload 后旧 ctx 失效
+      //   （`agent-session.ts` 的 stale-ctx 守卫）：照旧写 notify 会抛异常，
+      //   App 侧只看到 `pi 事件：extension_error`（实测踩过）。所以先报"正在重载"，再 reload。
+      ctx.ui.notify("pient-reload: 正在重新加载技能 / 插件 / 设置…", "info");
+      await ctx.reload();
     },
   });
 }

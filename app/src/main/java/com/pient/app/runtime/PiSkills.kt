@@ -151,6 +151,8 @@ object PiSkills {
             dir.mkdirs()
             File(dir, "SKILL.md").writeText(content)
             PientLog.i(TAG, "技能导入：$slug → ${dir.absolutePath}")
+            // 导入完立刻让 pi 重扫（否则新技能在输入栏 `/` 卡里要等通道重启才出现）
+            PiCommands.reloadAsync(context)
             null
         }.getOrElse { it.message ?: L.runtime.writeFailed }
     }
@@ -210,6 +212,7 @@ object PiSkills {
             written++
         }
         PientLog.i(TAG, "技能 ZIP 导入：$slug → ${dir.absolutePath}（$written 个文件）")
+        PiCommands.reloadAsync(context)
         null to slug
     }.getOrElse { (it.message ?: L.runtime.unzipFailed) to "" }
 
@@ -226,6 +229,7 @@ object PiSkills {
                 f.writeText(text)
             }
             PientLog.i(TAG, "技能目录导入：$name（${files.size} 个文件）")
+            PiCommands.reloadAsync(context)
             null
         }.getOrElse { it.message ?: L.runtime.writeFailed }
     }

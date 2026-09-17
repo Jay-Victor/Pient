@@ -3,6 +3,7 @@ package com.pient.app.data
 import com.pient.app.data.i18n.L
 import com.pient.app.AppCtx
 import com.pient.app.runtime.KeepAliveDetail
+import com.pient.app.runtime.PiCommands
 import com.pient.app.runtime.PiKeepAlive
 import com.pient.app.runtime.PiPolish
 
@@ -766,8 +767,26 @@ class ChatState {
      * 界面却显示空闲 → 下一条消息被 pi 拒（"Agent is already processing"，用户看到一条英文报错）。
      * PiKeepAlive 的意义本来就是让回合在后台跑完；要停必须走 [abort]（它会通知 pi 并等它收尾）。
      */
-    fun startTurn(text: String, quote: Quote? = null) =
+    fun startTurn(text: String, quote: Quote? = null) {
+        // ── 扩展命令（`/pient-reload`、插件贡献的 `/xxx`）：**没有回合**，即发即走 ──
+        // pi 对扩展命令是「立即执行、不产生任何 agent 事件」（`agent-session.ts` 的 prompt() 先走
+        // `_tryExecuteExtensionCommand`，handled 即 return）。当普通回合发出去的话，App 会把它标成
+        // 「运行中」并且**永远等不到结束事件** → 界面卡在运行中（真机实测踩过）。
+        // 这里直接发一条 prompt：不进消息流、不建回合、不写 pi 会话（pi 侧也不落条目）；
+        // 结果用一句 Toast 说明（App 目前不消费扩展的 ui.notify，见 ctx.ui 桥那项待办）。
+        if (quote == null && PiCommands.isExtensionCommand(text)) {
+            val cmd = text.trim().substringBefore(' ').substringBefore('\n')
+            bgScope.launch {
+                val ok = runCatching { PiRpc.prompt(text.trim())?.optBoolean("success") == true }
+                    .getOrDefault(false)
+                // 命令可能改了技能 / 插件（/pient-reload 就是干这个的）→ 顺手刷新命令面
+                AppCtx.get()?.let { ctx -> runCatching { PiCommands.refresh(ctx) } }
+                blockedNote = if (ok) L.chat.commandRan(cmd) else L.chat.commandFailed(cmd)
+            }
+            return
+        }
         launchTurn { streamReply(text, quote) }
+    }
 
     /**
      * 把一轮任务挂到进程 scope 上跑，并保证**异常不逃逸**：
@@ -1375,8 +1394,10 @@ class ChatState {
         fun textOf(id: String): String {
             val raw = piText(entryById[id]?.optJSONObject("message"))
             if (!isUserTurn(id)) return raw
-            // 画布节点预览显示**用户原话**（引用与附件分别由详情卡 / 卡片图标呈现，2026-09-17）
-            return userMsgOf(id)?.text ?: raw
+            // 画布节点预览显示**用户原话**（引用与附件分别由详情卡 / 卡片图标呈现，2026-09-17）；
+            // `piUserMsg` 对纯文本消息返回 null（没东西可还原），所以这里还要自己过一遍
+            // `/skill:<名字>` 的显示还原 —— 否则卡片标签是 pi 的展开全文（见 SkillExpansion）
+            return userMsgOf(id)?.text ?: SkillExpansion.display(raw)
         }
         val idxOf = HashMap<String, Int>().apply { userIds.forEachIndexed { i, u -> put(u, i) } }
         // 每个用户消息的 exchange = **它自己这一回合**里的助手文本：从它往下走，遇到下一个用户消息就停。
@@ -1727,7 +1748,7 @@ class ChatState {
             if (split != null && split.first == quote.text.trim()) body = split.second
             else quote = null      // 文本形态对不上 = 孤儿标记（写了标记但本轮没发出去）→ 不认
         }
-        val (text, listed) = ContextPolicy.splitAttachments(body)
+        val (text, listed) = ContextPolicy.splitAttachments(SkillExpansion.display(body))
         var attachments = listed + imageAttachments(msg)
         when {
             meta?.attachments?.isNotEmpty() == true -> attachments = meta.attachments
@@ -1761,7 +1782,13 @@ class ChatState {
             val msg = e.optJSONObject("message")
             val raw = piText(msg).trim()
             if (raw.isEmpty()) continue
-            piUserMsg(id, msg, piEntryById, piParentOf, localAttach)?.let { out[raw] = it }
+            // **两个键都认**：`raw` 是 pi 侧原文（展开态），`display` 是界面上的紧凑形态 ——
+            // `syncMessagesFromPi` 用 `u.text.trim()`（来自 pushPiMessage，已还原）来对位，
+            // 只索引原文会让 `/skill:…` 这种消息的引用 / 附件还原落空。
+            piUserMsg(id, msg, piEntryById, piParentOf, localAttach)?.let { restored ->
+                out[raw] = restored
+                out.putIfAbsent(restored.text.trim(), restored)
+            }
         }
         return out
     }
@@ -2347,7 +2374,9 @@ class ChatState {
     private fun pushPiMessage(msg: JSONObject?, out: MutableList<Msg>) {
         if (msg == null) return
         when (msg.optString("role")) {
-            "user" -> piText(msg).trim().takeIf { it.isNotEmpty() }?.let { out += Msg.User(it) }
+            // `/skill:<名字>` 命令：pi 侧存的是展开全文（见 SkillExpansion），显示层还原成用户敲的紧凑命令
+            "user" -> piText(msg).trim().takeIf { it.isNotEmpty() }
+                ?.let { out += Msg.User(SkillExpansion.display(it)) }
             "assistant" -> {
                 val arr = msg.optJSONArray("content") ?: return
                 for (i in 0 until arr.length()) {

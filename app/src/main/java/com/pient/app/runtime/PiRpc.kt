@@ -284,6 +284,19 @@ object PiRpc {
     suspend fun getCommands(): JSONObject? = dataOf(send(JSONObject().put("type", "get_commands")))
 
     /**
+     * 让 pi 重扫技能 / 插件 / 设置（扩展命令 `/pient-reload` → 扩展 API `ctx.reload()`）。
+     *
+     * 为什么走扩展命令：0.85.1 的 RPC 面里**没有** reload（只有扩展的 `ctx.reload()`），
+     * 而扩展命令在 pi 里是**立即执行、不落会话条目、不进 LLM 上下文**的
+     * （`agent-session.ts` 的 `prompt()` 先走 `_tryExecuteExtensionCommand`，handled 即 return）。
+     * 调用点：技能页导入、插件页装 / 删 / 更新完成之后（见 `PiCommands.reloadAsync`）。
+     *
+     * @return true = pi 收下并执行（`success: true`）
+     */
+    suspend fun reloadResources(): Boolean =
+        prompt("/pient-reload")?.optBoolean("success") == true
+
+    /**
      * **会话内分支**：把活跃叶移动到 entryId（= TUI 的 /tree 选择）。
      * 走扩展命令 `/pient-nav <id> [--summarize] [--label x] [--instructions y]`
      * —— pi 的 RPC 文档写明扩展命令「available for invocation via prompt」。
