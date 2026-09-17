@@ -18,6 +18,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
 import com.pient.app.runtime.PiRpc
+import com.pient.app.runtime.PiRpcState
 import com.pient.app.runtime.PiRuntime
 import com.pient.app.runtime.ReplyNotify
 import java.io.File
@@ -2497,8 +2498,24 @@ class ChatState {
      * 通道刚重启时 pi 的档位还是默认 `medium`，若推送与 `prompt` 并行发出，**本轮会跑在旧档位上**
      * （只有下一条消息才对）。所以发送前一律先 await 同步完再发。
      */
+    /**
+     * 通道**当前实际在跑**的模型（`provider/model`）；未运行 = null。
+     * 用途：判断 pi 对档位表/档位的回答属于**哪个模型**（见 [syncThinkingToPiNow]）。
+     */
+    private fun piRunningKey(): String? =
+        (PiRpc.state.value as? PiRpcState.Running)?.let { "${it.provider}/${it.model}" }
+
     suspend fun syncThinkingToPiNow() {
         if (!PiRpc.usable()) return
+        // **通道跑的是别的模型**（刚在面板里切了模型，但通道要等下次发送才重启）→ pi 此刻对
+        // `get_available_thinking_levels` / `get_state` 的回答都属于**上一个模型**：照收就会拿 A 模型的
+        // 档位表去说 B 模型（切完模型第一眼显示错的档位数、错的真值行）。一律当未知，走界面回退。
+        val t = piChannelTarget()
+        if (t != null && piRunningKey() != "${t.first}/${t.second}") {
+            piThinkingLevel = null
+            piThinkingLevels = null
+            return
+        }
         PiRpc.availableThinkingLevels()?.let { applyPiLevels(it) }
         val target = targetPiLevel()
         val now = PiRpc.thinkingLevelNow()

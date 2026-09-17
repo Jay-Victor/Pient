@@ -246,12 +246,10 @@ object AiBackend {
     }
 
     /**
-     * 档位采样（2026-09-12 映射层）：**服务商的档位数量未必是 5**——DeepSeek 官方只有
-     * `low/high/max`、OpenAI 只有 4 档（无 xhigh）、有的服务商根本没有档位（只有开关）。
-     * 采样规则 = 把我们的 5 档按比例落到对方的 n 档上：`round(ordinal × (n−1) / 4)`。
-     * 同思路的参考实现：Operit `DeepseekProvider.resolveDeepseekThinkingEffort`
-     * （五档 → `listOf("low","high","max","max","max")`）、Hermes 的最近邻收敛
-     * （`xhigh→high`、`minimal→low`、否则 medium、否则第一个）。
+     * 档位采样：把 5 档按比例落到「对方的 n 个位置」上，`round(ordinal × (n−1) / 4)`。
+     * **只服务两条路**（都不再是常用路径，见 [levelWire] 的说明）：① 服务商在 ProviderCatalog 里
+     * 声明的预算表；② Anthropic 协议的 `budget_tokens` 阶梯（pi 那边是 `adjustMaxTokensForThinking`
+     * ＋可选的 ThinkingBudgets 表，应用只能给个近似值，界面已标「预计」）。
      */
     private fun sampleIndex(level: ThinkingLevel, size: Int): Int =
         if (size <= 1) 0 else (level.ordinal * (size - 1) + 2) / 4
@@ -271,18 +269,6 @@ object AiBackend {
         data object Unsupported : LevelWire
     }
 
-    /** 各格式的档位词表（未列出且非预算型 = 不支持档位） */
-    private fun levelWordsFor(format: ReasoningFormat): List<String>? = when (format) {
-        ReasoningFormat.OPENAI -> listOf("minimal", "low", "medium", "high")      // OpenAI 无 xhigh 档
-        ReasoningFormat.DEEPSEEK -> listOf("low", "high", "max")                   // DeepSeek 官方词表
-        ReasoningFormat.OPENROUTER -> listOf("minimal", "low", "medium", "high")
-        else -> null
-    }
-
-    /** 档位走预算写的格式 */
-    private fun levelUsesBudget(format: ReasoningFormat): Boolean =
-        format == ReasoningFormat.QWEN || format == ReasoningFormat.SILICONFLOW
-
     /**
      * 档位 → 线上形态（**请求体与 UI 提示共用同一判断**，不会出现「面板说 A、实际发 B」）：
      * Anthropic 协议固定预算；其余按格式的词表/预算；都不支持则 [LevelWire.Unsupported]。
@@ -300,9 +286,14 @@ object AiBackend {
             return LevelWire.Budget(BUDGET_LADDER[sampleIndex(level, BUDGET_LADDER.size)])
         }
         val format = effectiveReasoningFormat(cfg)
-        levelWordsFor(format)?.let { return LevelWire.Word(it[sampleIndex(level, it.size)]) }
-        if (levelUsesBudget(format)) return LevelWire.Budget(BUDGET_LADDER[sampleIndex(level, BUDGET_LADDER.size)])
-        return LevelWire.Unsupported
+        // **原样报档位名**（2026-09-17 真机实测后改）：pi 的请求体是
+        // `model.thinkingLevelMap?.[档位] ?? 档位`（openai-completions.ts:882），而应用管理的模型**不写**
+        // thinkingLevelMap ⇒ pi 发出去的就是档位名本身。此前按「服务商词表」等距采样，会出现
+        // 真值行和估算行**互相矛盾**的情况（实测：偏好 low，pi 答「实际收到：low」，估算却写「high」
+        // —— 那是 DeepSeek 词表 low/high/max 按五档比例采出来的中档）。这行既然叫
+        // 「预计服务商收到」，口径就必须是 pi 的线上值。
+        if (format == ReasoningFormat.NONE) return LevelWire.Unsupported
+        return LevelWire.Word(level.piValue)
     }
 
     // ───────────────────────── 回合 → 协议报文 ─────────────────────────
