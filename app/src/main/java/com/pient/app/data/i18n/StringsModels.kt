@@ -12,6 +12,8 @@ interface ModelsStrings {
     fun modelsAllOk(a0: Any?): String
     fun modelsTestPartial(a0: Any?, a1: Any?): String
     fun modelsTestUnsupported(a0: Any?): String
+    /** 「编辑模型 - {0}」：逐模型参数浮层标题（模型列表行尾铅笔；pi 侧这些字段本就是 per-model） */
+    fun editModelTitle(a0: Any?): String
     val apiEndpoint: String
     val filterTitle: String
     val usageChartPerRequest: String
@@ -41,6 +43,16 @@ interface ModelsStrings {
     val apiKeyHint: String
     val modelList: String
     val modelListHint: String
+    /** 模型列表字段下方的说明：单个模型的参数在「模型选择列表」里点铅笔改（pi 侧逐模型） */
+    val perModelDefaultsNote: String
+    /** 逐模型浮层顶部：留空 = 不写该键（pi 用自己的默认） */
+    val modelSettingEmptyHint: String
+    /** 逐模型浮层：「该模型支持思考」行标签（pi `models[].reasoning`） */
+    val modelThinkingSupport: String
+    /** 未单独设置时的说明：跟随「思考设置」的写法（写盘与 pi 侧事实都由它决定） */
+    fun modelThinkingByFormat(a0: Any?): String
+    /** 已单独设置：点此恢复按写法推断（清掉 models[].reasoning 的显式值） */
+    val modelThinkingReset: String
     val capabilities: String
     val imageSupport: String
     val imageSupportHint: String
@@ -175,6 +187,12 @@ object ZhModels : ModelsStrings {
     override val apiKeyHint: String = "仅保存在本机 · 用于请求签名，界面不回显"
     override val modelList: String = "模型列表"
     override val modelListHint: String = "多个模型用英文分号 ; 分隔 · 点击右侧按钮批量选择 · 需要别名时写 模型id=别名（pi 的 models[].name）"
+    override val perModelDefaultsNote: String = "单个模型的窗口 / 识图 / 采样参数在「模型选择列表」里点该行的铅笔设置（pi 的这几个字段本来就是逐个模型的）。"
+    override val modelSettingEmptyHint: String = "留空 = 不写该键，pi 用它自己的默认（窗口 128K / 输出 16K / 采样由服务商决定）。"
+    override val modelThinkingSupport: String = "该模型支持思考"
+    override fun modelThinkingByFormat(a0: Any?): String = "未单独设置：跟随「思考设置」的写法（当前：${a0}）"
+    override val modelThinkingReset: String = "已单独设置 · 点此恢复按写法推断"
+    override fun editModelTitle(a0: Any?): String = "编辑模型 - ${a0}"
     override val capabilities: String = "模型能力"
     override val imageSupport: String = "模型支持识图"
     override val imageSupportHint: String = "启用后，图片将直接发送给AI处理；关闭时仅发送一行省略占位"
@@ -309,6 +327,12 @@ object EnModels : ModelsStrings {
     override val apiKeyHint: String = "Stored on this device only · Used to sign requests, never shown in the UI"
     override val modelList: String = "Model list"
     override val modelListHint: String = "Separate multiple models with a semicolon ; · Tap the button on the right to select in bulk · To set an alias, write model-id=alias (pi's models[].name)"
+    override val perModelDefaultsNote: String = "Set a single model's window / image input / sampling parameters with the pencil on its row in the model list (pi keeps these fields per model)."
+    override val modelSettingEmptyHint: String = "A field left empty is not written at all - pi then uses its own defaults (128K window / 16K output / provider-side sampling)."
+    override val modelThinkingSupport: String = "This model supports thinking"
+    override fun modelThinkingByFormat(a0: Any?): String = "Not set here: follows the format chosen in Thinking settings (now: ${a0})"
+    override val modelThinkingReset: String = "Set for this model · Tap to follow the format again"
+    override fun editModelTitle(a0: Any?): String = "Edit model - ${a0}"
     override val capabilities: String = "Model capabilities"
     override val imageSupport: String = "Model supports image input"
     override val imageSupportHint: String = "When on, images are sent straight to the AI; when off, only a one-line placeholder is sent"
@@ -386,7 +410,7 @@ object EnModels : ModelsStrings {
     override val usageStartDate: String = "Start date"
     override val usageEndDate: String = "End date"
     override val usageSelectDate: String = "Select"
-    override fun usageBillingSummaryToken(a0: Any?, a1: Any?, a2: Any?, a3: Any?): String = "Per Token · Input ${a0}${a1}/million · Output ${a0}${a2}/million"
+    override fun usageBillingSummaryToken(a0: Any?, a1: Any?, a2: Any?, a3: Any?): String = "Per Token · Input ${a0}${a1}/million · Output ${a2}${a3}/million"
     override fun usageBillingSummaryCount(a0: Any?, a1: Any?): String = "Per Request · ${a0}${a1} each"
     override val usageRateTitle: String = "Exchange rate"
     override val usageRateHint: String = "USD-priced models are converted to CNY at this rate for the total cost"

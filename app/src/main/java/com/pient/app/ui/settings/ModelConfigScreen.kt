@@ -39,6 +39,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Compress
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.ExpandMore
@@ -85,6 +86,7 @@ import androidx.navigation.NavController
 import com.pient.app.data.AiBackend
 import com.pient.app.data.AiConfigStore
 import com.pient.app.data.ChatState
+import com.pient.app.data.ModelSetting
 import com.pient.app.data.PiAgentFiles
 import com.pient.app.data.ProviderCatalog
 import com.pient.app.data.ProviderConfig
@@ -140,7 +142,8 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
     // ── 状态 ──
     // 已配置服务商列表（AiConfigStore 持久化；2026-09-09 起无预置——用户自行添加）
-    val configuredIds = AiConfigStore.configs.keys.toList()
+    // 顺序用 AiConfigStore 维护的**添加序**（configs.keys 是哈希序，会跳）
+    val configuredIds = AiConfigStore.orderedIds()
     var selectedId by remember { mutableStateOf<String?>(configuredIds.firstOrNull()) }
     val provider = selectedId?.let { ProviderCatalog.find(it) }
     val cfg = selectedId?.let { AiConfigStore.configs[it] }
@@ -151,6 +154,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     var confirmDeleteOpen by remember { mutableStateOf(false) }  // 删除二次确认
     var endpointPickerOpen by remember { mutableStateOf(false) }
     var modelPickerOpen by remember { mutableStateOf(false) }
+    var editingModel by remember { mutableStateOf<String?>(null) } // 逐模型参数浮层：模型列表里的条目原文
     var keyVisible by remember { mutableStateOf(false) }       // API密钥显隐
     var testState by remember { mutableStateOf<String?>(null) } // 测试连接/刷新反馈
     /** 反馈口径：true = 全通过（主色）/ false = 失败（error 色）/ null = 进行中或中性提示 */
@@ -170,14 +174,21 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     }
 
     /**
-     * 改「上下文压缩」三参（2026-09-15 要求 3）。
+     * 改「上下文压缩」**四参**（三旋钮 + 压缩指令；2026-09-15 要求 3，2026-09-17 补指令）。
      *
      * 为什么单独一个入口：**这三项在 pi 侧是全局一份**（`~/.pi/agent/settings.json` 的 `compaction` 块，
      * settings-manager 里没有 per-provider 的概念）。页面原来把它画在「上下文设置」卡里、跟着当前服务商走，
      * 于是编辑第二个服务商的那份值其实不生效 —— 那是界面与 pi 不对味的地方。
      * 现在的口径：改任意一处 = 镜像到所有服务商配置（界面不出现两种值）+ 立即写盘（不等统一落盘的 debounce）。
+     * **压缩指令也一并镜像**：它是 Pient 侧字段（`compactNow` 取当前模型的 provider 那份），但画在同一张
+     * 「全局」卡里 —— 不镜像就会「在 A 服务商填了、切到 B 就没了」。
      */
-    fun setCompaction(enabled: Boolean? = null, reserve: String? = null, keep: String? = null) {
+    fun setGlobals(
+        enabled: Boolean? = null,
+        reserve: String? = null,
+        keep: String? = null,
+        instructions: String? = null,
+    ) {
         val ids = AiConfigStore.configs.keys.toList()
         if (ids.isEmpty()) return
         ids.forEach { id ->
@@ -186,13 +197,18 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                 compactionEnabled = enabled ?: cur.compactionEnabled,
                 reserveTokens = reserve ?: cur.reserveTokens,
                 keepRecentTokens = keep ?: cur.keepRecentTokens,
+                compactInstructions = instructions ?: cur.compactInstructions,
             )
         }
-        PiAgentFiles.writeSettings(context, AiConfigStore.configs.values.firstOrNull())
+        // 这条是**绕过统一落盘 debounce 的立即写**（改一下就要马上落到 settings.json）——
+        // 正因为它先写掉了，之后那次 save() 会看到「内容没变」、不会打脏标记 → 这里自己打。
+        val changed = PiAgentFiles.writeSettings(context, AiConfigStore.primaryConfig())
+        if (changed) PiRpc.markConfigDirty()
         // **即时生效**（2026-09-17）：pi 的 settings.json 只在进程启动时读一次，运行中的会话
         // 不会察觉我们刚写的文件 —— 官方给的热改入口就是 RPC `set_auto_compaction`
         // （`PiRpc.setAutoCompaction`，原先全仓无调用点）。通道没起来就不发（下次启动自然读到）。
-        // 另两参（reserve/keep）pi 没有对应的 RPC，仍需等通道重启才生效 —— 页面 hint 已说明。
+        // 另两参（reserve/keep）pi 没有对应的 RPC：走上面的脏标记 —— 下一轮对话开始时
+        // `PiRpc.start()` 会重启通道重读 settings.json，用户不必自己去切模型/重启应用。
         if (enabled != null && PiRpc.usable()) {
             scope.launch { PiRpc.setAutoCompaction(enabled) }
         }
@@ -206,11 +222,22 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     fun addProvider(id: String) {
         val p = ProviderCatalog.find(id)
         if (id !in AiConfigStore.configs) {
-            AiConfigStore.configs[id] = ProviderConfig(
+            // 全局四项（压缩三参 + 压缩指令）在 pi 侧只有一份 —— 新增服务商必须**继承现有值**：
+            // 否则卡片显示默认值（开 / 16384 / 20000 / 空），而 settings.json（= pi 实际用的，
+            // 取第一家那份）是另一套，界面与实际对不上。
+            val globals = AiConfigStore.primaryConfig()
+            val fresh = ProviderConfig(
                 providerId = id,
                 endpoint = p.defaultEndpoint,
                 // 已知服务商的思考参数写法直接预置（自定义服务商 = AUTO 按模型名推断）
                 reasoningFormat = p.reasoningFormat,
+            )
+            if (id !in AiConfigStore.providerOrder) AiConfigStore.providerOrder.add(id)
+            AiConfigStore.configs[id] = if (globals == null) fresh else fresh.copy(
+                compactionEnabled = globals.compactionEnabled,
+                reserveTokens = globals.reserveTokens,
+                keepRecentTokens = globals.keepRecentTokens,
+                compactInstructions = globals.compactInstructions,
             )
         }
         selectedId = id
@@ -224,7 +251,11 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     fun deleteCurrent() {
         val id = selectedId ?: return
         AiConfigStore.configs.remove(id)
-        selectedId = AiConfigStore.configs.keys.firstOrNull()
+        AiConfigStore.providerOrder.remove(id)
+        selectedId = AiConfigStore.orderedIds().firstOrNull()
+        // 删光服务商 = 回到「未配置」：完成标记跟着回落（否则首启引导第二步一直算已完成，
+        // 而聊天页此时连消息都发不出去）
+        if (AiConfigStore.configs.isEmpty()) chatState.aiConfigured = false
         testState = null
         testOk = null
         testRows = null
@@ -297,7 +328,8 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             callModels { models ->
                 testState = if (models.isEmpty()) L.models.connectionOkNoModels else L.models.connectionOk
                 testOk = true
-                chatState.aiConfigured = true
+                // **不置 aiConfigured**：这一步只证明「能列模型」，不等于某个模型真能用 ——
+                // 「AI 配置完成」的唯一口径 = 至少一个模型真跑通（见下面逐模型测试那段）。
             }
             return
         }
@@ -589,7 +621,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 ) {
                                     // 第一项 = 跟随预设（空串）；其余是该服务商可用的 api 集合
                                     val options = listOf("") + ProviderCatalog.apiOptions(provider.id, cfg.apiType)
-                                    for ((i, api) in options.withIndex()) {
+                                    for (api in options) {
                                         DropdownMenuItem(
                                             text = {
                                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -602,8 +634,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                                         )
                                                         Text(
                                                             if (api.isBlank()) ProviderCatalog.apiOf(provider.id)
-                                                            else if (i == 1 && options.size > 2) L.models.apiOptionHint
-                                                            else "provider.api",
+                                                            else L.models.apiOptionHint,
                                                             style = MaterialTheme.typography.labelSmall,
                                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                         )
@@ -644,72 +675,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 onValueChange = { v -> updateConfig { it.copy(modelList = v) } },
                                 onOpenPicker = { modelPickerOpen = true },
                             )
-                        }
-                    }
-                }
-            }
-
-            // ── ②b 模型能力（2026-09-14 照 Operit 对齐：三个媒体 direct-processing 开关；
-            //     工具能力已整体移除，原 ToolCall 开关随之下线）──
-            // 媒体三开关 = 该类型媒体直发还是「摘链接换占位」（关掉不拦消息）。
-            if (provider != null && cfg != null) {
-                item {
-                    Column {
-                        SectionHeader(L.models.capabilities, icon = Icons.Outlined.Extension)
-                        ConfigCard {
-                            ParamBlock(
-                                label = L.models.imageSupport,
-                                hint = L.models.imageSupportHint,
-                                enabled = cfg.imageDirectEnabled,
-                                onToggle = { updateConfig { it.copy(imageDirectEnabled = !it.imageDirectEnabled) } },
-                            )
-                            DividerLine()
-                            ParamBlock(
-                                label = L.models.audioSupport,
-                                hint = L.models.audioSupportHint,
-                                enabled = cfg.audioDirectEnabled,
-                                onToggle = { updateConfig { it.copy(audioDirectEnabled = !it.audioDirectEnabled) } },
-                            )
-                            DividerLine()
-                            ParamBlock(
-                                label = L.models.videoSupport,
-                                hint = L.models.videoSupportHint,
-                                enabled = cfg.videoDirectEnabled,
-                                onToggle = { updateConfig { it.copy(videoDirectEnabled = !it.videoDirectEnabled) } },
-                            )
-                            Spacer(Modifier.height(12.dp))
-                        }
-                    }
-                }
-            }
-
-            // ── ③ 上下文设置（与 API设置 同构：卡外标题行 + 分区块；仅在已选择服务商时显示） ──
-            if (provider != null && cfg != null) {
-                item {
-                    Column {
-                        SectionHeader(L.models.contextSettings, icon = Icons.Outlined.MenuBook)
-                        ConfigCard {
-                            // 3.1 上下文长度
-                            ConfigFieldLabel(L.models.contextLength)
-                            FieldHint(L.models.contextLengthHint)
-                            TokenInputField(
-                                value = cfg.ctxLenK,
-                                onValueChange = { v ->
-                                    updateConfig { it.copy(ctxLenK = v.filter { c -> c.isDigit() }) }
-                                },
-                                placeholder = "128",
-                            )
-                            DividerLine()
-                            // 3.2 最大输出长度
-                            ConfigFieldLabel(L.models.maxOutputLength)
-                            FieldHint(L.models.maxOutputLengthHint)
-                            TokenInputField(
-                                value = cfg.maxOutK,
-                                onValueChange = { v ->
-                                    updateConfig { it.copy(maxOutK = v.filter { c -> c.isDigit() }) }
-                                },
-                                placeholder = "16",
-                            )
+                            FieldHint(L.models.perModelDefaultsNote)
                         }
                     }
                 }
@@ -804,86 +770,6 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                 }
             }
 
-            // ── ④ 模型参数设置（与 API设置 同构：卡外标题行 + 开关区块；仅在已选择服务商时显示） ──
-            if (provider != null && cfg != null) {
-                item {
-                    Column {
-                        SectionHeader(L.models.paramSettings, icon = Icons.Outlined.Tune)
-                        ConfigCard {
-                            // 该 API 类型下 pi 不转发采样参数（2026-09-17）：如实说明 + 三个开关置灰。
-                            // 口径：只有 openai 系（completions / responses / azure-responses）会把
-                            // `models[].samplingParams` 写进请求体；anthropic / google / bedrock / mistral /
-                            // codex 路径不读它（见 AiBackend.samplingSupported）。配的值仍会写入 models.json，
-                            // 换成 openai 兼容的 API 类型后即生效。
-                            val samplingOk = AiBackend.samplingSupported(cfg)
-                            if (!samplingOk) {
-                                Text(
-                                    L.models.samplingUnsupported(
-                                        cfg.apiType.trim().ifBlank { ProviderCatalog.apiOf(cfg.providerId) },
-                                    ),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp),
-                                )
-                            }
-                            // 4.1 温度
-                            ParamBlock(
-                                label = L.models.temperature,
-                                hint = L.models.temperatureHint,
-                                enabled = cfg.tempEnabled,
-                                onToggle = { updateConfig { it.copy(tempEnabled = !it.tempEnabled) } },
-                                switchEnabled = samplingOk,
-                            )
-                            if (cfg.tempEnabled) {
-                                ParamInputField(
-                                    value = cfg.tempValue,
-                                    onValueChange = { v -> updateConfig { it.copy(tempValue = v) } },
-                                    placeholder = "1.0",
-                                    rangeHint = L.models.temperatureRange,
-                                )
-                            }
-                            DividerLine()
-                            // 4.2 Top-K 采样
-                            ParamBlock(
-                                label = L.models.topK,
-                                hint = L.models.topKHint,
-                                enabled = cfg.topKEnabled,
-                                onToggle = { updateConfig { it.copy(topKEnabled = !it.topKEnabled) } },
-                                switchEnabled = samplingOk,
-                            )
-                            if (cfg.topKEnabled) {
-                                ParamInputField(
-                                    value = cfg.topKValue,
-                                    onValueChange = { v -> updateConfig { it.copy(topKValue = v) } },
-                                    placeholder = "0",
-                                    rangeHint = L.models.topKRange,
-                                )
-                            }
-                            DividerLine()
-                            // 4.3 核采样（Top-P 采样）
-                            ParamBlock(
-                                label = L.models.topP,
-                                hint = L.models.topPHint,
-                                enabled = cfg.topPEnabled,
-                                onToggle = { updateConfig { it.copy(topPEnabled = !it.topPEnabled) } },
-                                switchEnabled = samplingOk,
-                            )
-                            if (cfg.topPEnabled) {
-                                ParamInputField(
-                                    value = cfg.topPValue,
-                                    onValueChange = { v -> updateConfig { it.copy(topPValue = v) } },
-                                    placeholder = "1.0",
-                                    rangeHint = L.models.topPRange,
-                                )
-                            } else {
-                                // 关闭态：无输入框，补底部间距（与开启态 ParamInputField 的 bottom 10dp 对齐）
-                                Spacer(Modifier.height(10.dp))
-                            }
-                        }
-                    }
-                }
-            }
-
             // ── ⑤ 上下文压缩（**全局一份**）──
             // pi 侧只有一份：`~/.pi/agent/settings.json` 的 `compaction` 块（settings-manager 里没有
             // per-provider 的概念）。原来它画在「上下文设置」卡里、跟着当前服务商走 —— 改第二个服务商
@@ -898,7 +784,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 label = L.models.compactionAuto,
                                 hint = L.models.compactionAutoHint,
                                 enabled = cfg.compactionEnabled,
-                                onToggle = { setCompaction(enabled = !cfg.compactionEnabled) },
+                                onToggle = { setGlobals(enabled = !cfg.compactionEnabled) },
                             )
                             if (cfg.compactionEnabled) {
                                 ConfigFieldLabel(L.models.reserveTokens)
@@ -906,7 +792,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 ContextNumberField(
                                     value = cfg.reserveTokens,
                                     onValueChange = { v ->
-                                        setCompaction(reserve = v.filter { c -> c.isDigit() }.take(7))
+                                        setGlobals(reserve = v.filter { c -> c.isDigit() }.take(7))
                                     },
                                     placeholder = "16384",
                                     suffix = "Tokens",
@@ -916,7 +802,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 ContextNumberField(
                                     value = cfg.keepRecentTokens,
                                     onValueChange = { v ->
-                                        setCompaction(keep = v.filter { c -> c.isDigit() }.take(7))
+                                        setGlobals(keep = v.filter { c -> c.isDigit() }.take(7))
                                     },
                                     placeholder = "20000",
                                     suffix = "Tokens",
@@ -926,7 +812,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                             FieldHint(L.models.compactInstructionsHint)
                             PientTextArea(
                                 value = cfg.compactInstructions,
-                                onValueChange = { v -> updateConfig { it.copy(compactInstructions = v) } },
+                                onValueChange = { v -> setGlobals(instructions = v) },
                                 placeholder = L.models.compactInstructionsPlaceholder,
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1026,10 +912,40 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
         )
     }
 
+    // ── 弹窗：逐模型参数（模型列表里点铅笔） ──
+    // 为什么要有它：pi 的 models.json 里 `contextWindow` / `maxTokens` / `input` / `samplingParams`
+    // 都是**每个模型各写一份**（pi-web 的 ModelsConfig 同样逐模型编辑）；卡面上那三个字段只是
+    // 「新加入列表的模型的默认值」，改它不会动已有模型。
+    editingModel?.let { entry ->
+        val modelId = entry.substringBefore('=').trim()
+        // 「未单独设置」时该模型的默认思考支持 = 写法推断（与写盘同一份规则：AUTO 按模型名推）
+        val fmtNow = cfg?.let { c ->
+            if (c.reasoningFormat == ReasoningFormat.AUTO) AiBackend.inferReasoningFormat(modelId)
+            else c.reasoningFormat
+        }
+        ModelSettingDialog(
+            title = L.models.editModelTitle(entry),
+            initial = cfg?.settingOf(modelId) ?: ModelSetting(),
+            thinkingByFormat = fmtNow != null && fmtNow != ReasoningFormat.NONE,
+            formatLabel = fmtNow?.label.orEmpty(),
+            // 采样不转发警告（原「模型参数设置」卡上的那条）：搬到真正设值的地方
+            unsupportedNote = cfg?.takeIf { !AiBackend.samplingSupported(it) }?.let { c ->
+                L.models.samplingUnsupported(c.apiType.trim().ifBlank { ProviderCatalog.apiOf(c.providerId) })
+            },
+            onDismiss = { editingModel = null },
+            onSave = { s ->
+                updateConfig { it.copy(modelSettings = it.modelSettings + (modelId to s)) }
+                editingModel = null
+            },
+        )
+    }
+
     // ── 弹窗：模型列表（多选 + 底部取消/确定；顶栏刷新 = 真实拉取服务商模型） ──
     if (modelPickerOpen) {
+        // 条目源与「已选」判定同源 = cfg.models（trim 过、去重过）：手写「a; b」这种带空格的列表
+        // 也要每行都是勾选态（旧实现按未 trim 的 split 判 → b 不勾 → 点「确定」把它静默删掉）。
         val modelEntries = (cfg?.models ?: emptyList()).map {
-            PickerEntry(key = it, title = it, mono = true, selected = it in (cfg?.modelList?.split(";") ?: emptyList()))
+            PickerEntry(key = it, title = it, mono = true, selected = true, editable = true)
         }
         SearchPickerPopup(
             topBarTitle = L.models.modelPickerTitle,
@@ -1049,7 +965,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                 },
                             ) { models ->
                                 if (models.isEmpty()) toast(L.models.noModelsReturned)
-                                else updateConfig { it.copy(modelList = models.joinToString(";")) }
+                                else updateConfig { it.copy(modelList = mergeModelList(it.modelList, models)) }
                                 refreshing = false
                             }
                         }
@@ -1060,6 +976,13 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             entries = modelEntries,
             multiSelect = true,
             onDismiss = { modelPickerOpen = false },
+            // 铅笔 = 改**这一个模型**的窗口 / 识图 / 采样（pi 侧这些字段本来就是 per-model）
+            // 顺手收起列表：编辑浮层要画在它上面，列表留着也会挡住（同一 Box 里后画的在上面也就算了，
+            // 关掉还能避免多选状态被误清）
+            onEditRow = { e ->
+                editingModel = e.title
+                modelPickerOpen = false
+            },
             onConfirmMulti = { keys ->
                 // 多选确认：以英文分号拼接填入输入框
                 updateConfig {
@@ -1189,6 +1112,162 @@ private fun ParamInputField(
         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
         modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 10.dp),
     )
+}
+
+
+/**
+ * 逐模型参数浮层：**单个模型**的上下文长度 / 最大输出 / 识图 / 采样。
+ * 留空 = 不写该键（pi 用自己那一层的默认），与 pi-web 的模型编辑同口径。
+ */
+@Composable
+private fun ModelSettingDialog(
+    title: String,
+    initial: ModelSetting,
+    /** 该 API 类型下 pi 不转发采样参数时的说明（null = 不显示）—— 原在「模型参数设置」卡上 */
+    unsupportedNote: String?,
+    /** 「思考设置」卡按当前写法推断出的**默认**是否支持思考（未单独设置时生效） */
+    thinkingByFormat: Boolean,
+    /** 该写法的人类可读名（用于说明行「当前：X」） */
+    formatLabel: String,
+    onDismiss: () -> Unit,
+    onSave: (ModelSetting) -> Unit,
+) {
+    var ctxLenK by remember { mutableStateOf(initial.ctxLenK) }
+    var maxOutK by remember { mutableStateOf(initial.maxOutK) }
+    var image by remember { mutableStateOf(initial.image) }
+    var temperature by remember { mutableStateOf(initial.temperature) }
+    var topK by remember { mutableStateOf(initial.topK) }
+    var topP by remember { mutableStateOf(initial.topP) }
+    // 三态：null = 未单独设置（跟随写法推断）。**只有用户动过开关/恢复默认才会变** ——
+    // 没动就原样回写，避免「只改了窗口」把思考支持也冻成显式值。
+    var reasoning by remember { mutableStateOf(initial.reasoning) }
+    val digits = { v: String -> v.filter { it.isDigit() } }
+    val decimal = { v: String -> v.filter { it.isDigit() || it == '.' } }
+    PientDialog(
+        title = title,
+        onDismiss = onDismiss,
+        confirmText = L.common.save,
+        onConfirm = {
+            onSave(
+                ModelSetting(
+                    ctxLenK = ctxLenK.trim(),
+                    maxOutK = maxOutK.trim(),
+                    image = image,
+                    temperature = temperature.trim(),
+                    topK = topK.trim(),
+                    topP = topP.trim(),
+                    reasoning = reasoning,
+                ),
+            )
+        },
+    ) {
+        Text(
+            L.models.modelSettingEmptyHint,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            modifier = Modifier.padding(bottom = 2.dp),
+        )
+        unsupportedNote?.let { note ->
+            Text(
+                note,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+        DialogFieldRow(L.models.contextLength, ctxLenK, digits, "128", "K") { ctxLenK = it }
+        DialogFieldRow(L.models.maxOutputLength, maxOutK, digits, "16", "K") { maxOutK = it }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+        ) {
+            Text(
+                L.models.imageSupport,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f).padding(end = 8.dp),
+            )
+            Switch(
+                checked = image,
+                onCheckedChange = { image = it },
+                colors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary),
+            )
+        }
+        Text(
+            L.models.imageSupportHint,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        ) {
+            Text(
+                L.models.modelThinkingSupport,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f).padding(end = 8.dp),
+            )
+            Switch(
+                checked = reasoning ?: thinkingByFormat,
+                // 拨一下 = 显式指定该模型支持/不支持（写进 pi 的 models[].reasoning）
+                onCheckedChange = { reasoning = it },
+                colors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary),
+            )
+        }
+        if (reasoning == null) {
+            Text(
+                L.models.modelThinkingByFormat(formatLabel),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        } else {
+            Text(
+                L.models.modelThinkingReset,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .clickable { reasoning = null },
+            )
+        }
+        DialogFieldRow(L.models.temperature, temperature, decimal, "1.0", null) { temperature = it }
+        DialogFieldRow(L.models.topK, topK, digits, "0", null) { topK = it }
+        DialogFieldRow(L.models.topP, topP, decimal, "1.0", null) { topP = it }
+    }
+}
+
+/** 逐模型浮层里的「标签 + 输入框」一行（留空 = 不传该参数，故不给开关，只给值） */
+@Composable
+private fun DialogFieldRow(
+    label: String,
+    value: String,
+    filter: (String) -> String,
+    placeholder: String,
+    suffix: String?,
+    onChange: (String) -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f).padding(end = 8.dp),
+        )
+        PientInputBox(
+            value = value,
+            onValueChange = { v -> onChange(filter(v)) },
+            placeholder = placeholder,
+            number = true,
+            suffix = suffix,
+            modifier = Modifier.width(120.dp),
+        )
+    }
 }
 
 /** 字段标签行（"API端点"/"API密钥"/"模型列表"） */
@@ -1486,6 +1565,20 @@ private fun ContextNumberField(
  * （Popup focusable 抢走焦点）窗口也不会再长回去（实测 3s 后仍 1454）。
  * 页面内浮层随应用窗口（全屏、不随 IME 缩放）布局，天然不受键盘影响。
  */
+/**
+ * 刷新回来的 id 列表与手写列表合并（**不再整串覆盖**）：
+ * - 同名 id 保留用户写的 `id=别名` 原文（别名是 pi 的 `models[].name`，覆盖掉就丢了）；
+ * - 顺序按服务商返回的顺序重排；
+ * - 服务商不再返回的 id 丢弃（那本来就是这个按钮的语义：以服务商当前可用列表为准）。
+ */
+private fun mergeModelList(old: String, fetched: List<String>): String {
+    val original = HashMap<String, String>()
+    old.split(";").map { it.trim() }.filter { it.isNotEmpty() }.forEach { entry ->
+        original[entry.substringBefore('=').trim()] = entry
+    }
+    return fetched.joinToString(";") { id -> original[id] ?: id }
+}
+
 /** 弹窗选择项（服务商 / 端点 / 模型统一数据） */
 private data class PickerEntry(
     val key: String,
@@ -1496,6 +1589,7 @@ private data class PickerEntry(
     val mono: Boolean = false, // 等宽字体渲染（端点/模型）
     val selected: Boolean = false,
     val added: Boolean = false, // 已配置（服务商目录弹窗：右侧灰勾）
+    val editable: Boolean = false, // 该行可编辑（模型弹窗：右侧铅笔 → 逐模型参数浮层）
 )
 
 @Composable
@@ -1510,6 +1604,7 @@ private fun SearchPickerPopup(
     multiSelect: Boolean = false,                      // 多选模式：底部"取消 + 确定"
     onSelect: (PickerEntry) -> Unit = {},              // 单选回调
     onConfirmMulti: (Set<String>) -> Unit = {},        // 多选确定回调
+    onEditRow: ((PickerEntry) -> Unit)? = null,        // 行内编辑（模型弹窗：逐模型参数）
 ) {
     var query by remember { mutableStateOf("") }
     val filtered = if (searchPlaceholder == null) entries
@@ -1584,6 +1679,7 @@ private fun SearchPickerPopup(
                     items(filtered, key = { it.key }) { e ->
                         PickerRow(
                             entry = if (multiSelect) e.copy(selected = selMap[e.key] == true) else e,
+                            onEdit = if (onEditRow != null && e.editable) ({ onEditRow(e) }) else null,
                             onClick = {
                                 if (multiSelect) {
                                     if (selMap[e.key] == true) selMap.remove(e.key) else selMap[e.key] = true
@@ -1673,7 +1769,7 @@ private fun SearchBar(placeholder: String, query: String, onQueryChange: (String
 
 /** 弹窗列表项：服务商 = 左侧 logo + 名称；端点/模型 = 等宽文本（选中 = 主色 15% 底 + 粗体主色字 + 勾） */
 @Composable
-private fun PickerRow(entry: PickerEntry, onClick: () -> Unit) {
+private fun PickerRow(entry: PickerEntry, onClick: () -> Unit, onEdit: (() -> Unit)? = null) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -1710,6 +1806,20 @@ private fun PickerRow(entry: PickerEntry, onClick: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f).padding(start = if (entry.logoRes != 0) 10.dp else 0.dp),
         )
+        if (onEdit != null) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(34.dp)
+                    .clickable(onClick = onEdit),
+            ) {
+                Icon(
+                    Icons.Outlined.Edit, L.models.editModelTitle(entry.title),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
         if (entry.selected) {
             Icon(
                 Icons.Outlined.Check, null,

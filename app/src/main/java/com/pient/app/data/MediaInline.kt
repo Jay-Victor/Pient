@@ -4,25 +4,27 @@ import android.content.Context
 import java.io.File
 
 /**
- * **媒体直发部件（请求层）** —— 按「模型能力」的三个媒体开关把本条用户消息的附件转成
+ * **媒体直发部件（请求层）** —— 按「模型能力 → 模型支持识图」把本条用户消息里的**图片**转成
  * 随请求发出的内容部件（照 Operit `OpenAIProvider.buildContentField` 的口径）：
- * - 该类型开关**开** → 文件本体转内容部件（图片 `image_url` / 音频 `input_audio` / 视频 `video_url`）；
- * - 该类型开关**关**（或超上限 / 读取失败）→ **不拦消息**，只追加一行说明（关 = Operit 原文占位文案）；
+ * - 开关**开** → 图片本体转内容部件（pi RPC `prompt.images` 的 ImageContent）；
+ * - 开关**关**（或超上限 / 读取失败）→ **不拦消息**，只追加一行说明（关 = Operit 原文占位文案）；
  *   没被直发的附件仍以「名称 · 路径」留在正文里。
+ *
+ * **只有图片**（2026-09-17 用户拍板收口）：pi 的用户消息内容类型只有 text / image
+ * （`ImageContent`，见 pi `docs/rpc.md`）—— 音频 / 视频在 pi 通道里发不出去，那两个开关与这里的
+ * 音频/视频分支一并删除；音频 / 视频附件按**普通文件**处理（正文里仍列「名称 · 路径」，
+ * AI 可以用自己的工具去读）。
  *
  * 独立成层（2026-09-14）：它管的是**请求体怎么拼**，与工具执行无关 ——
  * 早期挤在单文件实现里，让一个文件同时背着请求层与提示词层的职责。
  */
 object MediaInline {
 
-    /** base64 让请求体膨胀约 1/3，各类直发上限（超出则不直发，正文里给一行说明） */
+    /** base64 让请求体膨胀约 1/3，直发上限（超出则不直发，正文里给一行说明） */
     private const val INLINE_IMAGE_MAX = 6L * 1024 * 1024
-    private const val INLINE_AUDIO_MAX = 12L * 1024 * 1024
-    private const val INLINE_VIDEO_MAX = 24L * 1024 * 1024
 
-    /** 未直发时的占位文案（Operit strings.xml 原文；常量与「读回」侧共用 [ContextPolicy] 那一份） */
+    /** 未直发时的占位文案（Operit strings.xml 原文；与「读回」侧共用 [ContextPolicy] 那一份） */
     private val OMIT_IMAGE = ContextPolicy.OMIT_IMAGE
-    private val OMIT_MEDIA = ContextPolicy.OMIT_MEDIA
 
     /**
      * 直发结果：
@@ -61,6 +63,7 @@ object MediaInline {
         context: Context,
         attachments: List<Attachment>,
         cfg: ProviderConfig,
+        modelId: String,
     ): InlineResult {
         if (attachments.isEmpty()) return InlineResult(emptyList(), emptySet(), emptyList())
         val parts = ArrayList<WirePart>()
@@ -71,23 +74,16 @@ object MediaInline {
             val file = File(path)
             if (!file.isFile) return@forEachIndexed
             val ext = file.name.substringAfterLast('.', "").lowercase()
-            val (type, max) = when {
-                ext in MEDIA_IMAGE_EXTS -> "image" to INLINE_IMAGE_MAX
-                ext in MEDIA_VIDEO_EXTS -> "video" to INLINE_VIDEO_MAX
-                ext in MEDIA_AUDIO_EXTS -> "audio" to INLINE_AUDIO_MAX
-                else -> return@forEachIndexed
-            }
-            val enabled = when (type) {
-                "image" -> cfg.imageDirectEnabled
-                "audio" -> cfg.audioDirectEnabled
-                else -> cfg.videoDirectEnabled
-            }
-            if (!enabled) {
-                notes.add(if (type == "image") OMIT_IMAGE else OMIT_MEDIA)
+            // 只有图片进请求（音频 / 视频 / 其它文件不进请求，也不给「未直发」提示 ——
+            // 它们本来就是以「名称 · 路径」进正文的普通附件）
+            if (ext !in MEDIA_IMAGE_EXTS) return@forEachIndexed
+            // 逐模型：这个模型自己开没开识图（没有逐模型条目时落回卡面默认值）
+            if (!cfg.settingOf(modelId).image) {
+                notes.add(OMIT_IMAGE)
                 return@forEachIndexed
             }
-            if (file.length() > max) {
-                notes.add("[附件未直发] ${a.name}（${file.length() / 1024 / 1024}MB 超过直发上限 ${max / 1024 / 1024}MB）")
+            if (file.length() > INLINE_IMAGE_MAX) {
+                notes.add("[附件未直发] ${a.name}（${file.length() / 1024 / 1024}MB 超过直发上限 ${INLINE_IMAGE_MAX / 1024 / 1024}MB）")
                 return@forEachIndexed
             }
             val b64 = runCatching {
@@ -97,7 +93,7 @@ object MediaInline {
                 notes.add("[附件未直发] ${a.name}（读取失败）")
                 return@forEachIndexed
             }
-            parts.add(WirePart(type, mimeOf(file.name), b64))
+            parts.add(WirePart("image", mimeOf(file.name), b64))
             inlined.add(index)
         }
         return InlineResult(parts, inlined, notes)

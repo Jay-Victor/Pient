@@ -111,22 +111,25 @@ object AiBackend {
     // ───────────────────────── 模型逐一测试（配置页「测试连接」） ─────────────────────────
 
     /**
-     * 端点走哪套对话协议（决定「逐一测试」怎么发请求）。
-     *
-     * **判定顺序照 pi 的实际行为**：pi 严格按 `models[].api` / `providers.<id>.api` 发请求，
-     * 所以先看页面上的「API 类型」（空 = pi 的事实表 [ProviderCatalog.apiOf]）；
-     * 只有该类型应用测不了时（google / bedrock / mistral / pi-messages），才回落到
-     * 「端点含 anthropic」这条老判据；都不匹配 = 应用内无法逐一测试（如实上报，不假装失败）。
+     * 端点走哪套协议（决定「逐一测试」怎么发请求）—— **逐条对齐该 api 在 pi 里的真实形态**：
+     * - `openai-completions` → `POST {baseUrl}/chat/completions`；
+     * - `openai-responses` → `POST {baseUrl}/responses`（pi 的 openai / xai 主用法就是这条；旧实现
+     *   一律按 chat/completions 探活 —— 路径不同，配置正常也会被报成 ✕）；
+     * - `anthropic-messages` → `POST {baseUrl}/v1/messages`；
+     * - `azure-openai-responses`（要 `api-version` 查询参数 + `api-key` 头）与
+     *   `openai-codex-responses`（ChatGPT 后端 + OAuth）应用内无法忠实复现 → 如实报「测不了」，
+     *   不假装失败；google / bedrock / mistral / pi-messages 同理；未知 api 才回落到「端点含 anthropic」。
      */
-    enum class ChatProtocol { OPENAI, ANTHROPIC, UNSUPPORTED }
+    enum class ChatProtocol { OPENAI, RESPONSES, ANTHROPIC, UNSUPPORTED }
 
     fun chatProtocol(cfg: ProviderConfig): ChatProtocol {
         val api = cfg.apiType.trim().ifBlank { ProviderCatalog.apiOf(cfg.providerId) }
-        return when {
-            api == "anthropic-messages" -> ChatProtocol.ANTHROPIC
-            api.startsWith("openai") || api == "azure-openai-responses" -> ChatProtocol.OPENAI
-            isAnthropicProtocol(cfg.endpoint) -> ChatProtocol.ANTHROPIC
-            else -> ChatProtocol.UNSUPPORTED
+        return when (api) {
+            "anthropic-messages" -> ChatProtocol.ANTHROPIC
+            "openai-responses" -> ChatProtocol.RESPONSES
+            "openai-completions" -> ChatProtocol.OPENAI
+            "azure-openai-responses", "openai-codex-responses" -> ChatProtocol.UNSUPPORTED
+            else -> if (isAnthropicProtocol(cfg.endpoint)) ChatProtocol.ANTHROPIC else ChatProtocol.UNSUPPORTED
         }
     }
 
@@ -159,8 +162,9 @@ object AiBackend {
      * 为什么不能只 GET `/models`（2026-09-17 用户口径）：那条只证明「能列模型」——
      * 套餐不含该模型、模型名写错、权限不对都发现不了。逐模型真发一次才叫「可用」。
      *
-     * URL 口径**逐字照 pi**（pi 把 baseUrl 原样交给官方 SDK，由 SDK 拼路径）：
-     * openai 兼容 = `{endpoint}/chat/completions`、anthropic = `{endpoint}/v1/messages`。
+     * URL 口径**逐字照 pi**（pi 把 baseUrl 原样交给官方 SDK，由 SDK 拼路径），见 [chatProtocol]：
+     * openai 兼容 = `{endpoint}/chat/completions`、responses = `{endpoint}/responses`、
+     * anthropic = `{endpoint}/v1/messages`。
      */
     suspend fun testModel(cfg: ProviderConfig, modelEntry: String): ModelProbe {
         // 页面语法 `id=别名`：发给服务商的是 id（别名只进 pi 的 models[].name）
@@ -175,6 +179,18 @@ object AiBackend {
                 ChatProtocol.ANTHROPIC -> Request.Builder()
                     .url("$base/v1/messages")
                     .post(body.toString().toRequestBody(JSON))
+                    .apply { authHeaders(cfg, this) }
+                    .build()
+                ChatProtocol.RESPONSES -> Request.Builder()
+                    // pi 的 openai / xai 走的就是这条：POST {baseUrl}/responses（{model, input, max_output_tokens}）
+                    .url("$base/responses")
+                    .post(
+                        JSONObject()
+                            .put("model", id)
+                            .put("input", "ping")
+                            .put("max_output_tokens", PROBE_MAX_TOKENS)
+                            .toString().toRequestBody(JSON),
+                    )
                     .apply { authHeaders(cfg, this) }
                     .build()
                 else -> Request.Builder()
@@ -209,19 +225,24 @@ object AiBackend {
     // ───────────────────────── 请求体 ─────────────────────────
 
     /**
-     * 生效的思考参数写法：显式配置优先；AUTO 按模型名推断（deepseek → DEEPSEEK、
-     * glm/zhipu → ZAI、qwen/qwq/通义 → QWEN），**识别不出 = NONE**（维持「不发参数」的
-     * 老行为——对未知端点发它不认识的字段会直接 400，宁可保守）。
+     * AUTO 的推断规则（**唯一一份**：界面显示、[effectiveReasoningFormat]、写 models.json 三处共用）：
+     * deepseek → DEEPSEEK、glm/zhipu → ZAI、qwen/qwq/通义 → QWEN，**识别不出 = NONE**
+     * （维持「不发参数」的老行为——对未知端点发它不认识的字段会直接 400，宁可保守）。
      */
-    fun effectiveReasoningFormat(cfg: ProviderConfig): ReasoningFormat {
-        if (cfg.reasoningFormat != ReasoningFormat.AUTO) return cfg.reasoningFormat
-        val m = modelNameOf(cfg).lowercase()
+    fun inferReasoningFormat(modelName: String): ReasoningFormat {
+        val m = modelName.lowercase()
         return when {
             m.contains("deepseek") -> ReasoningFormat.DEEPSEEK
             m.contains("glm") || m.contains("zhipu") || m.contains("chatglm") -> ReasoningFormat.ZAI
             m.contains("qwen") || m.contains("qwq") || m.contains("tongyi") -> ReasoningFormat.QWEN
             else -> ReasoningFormat.NONE
         }
+    }
+
+    /** 生效的思考参数写法：显式配置优先；AUTO 按模型名推断（见 [inferReasoningFormat]） */
+    fun effectiveReasoningFormat(cfg: ProviderConfig): ReasoningFormat {
+        if (cfg.reasoningFormat != ReasoningFormat.AUTO) return cfg.reasoningFormat
+        return inferReasoningFormat(modelNameOf(cfg))
     }
 
     /**

@@ -86,7 +86,22 @@ object PiRpc {
     }
 
     /**
-     * 起（或复用）通道。**provider/model 变了就重启** —— 默认模型是 `--provider/--model`
+     * **配置页改动了 pi 原生文件**（models.json / auth.json / settings.json 的内容真有变化）→ 置位。
+     * 由 `AiConfigStore.save()` 打标（**内容比对**，不是「保存过就置位」——否则开屏那次统一落盘会白重启一次）。
+     *
+     * 为什么需要它：pi 只在**进程启动**时读这些文件（RPC 里没有 reload 命令，`session.reload()` 只由扩展
+     * 的 `ctx.reload()` 触发）—— 不重启的话配置页改完要用户自己去切一次模型或重启应用才生效。
+     */
+    @Volatile
+    private var configDirty = false
+
+    fun markConfigDirty() {
+        configDirty = true
+        Log.i(TAG, "配置已改动：pi 通道将在下次启动时重启（重读 models.json / auth.json / settings.json）")
+    }
+
+    /**
+     * 起（或复用）通道。**provider/model 变了、或配置改过就重启** —— 默认模型是 `--provider/--model`
      * 传进去的（比让 pi 自己选更可控；也避免「上一次选的服务商又生效」）。
      *
      * **必须同步**：并发调用会各起一个 pi 进程（双份事件流）。
@@ -98,18 +113,22 @@ object PiRpc {
         process?.let { p ->
             val st = _state.value
             val cur = (st as? PiRpcState.Running)?.let { "${it.provider}/${it.model}" }
-            if (p.isAlive && cur == key) {
+            // 键相同**且配置没改过**才复用：配置页改过 pi 原生文件时不复用（pi 只在进程启动时读它们）
+            if (p.isAlive && cur == key && !configDirty) {
                 return true
             }
             // 诊断（2026-09-15）：旧代码静默 stop+重启，通道反复启停无从查起 —— 把原因打出来
-            val why = if (!p.isAlive) {
-                "旧进程已退出（exit=" + (runCatching { p.exitValue() }.getOrNull()?.toString() ?: "?") + "）"
-            } else "alive=true 但状态/键不匹配：st=$st cur=[$cur](len=${cur?.length}) key=[$key](len=${key.length})"
+            val why = when {
+                !p.isAlive -> "旧进程已退出（exit=" + (runCatching { p.exitValue() }.getOrNull()?.toString() ?: "?") + "）"
+                configDirty -> "配置页改过 pi 原生文件（重读 models.json / auth.json / settings.json）"
+                else -> "alive=true 但状态/键不匹配：st=$st cur=[$cur](len=${cur?.length}) key=[$key](len=${key.length})"
+            }
             val caller = Throwable().stackTrace
                 .firstOrNull { it.className.startsWith("com.pient.app") && !it.className.endsWith("PiRpc") }
                 ?.let { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }.orEmpty()
             Log.i(TAG, "通道重启：$why；调用方=$caller")
         }
+        configDirty = false   // 无论走哪条路，这次启动之后读到的都是新文件
         stop()
         val ctx = AppCtx.get() ?: return false
         if (!PiRuntime.rootfsReady(ctx) || !PiRuntime.piReady(ctx)) {
@@ -300,8 +319,13 @@ object PiRpc {
      * 即时切换**自动压缩**（pi 官方 RPC `set_auto_compaction`）。与 settings.json 的
      * `compaction.enabled` 是同一件事，这里用于改配置后不让用户去重启宿主。
      */
-    suspend fun setAutoCompaction(enabled: Boolean): JSONObject? =
-        send(JSONObject().put("type", "set_auto_compaction").put("enabled", enabled))
+    suspend fun setAutoCompaction(enabled: Boolean): JSONObject? {
+        val res = send(JSONObject().put("type", "set_auto_compaction").put("enabled", enabled))
+        // 留一行回包（这命令没有别处可观察的副作用：pi 只把开关状态放进 `get_state.autoCompactionEnabled`）——
+        // 验「配置页拨开关 → 运行中的会话真的热改」时读这一行。
+        Log.i(TAG, "set_auto_compaction($enabled) 回包：${res?.toString()?.take(200) ?: "无响应（通道没起）"}")
+        return res
+    }
 
     // ─────────────── 思考档位（2026-09-17：界面开关/滑轨真正作用到 pi）───────────────
 

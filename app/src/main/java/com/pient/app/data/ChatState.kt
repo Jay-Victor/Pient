@@ -890,7 +890,12 @@ class ChatState {
     private fun piChannelTarget(): Pair<String, String>? {
         val m = selectedModel ?: return null
         val cfg = AiConfigStore.configs[m.provider] ?: return null
-        val model = m.name.takeIf { it.isNotBlank() } ?: cfg.models.firstOrNull() ?: return null
+        // 送 pi 的必须是**模型 id**：列表条目可能是 `id=别名`（别名只是 Pient 侧写进 `models[].name` 的
+        // 展示/匹配写法），整条 `id=别名` 送过去 pi 的 `--model` 认不出来（2026-09-17 真机实测发现）。
+        val model = m.name.substringBefore('=').trim()
+            .takeIf { it.isNotBlank() }
+            ?: cfg.models.firstOrNull()?.substringBefore('=')?.trim()
+            ?: return null
         return cfg.providerId to model
     }
 
@@ -997,9 +1002,12 @@ class ChatState {
             markRunning(false)
             return
         }
-        // 所选模型可能不在配置的模型列表内（列表被改）→ 取配置列表首个
-        val effectiveModel = model.name.takeIf { cfg.models.contains(it) }
-            ?: cfg.models.firstOrNull().orEmpty()
+        // 所选模型可能不在配置的模型列表内（列表被改）→ 取配置列表首个。
+        // 比对按 **id**（列表条目可能是 `id=别名`；不剥掉别名会把「同一条」判成「不在列表里」，
+        // 于是逐模型的窗口 / 识图落到第一个模型上 —— 见 settingOf / MediaInline）。
+        val effectiveModel = model.name.substringBefore('=').trim()
+            .takeIf { id -> cfg.models.any { it.substringBefore('=').trim() == id } }
+            ?: cfg.models.firstOrNull()?.substringBefore('=')?.trim().orEmpty()
 
         // 引用消息：正文以 markdown 块引用注入（Quote.toPrompt；UI 仍只显示用户正文）
         // 本轮用户回合的请求文本：附件以「名称 · 路径」附在正文后（本条是最新回合，媒体恒保留）；
@@ -1009,7 +1017,7 @@ class ChatState {
         // 只追加一行 Operit 原文占位（「图片内容已省略，当前模型不支持图片处理」）。
         val appCtx = AppCtx.get()
         val inline = if (appCtx != null) {
-            MediaInline.parts(appCtx, currentMsg.attachments, cfg)
+            MediaInline.parts(appCtx, currentMsg.attachments, cfg, effectiveModel)
         } else {
             MediaInline.InlineResult(emptyList(), emptySet(), emptyList())
         }
@@ -1780,18 +1788,16 @@ class ChatState {
     ): ChatOutcome = coroutineScope {
         val userText = userTurnText
         // 附件直发：pi 的 `prompt` 支持 images（ImageContent = {type,data,mimeType}，见 pi docs/rpc.md）。
-        // media 里已经是 base64 部件（[MediaInline] 按媒体开关与上限筛过），这里只挑图片 ——
-        // pi 的 ImageContent 只有图片这一种；音频/视频在 pi 通道给一行占位说明，不让用户误以为发出去了。
+        // media 里已经是 base64 的图片部件（[MediaInline] 按「模型支持识图」与上限筛过）——
+        // pi 的 ImageContent 只有图片这一种，音频 / 视频不进这里（它们按普通文件走：正文里仍带
+        // 「名称 · 路径」，AI 可以用自己的工具去读），所以也不会再出现「未直发」提示。
         val piImages = media.filter { it.type == "image" }.map { part ->
             JSONObject()
                 .put("type", "image")
                 .put("data", part.base64)
                 .put("mimeType", part.mime.ifBlank { "image/png" })
         }
-        val skippedMedia = media.count { it.type != "image" }
-        val promptText = if (skippedMedia > 0) {
-            "$userText\n\n[附件未直发] 另有 $skippedMedia 个非图片附件（pi 通道只直发图片）"
-        } else userText
+        val promptText = userText
         val text = StringBuilder()           // 本轮全部正文（通道存活/错误判定用；条目按阶段落库，见 flushText）
         val textPhase = StringBuilder()      // **当前助手消息**的正文：工具调用前落成一条 Msg.Assistant
         val think = StringBuilder()          // 本轮全部思考（ChatOutcome 用；条目按阶段落库，见 flushThinking）
@@ -2029,11 +2035,17 @@ class ChatState {
     private data class ChatOutcome(val text: String, val usage: Usage?, val thinking: String)
 
     /**
-     * 上下文占用百分比：本轮用量（输入 + 缓存读/写 + 输出）÷ 配置的上下文长度。
-     * 数据源 = 服务商返回的 usage 真值；配置里长度缺失/为 0 时不改。
+     * 上下文占用百分比：本轮用量（输入 + 缓存读/写 + 输出）÷ 该模型的上下文长度。
+     * 数据源 = 服务商返回的 usage 真值；长度缺失/为 0 时不改。
+     *
+     * 窗口**逐模型**（pi `models[].contextWindow`）：取当前选用模型的生效值，
+     * 不是服务商级那一个（多模型窗口不同时，环要按自己那个模型的窗口算）。
      */
     private fun updateContextPercent(usage: Usage, cfg: ProviderConfig) {
-        val limitK = cfg.ctxLenK.trim().toIntOrNull() ?: return
+        // 窗口**逐模型**（pi `models[].contextWindow`）：取当前选用模型的生效值，不是服务商级那一个。
+        // 注意用 `name`（= 模型列表里的条目原文）而不是 `id`：`AiModel.id` 是 `provider/条目` 形态，
+        // 拿去查 modelSettings 会查不到（`mock-model=快速` 的键是 `mock-model`，见 settingOf）。
+        val limitK = cfg.settingOf(selectedModel?.name.orEmpty()).ctxLenK.trim().toIntOrNull() ?: return
         if (limitK <= 0) return
         val used = usage.inTokens + usage.cacheTokens + usage.cacheWriteTokens + usage.outTokens
         if (used <= 0) return

@@ -124,11 +124,13 @@ fun ContextUsageCard(
             // （pi 在 settings.json 的 `compaction` 里自己判，App 不参与）；这里只做等价换算展示。
             // 右侧「压缩上下文」= 移动端对桌面端 `/compact` 的等价入口（走 pi RPC `compact`），随时可按。
             val cfg = chatState.selectedModel?.provider?.let { AiConfigStore.configs[it] }
+            // 窗口逐模型（pi `models[].contextWindow`）：触发线按当前模型自己的窗口算。
+            // 用 `name`（模型列表条目原文，如 `mock-model=快速`）查 —— `AiModel.id` 是
+            // `provider/条目` 形态，直接查 modelSettings 会落空（settingOf 只剥 `=别名`）。
+            val limitK = cfg?.settingOf(chatState.selectedModel?.name.orEmpty())
+                ?.ctxLenK?.trim()?.toIntOrNull() ?: 0
             val threshold = cfg?.let {
-                ContextPolicy.autoCompactThresholdPercent(
-                    it.reserveTokensValue,
-                    it.ctxLenK.trim().toIntOrNull() ?: 0,
-                )
+                ContextPolicy.autoCompactThresholdPercent(it.reserveTokensValue, limitK)
             }
             Row(
                 verticalAlignment = Alignment.CenterVertically,

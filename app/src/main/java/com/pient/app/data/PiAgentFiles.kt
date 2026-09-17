@@ -62,6 +62,7 @@ object PiAgentFiles {
      * 写 `models.json`：逐个 provider 落 baseUrl / api / 模型清单。
      * `api` 取服务商目录的事实表（[ProviderCatalog.apiOf]）—— pi 的 api 类型是 per-model 的，
      * 但 Pient 页面是按服务商配置的，所以写在 provider 级（模型级仍可在 JSON 里单独覆盖）。
+     * 返回**内容是否真有变化**（不是「写成功」）—— 供配置页决定要不要让 pi 通道重读，见 [write]。
      */
     fun writeModels(context: Context, configs: Collection<ProviderConfig>): Boolean = runCatching {
         val root = JSONObject()
@@ -83,15 +84,15 @@ object PiAgentFiles {
             providers.put(c.providerId, pj)
         }
         root.put("providers", providers)
-        write(modelsFile(context), root.toString(2))
-        Log.i(TAG, "models.json 已写入：${configs.size} 个服务商 → ${modelsFile(context).absolutePath}")
-        true
+        val changed = write(modelsFile(context), root.toString(2))
+        if (changed) Log.i(TAG, "models.json 已写入：${configs.size} 个服务商 → ${modelsFile(context).absolutePath}")
+        changed
     }.getOrElse {
         Log.w(TAG, "models.json 写入失败：${it.message}")
         false
     }
 
-    /** 写 `auth.json`：API key 一律用 `type=api_key` 的形态（与 pi `/login` 落盘的一致） */
+    /** 写 `auth.json`：API key 一律用 `type=api_key` 的形态（与 pi `/login` 落盘的一致）；返回内容是否真有变化 */
     fun writeAuth(context: Context, configs: Collection<ProviderConfig>): Boolean = runCatching {
         // 保留文件里已有的其它凭据（例如 pi 自己 /login 存的 OAuth）——只 upsert 我们的
         val root = readJson(authFile(context)) ?: JSONObject()
@@ -110,9 +111,9 @@ object PiAgentFiles {
                 root.put(c.providerId, JSONObject().put("type", "api_key").put("key", key))
             }
         }
-        write(authFile(context), root.toString(2))
-        Log.i(TAG, "auth.json 已写入：${configs.count { it.apiKey.isNotBlank() }} 个凭据")
-        true
+        val changed = write(authFile(context), root.toString(2))
+        if (changed) Log.i(TAG, "auth.json 已写入：${configs.count { it.apiKey.isNotBlank() }} 个凭据")
+        changed
     }.getOrElse {
         Log.w(TAG, "auth.json 写入失败：${it.message}")
         false
@@ -121,7 +122,9 @@ object PiAgentFiles {
     /**
      * 合并写 `settings.json`：只动我们负责的键（`compaction` / `defaultTools`），
      * 其余键（pi 自己写的 `shellPath`、`skills`、`packages` 等）原样保留。
-     * `compaction` 取配置页里第一家服务商的设置（页面是逐服务商编辑的，pi 侧是全局一份）。
+     * `compaction` 取配置页里第一家服务商的设置（页面是逐服务商编辑的，pi 侧是全局一份；页面侧由
+     * `AiConfigStore.normalizeGlobals()` + 配置页的「全局四项」镜像保证各家一致）。
+     * 返回**内容是否真有变化**（不是「写成功」）—— 见 [write]。
      */
     fun writeSettings(context: Context, compactionSource: ProviderConfig?): Boolean = runCatching {
         val root = readJson(settingsFile(context)) ?: JSONObject()
@@ -141,9 +144,9 @@ object PiAgentFiles {
         // Pient 的项目都是应用自己创建/绑定的（不存在别人仓库那种风险），所以把这条口径固定成
         // 「总是信任」；用户若在桌面 pi 里显式设过别的值，这里不覆盖。
         if (!root.has("defaultProjectTrust")) root.put("defaultProjectTrust", "always")
-        write(settingsFile(context), root.toString(2))
-        Log.i(TAG, "settings.json 已合并写入（compaction + defaultTools=${PI_DEFAULT_TOOLS.size} 项）")
-        true
+        val changed = write(settingsFile(context), root.toString(2))
+        if (changed) Log.i(TAG, "settings.json 已合并写入（compaction + defaultTools=${PI_DEFAULT_TOOLS.size} 项）")
+        changed
     }.getOrElse {
         Log.w(TAG, "settings.json 写入失败：${it.message}")
         false
@@ -160,7 +163,6 @@ object PiAgentFiles {
         readJson(modelsFile(context))?.optJSONObject("providers")?.let { providers ->
             for (id in providers.keys()) {
                 val pj = providers.optJSONObject(id) ?: continue
-                val first = pj.optJSONArray("models")?.optJSONObject(0)
                 configs[id] = ProviderConfig(
                     providerId = id,
                     endpoint = pj.optString("baseUrl", ""),
@@ -168,17 +170,11 @@ object PiAgentFiles {
                     apiType = pj.optString("api", ""),
                     apiKey = "",
                     modelList = buildModelList(pj.optJSONArray("models")),
-                    ctxLenK = kTokens(first?.optInt("contextWindow", 0) ?: 0),
-                    maxOutK = kTokens(first?.optInt("maxTokens", 0) ?: 0),
-                    tempEnabled = first?.optJSONObject("samplingParams")?.has("temperature") == true,
-                    tempValue = first?.optJSONObject("samplingParams")?.opt("temperature")?.toString() ?: "1.0",
-                    topKEnabled = first?.optJSONObject("samplingParams")?.has("top_k") == true,
-                    topKValue = first?.optJSONObject("samplingParams")?.opt("top_k")?.toString() ?: "0",
-                    topPEnabled = first?.optJSONObject("samplingParams")?.has("top_p") == true,
-                    topPValue = first?.optJSONObject("samplingParams")?.opt("top_p")?.toString() ?: "1.0",
-                    imageDirectEnabled = first?.optJSONArray("input")?.let { arr ->
-                        (0 until arr.length()).any { arr.optString(it) == "image" }
-                    } ?: false,
+                    // 窗口 / 识图 / 采样在 pi 里都是 **per-model** 的（`models[].contextWindow` 等）：
+                    // 逐条读进 modelSettings；卡面上那三个字段是「新加入列表的模型的默认值」，
+                    // pi 文件里没有这个概念 —— 由 ai_config.json 里存着的那份填（见 loadExtras）。
+                    // 旧实现取 `models[0]` 当整家的值：多模型时页面只看得到第一个、改一次全覆盖。
+                    modelSettings = modelSettingsOf(pj.optJSONArray("models")),
                     reasoningFormat = reasoningFormatOf(pj.optJSONObject("compat")),
                     compactionEnabled = compaction?.optBoolean("enabled", ContextPolicy.DEFAULT_COMPACTION_ENABLED)
                         ?: ContextPolicy.DEFAULT_COMPACTION_ENABLED,
@@ -208,23 +204,45 @@ object PiAgentFiles {
     private fun modelJson(entry: String, c: ProviderConfig): JSONObject {
         val id = entry.substringBefore('=').trim()
         val alias = entry.substringAfter('=', "").trim()
+        // 逐模型参数（窗口 / 识图 / 采样）：有该模型的条目用它，没有则用卡面默认值
+        val s = c.settingOf(id)
         val m = JSONObject().put("id", id)
         if (alias.isNotEmpty()) m.put("name", alias)
-        c.ctxLenK.trim().toIntOrNull()?.takeIf { it > 0 }?.let { m.put("contextWindow", it * 1000) }
-        c.maxOutK.trim().toIntOrNull()?.takeIf { it > 0 }?.let { m.put("maxTokens", it * 1000) }
-        val input = JSONArray().put("text")
-        if (c.imageDirectEnabled) input.put("image")
-        m.put("input", input)
-        // 思考：pi 用 `model.reasoning` 标记「支持扩展思考」，不写 = 不支持。
-        // 页面选了**具体写法**（非 NONE / AUTO）就标上；AUTO（按模型名推断）与 NONE 留给 pi 自己判 —— 
-        // 内置目录里已有的事实不该被我们覆盖成 false（那会把思考能力关掉）。
-        if (c.reasoningFormat != ReasoningFormat.NONE && c.reasoningFormat != ReasoningFormat.AUTO) {
-            m.put("reasoning", true)
+        s.ctxLenK.trim().toIntOrNull()?.takeIf { it > 0 }?.let { m.put("contextWindow", it * 1000) }
+        s.maxOutK.trim().toIntOrNull()?.takeIf { it > 0 }?.let { m.put("maxTokens", it * 1000) }
+        // 识图：**勾上**写 `["text","image"]`、**取消就整个键不写**（照 pi-web ModelsConfig 的 imageInput：`v ? ["text","image"] : undefined`）。
+        // 为什么不写 `["text"]`：models.json 的条目会**整条替换**同 id 的内置目录条目 —— 写死 text 会把内置目录里
+        // 「这个模型能读图」的事实盖掉，pi 的 read 工具随后就不再返回图片内容了。取消后不写 = 由 pi 自己按目录判。
+        if (s.image) m.put("input", JSONArray().put("text").put("image"))
+        // 思考：pi 用 `model.reasoning` 标记「支持扩展思考」，**不写 = 不支持**（`provider-composer` 的
+        // `modelFromJson` 是 `definition.reasoning ?? false`，并不会回落到内置目录的既定事实）—— 旧实现
+        // 把 AUTO 当「留给 pi 自己判」是错的：pi 没得判，模型会一直停在「不支持思考」。现在：
+        // - 页面选了**具体写法**（非 NONE / AUTO）→ 写 true（写法在 provider 级 compat，见 writeModels）；
+        // - **AUTO** → 按模型名现推 [AiBackend.inferReasoningFormat]（与界面「自动识别 → 当前生效：X」
+        //   同一份规则）：推得出 → 写 true + **模型级** compat.thinkingFormat（provider 级那条是 AUTO 时没有的）；
+        //   推不出 → 当 NONE 处理（不写 = pi 侧「该模型不支持思考」）。
+        val fmt = if (c.reasoningFormat == ReasoningFormat.AUTO) {
+            AiBackend.inferReasoningFormat(id)
+        } else {
+            c.reasoningFormat
         }
+        // 逐模型三态：显式 开/关 优先，null 才走写法推断（= 2026-09-17 之前的旧行为）。
+        // 「不支持」**要显式写出 false**：pi 侧 false 与不写等价（`definition.reasoning ?? false`），
+        // 但不写会被回读成「未设置」→ 下次又跟着写法推断跑（用户的选择被静默丢掉）。
+        val reasoningOn = s.reasoning ?: (fmt != ReasoningFormat.NONE)
+        if (reasoningOn) {
+            m.put("reasoning", true)
+            if (fmt != c.reasoningFormat) {
+                reasoningCompat(fmt)?.let { compat -> m.put("compat", JSONObject(compat)) }
+            }
+        } else if (s.reasoning == false) {
+            m.put("reasoning", false)
+        }
+        // 采样：逐模型的值，**留空 = 不传该参数**（照 pi-web：值 undefined 就不写键）
         val sampling = JSONObject()
-        if (c.tempEnabled) sampling.put("temperature", c.tempValue.trim().toDoubleOrNull() ?: 1.0)
-        if (c.topKEnabled) sampling.put("top_k", c.topKValue.trim().toIntOrNull() ?: 0)
-        if (c.topPEnabled) sampling.put("top_p", c.topPValue.trim().toDoubleOrNull() ?: 1.0)
+        s.temperature.trim().toDoubleOrNull()?.let { sampling.put("temperature", it) }
+        s.topK.trim().toIntOrNull()?.let { sampling.put("top_k", it) }
+        s.topP.trim().toDoubleOrNull()?.let { sampling.put("top_p", it) }
         if (sampling.length() > 0) m.put("samplingParams", sampling)
         return m
     }
@@ -293,12 +311,48 @@ object PiAgentFiles {
      */
     private fun kTokens(value: Int): String = if (value > 0) (value / 1000).toString() else ""
 
+    /**
+     * `models[]` → 逐模型参数（[ModelSetting]）。
+     *
+     * 关键口径：**没写的键一律存成空串 / false**（= 回写时不写该键）—— 「文件里没写」与「页面上留空」
+     * 因此完全等价，回写不会凭空给模型补上默认值（旧的 `?: 1.0` / `?: 0` 兜底就会补）。
+     */
+    private fun modelSettingsOf(models: JSONArray?): Map<String, ModelSetting> {
+        if (models == null) return emptyMap()
+        val out = LinkedHashMap<String, ModelSetting>()
+        for (i in 0 until models.length()) {
+            val o = models.optJSONObject(i) ?: continue
+            val id = o.optString("id", "").trim()
+            if (id.isEmpty()) continue
+            val sp = o.optJSONObject("samplingParams")
+            out[id] = ModelSetting(
+                ctxLenK = kTokens(o.optInt("contextWindow", 0)),
+                maxOutK = kTokens(o.optInt("maxTokens", 0)),
+                image = o.optJSONArray("input")?.let { arr ->
+                    (0 until arr.length()).any { arr.optString(it) == "image" }
+                } ?: false,
+                temperature = if (sp?.has("temperature") == true) sp.opt("temperature").toString() else "",
+                topK = if (sp?.has("top_k") == true) sp.opt("top_k").toString() else "",
+                topP = if (sp?.has("top_p") == true) sp.opt("top_p").toString() else "",
+                // 三态：键在 = 显式支持/不支持（写盘时 false 也会写出来，才回读得到）；键不在 = 未设置
+                reasoning = if (o.has("reasoning")) o.optBoolean("reasoning") else null,
+            )
+        }
+        return out
+    }
+
     private fun readJson(f: File): JSONObject? = runCatching {
         if (f.isFile) JSONObject(f.readText()) else null
     }.getOrNull()
 
-    /** 原子写（临时文件 + rename），目录不存在时创建 */
-    private fun write(f: File, text: String) {
+    /**
+     * 原子写（临时文件 + rename），目录不存在时创建。
+     * 返回**内容是否真的有变化**（一样就跳过 I/O）—— 调用方（`AiConfigStore.save`）用它决定要不要
+     * 让 pi 重读（pi 只在进程启动时读这些文件，见 `PiRpc.markConfigDirty`）。
+     */
+    private fun write(f: File, text: String): Boolean {
+        val changed = !(f.isFile && f.readText() == text)
+        if (!changed) return false
         f.parentFile?.mkdirs()
         val tmp = File(f.parentFile, f.name + ".tmp")
         tmp.writeText(text)
@@ -306,5 +360,6 @@ object PiAgentFiles {
             f.writeText(text)
             tmp.delete()
         }
+        return true
     }
 }
