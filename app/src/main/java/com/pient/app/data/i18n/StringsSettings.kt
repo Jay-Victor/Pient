@@ -51,6 +51,45 @@ interface SettingsStrings {
     val messageNotifyVibrate: String
     val messageNotifyVibrateDesc: String
     val messageNotifyNoPermission: String
+
+    // ── 应用日志管理（2026-09-17）──
+    val logTitle: String
+    val logSubtitle: String
+    val logFileLabel: String
+    val logLocationNote: String
+    val logEmptyStat: String
+    fun logStatLine(a0: Any?, a1: Any?): String
+    fun logRangeLine(a0: Any?, a1: Any?): String
+    val logExport: String
+    val logExportSubtitle: String
+    val logExporting: String
+    val logView: String
+    val logViewSubtitle: String
+    val logClear: String
+    val logClearSubtitle: String
+    val logClearTitle: String
+    val logClearBody: String
+    val logCleared: String
+    fun logExported(a0: Any?): String
+    val logExportEmpty: String
+    val logExportFailed: String
+    val logNote: String
+    val logViewerTitle: String
+    val logFilterAll: String
+    val logFilterWarn: String
+    val logFilterError: String
+    fun logViewerCount(a0: Any?): String
+    val logViewerEmpty: String
+    val logDocTitle: String
+    val logExportTimeLabel: String
+    val logSectionEnv: String
+    fun logSectionStderr(a0: Any?): String
+    fun logSectionApp(a0: Any?): String
+    val logSectionSystem: String
+    fun logSystemNeedTier(a0: Any?): String
+    val logSystemSelf: String
+    val logSystemEmpty: String
+    fun logSystemFailed(a0: Any?): String
 }
 
 object ZhSettings : SettingsStrings {
@@ -103,6 +142,45 @@ object ZhSettings : SettingsStrings {
     override val messageNotifyVibrate: String = "消息通知震动"
     override val messageNotifyVibrateDesc: String = "当消息通知触发时进行震动提醒"
     override val messageNotifyNoPermission: String = "未授予通知权限：消息通知不会显示（可在系统设置里开启）"
+
+    // ── 应用日志管理（2026-09-17）──
+    override val logTitle: String = "应用日志管理"
+    override val logSubtitle: String = "运行记录 · 导出与清理"
+    override val logFileLabel: String = "日志文件"
+    override val logLocationNote: String = "位置：应用私有目录（导出后可在系统「下载/Pient/」查看）"
+    override val logEmptyStat: String = "还没有日志记录"
+    override fun logStatLine(a0: Any?, a1: Any?): String = "${a0} · ${a1} 行"
+    override fun logRangeLine(a0: Any?, a1: Any?): String = "${a0} — ${a1}"
+    override val logExport: String = "导出日志"
+    override val logExportSubtitle: String = "生成到系统「下载/Pient/」，可发给开发者分析"
+    override val logExporting: String = "正在导出…"
+    override val logView: String = "查看最近日志"
+    override val logViewSubtitle: String = "只读查看最近 2000 行，可按级别筛选"
+    override val logClear: String = "清空日志"
+    override val logClearSubtitle: String = "删除已记录的全部运行日志"
+    override val logClearTitle: String = "清空日志？"
+    override val logClearBody: String = "将删除应用已记录的全部运行日志（不影响会话、项目与配置）。"
+    override val logCleared: String = "日志已清空"
+    override fun logExported(a0: Any?): String = "日志已导出：${a0}"
+    override val logExportEmpty: String = "还没有可导出的日志"
+    override val logExportFailed: String = "导出失败，请重试"
+    override val logNote: String = "日志记录应用运行过程（含 pi 报错原文与环境信息）。不含 API 密钥与会话内容 —— 会话导出见「项目与会话记录」。"
+    override val logViewerTitle: String = "日志"
+    override val logFilterAll: String = "全部"
+    override val logFilterWarn: String = "警告以上"
+    override val logFilterError: String = "错误"
+    override fun logViewerCount(a0: Any?): String = "${a0} 行"
+    override val logViewerEmpty: String = "没有符合筛选的日志"
+    override val logDocTitle: String = "Pient 应用日志"
+    override val logExportTimeLabel: String = "导出时间："
+    override val logSectionEnv: String = "环境报告"
+    override fun logSectionStderr(a0: Any?): String = "pi stderr（最近 ${a0} 行）"
+    override fun logSectionApp(a0: Any?): String = "应用日志（${a0} 行）"
+    override val logSectionSystem: String = "系统日志（logcat）"
+    override fun logSystemNeedTier(a0: Any?): String = "系统日志需要调试 / Root 档；当前档位 ${a0} 没有特权通道"
+    override val logSystemSelf: String = "应用自身 logcat 尾部（无特权通道：只有本应用的日志行；系统其它进程的日志需要调试 / Root 档）"
+    override val logSystemEmpty: String = "这次抓取没有匹配到日志行"
+    override fun logSystemFailed(a0: Any?): String = "系统日志读取失败：${a0}"
 }
 
 object EnSettings : SettingsStrings {
@@ -155,4 +233,43 @@ object EnSettings : SettingsStrings {
     override val messageNotifyVibrate: String = "Notification vibration"
     override val messageNotifyVibrateDesc: String = "Vibrate when a message notification fires"
     override val messageNotifyNoPermission: String = "Notification permission not granted: message notifications stay hidden (you can enable it in system settings)"
+
+    // ── 应用日志管理（2026-09-17）──
+    override val logTitle: String = "App log management"
+    override val logSubtitle: String = "Runtime log · export and cleanup"
+    override val logFileLabel: String = "Log file"
+    override val logLocationNote: String = "Location: app-private storage (after export it lands in the system “Downloads/Pient/” folder)"
+    override val logEmptyStat: String = "No log recorded yet"
+    override fun logStatLine(a0: Any?, a1: Any?): String = "${a0} · ${a1} lines"
+    override fun logRangeLine(a0: Any?, a1: Any?): String = "${a0} — ${a1}"
+    override val logExport: String = "Export log"
+    override val logExportSubtitle: String = "Writes to the system “Downloads/Pient/” folder — send it to the developer for analysis"
+    override val logExporting: String = "Exporting…"
+    override val logView: String = "View recent log"
+    override val logViewSubtitle: String = "Read-only, last 2000 lines, filterable by level"
+    override val logClear: String = "Clear log"
+    override val logClearSubtitle: String = "Delete all recorded runtime log"
+    override val logClearTitle: String = "Clear log?"
+    override val logClearBody: String = "This deletes all recorded runtime log (sessions, projects and settings are not affected)."
+    override val logCleared: String = "Log cleared"
+    override fun logExported(a0: Any?): String = "Log exported: ${a0}"
+    override val logExportEmpty: String = "Nothing to export yet"
+    override val logExportFailed: String = "Export failed, please retry"
+    override val logNote: String = "The log records the app's runtime (including pi's raw errors and environment info). It contains no API keys and no session content — export sessions from “Project & session records”."
+    override val logViewerTitle: String = "Log"
+    override val logFilterAll: String = "All"
+    override val logFilterWarn: String = "Warning+"
+    override val logFilterError: String = "Error"
+    override fun logViewerCount(a0: Any?): String = "${a0} lines"
+    override val logViewerEmpty: String = "No log lines match the filter"
+    override val logDocTitle: String = "Pient app log"
+    override val logExportTimeLabel: String = "Exported at: "
+    override val logSectionEnv: String = "Environment report"
+    override fun logSectionStderr(a0: Any?): String = "pi stderr (last ${a0} lines)"
+    override fun logSectionApp(a0: Any?): String = "App log (${a0} lines)"
+    override val logSectionSystem: String = "System log (logcat)"
+    override fun logSystemNeedTier(a0: Any?): String = "System log needs the Debugger / Root tier; tier ${a0} has no privileged channel"
+    override val logSystemSelf: String = "The app's own logcat tail (no privileged channel: this app's lines only; other processes' logs need the Debugger / Root tier)"
+    override val logSystemEmpty: String = "No matching log lines were captured this time"
+    override fun logSystemFailed(a0: Any?): String = "Failed to read the system log: ${a0}"
 }

@@ -15,6 +15,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.BarChart
@@ -113,7 +114,7 @@ fun SettingsScreen(nav: NavController) {
                 )
             }
 
-            // ── 分组 3：数据与权限（三行均为真实页面） ──
+            // ── 分组 3：数据与权限（四行均为真实页面） ──
             SettingsGroup(L.settings.groupData, Icons.Outlined.Security) {
                 SettingsRow(
                     icon = Icons.Outlined.AdminPanelSettings,
@@ -134,6 +135,14 @@ fun SettingsScreen(nav: NavController) {
                     title = L.settings.usage,
                     subtitle = L.settings.usageSubtitle,
                     onClick = { nav.navigate("usage") },
+                )
+                DividerLine()
+                // 应用日志管理（2026-09-17）：运行日志的导出 / 查看 / 清空
+                SettingsRow(
+                    icon = Icons.AutoMirrored.Outlined.ReceiptLong,
+                    title = L.settings.logTitle,
+                    subtitle = L.settings.logSubtitle,
+                    onClick = { nav.navigate("app_logs") },
                 )
             }
 

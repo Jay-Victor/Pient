@@ -42,6 +42,8 @@ import com.pient.app.ui.plugins.PluginsScreen
 import com.pient.app.ui.settings.AboutScreen
 import com.pient.app.ui.settings.BehaviorSettingsScreen
 import com.pient.app.ui.settings.LanguageSettingsScreen
+import com.pient.app.ui.settings.LogManagementScreen
+import com.pient.app.ui.settings.LogViewerScreen
 import com.pient.app.ui.settings.ModelConfigScreen
 import com.pient.app.ui.settings.ProjectManagementScreen
 import com.pient.app.ui.settings.SettingsScreen
@@ -364,6 +366,13 @@ fun PientApp() {
                     }
                     composable("system_permissions") {
                         SystemPermissionScreen(nav = nav)
+                    }
+                    // 应用日志管理（2026-09-17）：导出/查看/清空（见 ui/settings/LogManagementScreen.kt）
+                    composable("app_logs") {
+                        LogManagementScreen(nav = nav)
+                    }
+                    composable("log_viewer") {
+                        LogViewerScreen(nav = nav)
                     }
                     composable("about") {
                         AboutScreen(nav = nav)

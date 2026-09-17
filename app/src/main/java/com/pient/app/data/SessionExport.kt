@@ -1,14 +1,7 @@
 package com.pient.app.data
 
 import com.pient.app.data.i18n.L
-import android.content.ContentValues
 import android.content.Context
-import android.net.Uri
-import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
-import android.util.Log
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -19,12 +12,9 @@ import java.util.Locale
  * 形态 = **Markdown**（pi 的会话条目本就是文本消息，导出成可读文本最通用、也能回灌给模型）：
  * 每个会话一个二级标题 + 项目/时间，逐条消息按角色输出；思考折叠成引用块，工具调用/结果各一行。
  *
- * 落点 = 系统「下载/Pient/」（MediaStore；API 29+ 免权限、系统文件管理器可见）；
- *       API 26~28 退到应用自己的外部下载目录（同样免权限，但路径在 Android/data 下）。
+ * 落点 = 系统「下载/Pient/」（实现见 [DownloadsOut]；API 29+ 免权限、系统文件管理器可见）。
  */
 object SessionExport {
-    private const val TAG = "PientExport"
-    private const val REL_DIR = "Pient"
 
     /**
      * 一组会话 → 一个 Markdown 文档。
@@ -53,28 +43,10 @@ object SessionExport {
 
     /**
      * 写给系统「下载/Pient/<fileName>」，返回可展示的落点描述（失败返回 null）。
+     * 实现见 [DownloadsOut]（与日志导出共用一份：同一语义不写第二遍）。
      */
-    fun writeToDownloads(context: Context, fileName: String, content: String): String? = runCatching {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                put(MediaStore.Downloads.MIME_TYPE, "text/markdown")
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/" + REL_DIR)
-            }
-            val uri: Uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                ?: return@runCatching null
-            context.contentResolver.openOutputStream(uri)?.use { it.write(content.toByteArray()) }
-                ?: return@runCatching null
-            Log.i(TAG, "已导出到下载/$REL_DIR/$fileName")
-            L.project.exportLocation(REL_DIR, fileName)
-        } else {
-            // API 26~28：公共下载目录需要 WRITE_EXTERNAL_STORAGE，不引权限 → 落应用外部下载目录
-            val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return@runCatching null
-            File(dir, fileName).writeText(content)
-            Log.i(TAG, "已导出到 ${File(dir, fileName).absolutePath}")
-            File(dir, fileName).absolutePath
-        }
-    }.onFailure { Log.w(TAG, "导出失败：${it.message}") }.getOrNull()
+    fun writeToDownloads(context: Context, fileName: String, content: String): String? =
+        DownloadsOut.writeText(context, fileName, "text/markdown", content)
 
     /** 文件名：pient-sessions-20260916-0102.md（毫秒 + 会话数，避免重名覆盖） */
     fun fileName(count: Int): String {
