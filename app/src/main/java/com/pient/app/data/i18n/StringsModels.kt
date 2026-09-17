@@ -9,6 +9,9 @@ interface ModelsStrings {
     val billingPerRequest: String
     val connectionOkNoModels: String
     val connectionOk: String
+    fun modelsAllOk(a0: Any?): String
+    fun modelsTestPartial(a0: Any?, a1: Any?): String
+    fun modelsTestUnsupported(a0: Any?): String
     val apiEndpoint: String
     val filterTitle: String
     val usageChartPerRequest: String
@@ -55,6 +58,7 @@ interface ModelsStrings {
     fun thinkingAutoActive(a0: Any?, a1: Any?): String
     fun thinkingProviderPreset(a0: Any?): String
     val paramSettings: String
+    fun samplingUnsupported(a0: Any?): String
     val temperature: String
     val temperatureHint: String
     val temperatureRange: String
@@ -139,6 +143,9 @@ object ZhModels : ModelsStrings {
     override val billingPerRequest: String = "按次计费"
     override val connectionOkNoModels: String = "连接成功（未返回模型）"
     override val connectionOk: String = "✓ 连接成功"
+    override fun modelsAllOk(a0: Any?): String = "✓ $a0 个模型全部可用"
+    override fun modelsTestPartial(a0: Any?, a1: Any?): String = "✕ 可用 $a0/$a1 个模型，其余测试失败"
+    override fun modelsTestUnsupported(a0: Any?): String = "该 API 类型（$a0）无法在应用内逐一测试，请在聊天页选它发一条消息验证"
     override val apiEndpoint: String = "API端点"
     override val filterTitle: String = "筛选"
     override val usageChartPerRequest: String = "按次"
@@ -177,14 +184,15 @@ object ZhModels : ModelsStrings {
     override val videoSupportHint: String = "启用后，视频将直接发送给AI处理；关闭时仅发送一行省略占位"
     override val contextSettings: String = "上下文设置"
     override val contextLength: String = "上下文长度"
-    override val contextLengthHint: String = "单次会话可用的最大上下文窗口 · 过大可能超出服务商上限"
+    override val contextLengthHint: String = "单次会话可用的最大上下文窗口 · 过大可能超出服务商上限 · 留空 = 不写该字段，pi 用 128K 默认"
     override val maxOutputLength: String = "最大输出长度"
-    override val maxOutputLengthHint: String = "单次回复最多生成的 token 数"
+    override val maxOutputLengthHint: String = "单次回复最多生成的 token 数 · 留空 = 不写该字段，pi 用 16K 默认"
     override val thinkingSettings: String = "思考设置"
     override val thinkingFormat: String = "思考参数格式"
     override fun thinkingAutoActive(a0: Any?, a1: Any?): String = "自动识别 → 当前生效：${a0}（${a1}）"
     override fun thinkingProviderPreset(a0: Any?): String = "服务商预设：${a0}"
     override val paramSettings: String = "模型参数设置"
+    override fun samplingUnsupported(a0: Any?): String = "该 API 类型（$a0）下 pi 不会把采样参数写进请求体，这三项对它不生效"
     override val temperature: String = "温度（Temperature）"
     override val temperatureHint: String = "调节采样随机性 · 关闭时不传该参数"
     override val temperatureRange: String = "取值范围 0.0~2.0"
@@ -195,7 +203,7 @@ object ZhModels : ModelsStrings {
     override val topPHint: String = "从累计概率达到 P 的最小 token 集合中采样 · 关闭时不传该参数"
     override val topPRange: String = "取值范围 0.0~1.0"
     override val compactionTitle: String = "上下文压缩（全局）"
-    override val compactionHint: String = "pi 侧是全局设置（~/.pi/agent/settings.json 的 compaction）· 所有服务商共用 · 改完立即生效"
+    override val compactionHint: String = "pi 侧是全局设置（~/.pi/agent/settings.json 的 compaction）· 所有服务商共用 · 开关即时生效；两个数值等 pi 通道重启后生效"
     override val compactionAuto: String = "自动压缩上下文"
     override val compactionAutoHint: String = "上下文接近上限时由 pi 自动摘要旧内容（关闭后仍可在用量卡手动压缩）"
     override val reserveTokens: String = "为回复预留 Tokens"
@@ -269,6 +277,9 @@ object EnModels : ModelsStrings {
     override val billingPerRequest: String = "Per Request"
     override val connectionOkNoModels: String = "Connected (no models returned)"
     override val connectionOk: String = "✓ Connected"
+    override fun modelsAllOk(a0: Any?): String = "✓ All $a0 models are available"
+    override fun modelsTestPartial(a0: Any?, a1: Any?): String = "✕ $a0/$a1 models available, the rest failed"
+    override fun modelsTestUnsupported(a0: Any?): String = "API type ($a0) can't be tested model-by-model in the app — send a message in chat with that model instead"
     override val apiEndpoint: String = "API endpoint"
     override val filterTitle: String = "Filter"
     override val usageChartPerRequest: String = "Per request"
@@ -307,14 +318,15 @@ object EnModels : ModelsStrings {
     override val videoSupportHint: String = "When on, video is sent straight to the AI; when off, only a one-line placeholder is sent"
     override val contextSettings: String = "Context settings"
     override val contextLength: String = "Context length"
-    override val contextLengthHint: String = "Max context window per session · Too large a value may exceed the provider limit"
+    override val contextLengthHint: String = "Max context window per session · Too large a value may exceed the provider limit · Leave empty = skip this field, pi uses the 128K default"
     override val maxOutputLength: String = "Max output length"
-    override val maxOutputLengthHint: String = "Max tokens generated per reply"
+    override val maxOutputLengthHint: String = "Max tokens generated per reply · Leave empty = skip this field, pi uses the 16K default"
     override val thinkingSettings: String = "Thinking settings"
     override val thinkingFormat: String = "Thinking parameter format"
     override fun thinkingAutoActive(a0: Any?, a1: Any?): String = "Auto-detect → Currently active: ${a0} (${a1})"
     override fun thinkingProviderPreset(a0: Any?): String = "Provider preset: ${a0}"
     override val paramSettings: String = "Model parameters"
+    override fun samplingUnsupported(a0: Any?): String = "With API type ($a0) pi does not put sampling parameters into the request body, so these three have no effect"
     override val temperature: String = "Temperature"
     override val temperatureHint: String = "Adjusts sampling randomness · Not sent when off"
     override val temperatureRange: String = "Range 0.0~2.0"
@@ -325,7 +337,7 @@ object EnModels : ModelsStrings {
     override val topPHint: String = "Sample from the smallest token set whose cumulative probability reaches P · Not sent when off"
     override val topPRange: String = "Range 0.0~1.0"
     override val compactionTitle: String = "Context compaction (global)"
-    override val compactionHint: String = "A global setting on the pi side (compaction in ~/.pi/agent/settings.json) · Shared by all providers · Applied immediately"
+    override val compactionHint: String = "A global setting on the pi side (compaction in ~/.pi/agent/settings.json) · Shared by all providers · The switch applies immediately; the two numbers apply after the pi channel restarts"
     override val compactionAuto: String = "Auto-compact context"
     override val compactionAutoHint: String = "pi summarizes old content automatically as the context nears its limit (manual compaction stays available on the usage card when off)"
     override val reserveTokens: String = "Tokens reserved for the reply"
