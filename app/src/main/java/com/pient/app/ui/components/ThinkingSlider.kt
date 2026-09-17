@@ -23,6 +23,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
@@ -40,6 +43,9 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pient.app.data.ThinkingLevel
@@ -77,6 +83,11 @@ fun ThinkingLevelSlider(
 ) {
     val n = levels.size
     val idx = levels.indexOf(selected).coerceAtLeast(0)
+    // 键盘/方向键入口（2026-09-17 真机补齐）：`.focusable()` 只是「可聚焦」，触屏上**没有任何东西会把
+    // 焦点交给它** —— 实测 D-pad 按到底也摸不到滑轨，方向键这条路径等于死代码。现在点一下即取焦，
+    // 并给一层极浅的描边让「焦点在滑轨上」看得见。
+    val focusRequester = remember { FocusRequester() }
+    var focused by remember { mutableStateOf(false) }
     val purple = if (LocalPientIsDark.current) DarkBrandPurple else LightBrandPurple
     val density = LocalDensity.current
 
@@ -121,8 +132,17 @@ fun ThinkingLevelSlider(
                 .fillMaxWidth()
                 .height(40.dp)
                 .then(
+                    if (focused && enabled) Modifier.border(
+                        1.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
+                        RoundedCornerShape(10.dp),
+                    ) else Modifier,
+                )
+                .then(
                     if (!enabled) Modifier
                     else Modifier
+                        .focusRequester(focusRequester)
+                        .onFocusChanged { focused = it.isFocused }
                         .focusable()
                         .onKeyEvent { event ->
                             if (event.type != KeyEventType.KeyDown) false
@@ -140,6 +160,8 @@ fun ThinkingLevelSlider(
                         // 真机上 `input tap` 落在滑轨上毫无反应。tap 与 drag 分两个 pointerInput，互不干扰）
                         .pointerInput(n) {
                             detectTapGestures { pos ->
+                                // 点按既选档、也把焦点交给滑轨：随后方向键 / 硬件键盘就能调档
+                                focusRequester.requestFocus()
                                 onChange(levelAt(pos.x, size.width.toFloat(), thumbPx, levels))
                             }
                         }
