@@ -6,7 +6,9 @@
  *  2. `/pient-sysprompt` —— 把 pi 真实生效的系统提示词回流给 App 的只读面板；
  *  3. `/pient-meta <base64(JSON)>` —— 把「引用 + 附件清单（含文件名）」的元数据写进会话（`pient_meta` custom 条目）；
  *  4. `android_shell` **工具** —— 让 AI 能在 **Android 系统**里执行命令（Ubuntu 做不到的那些：
- *     `pm`/`am`/`cmd`/`dumpsys` 等系统命令、装应用、改系统设置、读别的 app 私有数据、操作硬件）。
+ *     `pm`/`am`/`cmd`/`dumpsys` 等系统命令、装应用、改系统设置、读别的 app 私有数据、操作硬件）；
+ *  5. **系统提示词的 Pient 化** —— `before_agent_start` 每轮改写（Pient 身份句 + 运行环境段）；
+ *     `/pient-sysprompt` 回流时套同一个改写函数，保证面板显示的 = 模型真实收到的那一份。
  *
  * ── 为什么 `/pient-nav` 要自己写 ─────────────────────────────────────────────
  * pi 的官方 RPC 暴露了会话/树/分叉的**大部分**能力
@@ -71,6 +73,37 @@ const META_TYPE = "pient_meta";
 
 /** 系统提示词回流文件（Pient 的「系统提示词」面板读它；App 侧不再持有提示词） */
 const SYSPROMPT_FILE = ".pient-sysprompt.txt";
+
+/**
+ * ── 系统提示词的 Pient 化（2026-09-17 用户拍板）────────────────────────────────
+ * pi 的基座提示词由官方包生成（`core/system-prompt.ts` 的 `buildSystemPrompt()`），
+ * Pient 不动 pi 源码，只做**确定性字符串改写**：
+ *   ① 首句换成 Pient 身份句；② 末尾追加一段运行环境说明（Android 客户端 / `/workspace`
+ *   含义 / 跟随用户语言 / 引用与附件是 Pient 注入的元数据）。
+ * 两条硬口径：
+ *   - `before_agent_start` 每轮改写（官方 hook：返回 `{ systemPrompt }` 即替换本轮提示词，
+ *     pi 侧把它设为**本轮 override**，随下一轮 run 结束被清掉）；
+ *   - `/pient-sysprompt` 写完前面套**同一个函数** —— 命令是回合之外执行的，那时 override
+ *     已被清掉、`ctx.getSystemPrompt()` 回的是基座原文，不套就会把「pi 原文」当成
+ *     「真实下发的一份」写进面板（面板跟模型收到的不是同一个东西）。
+ * pi 升级若改了首句文案 → 替换不命中 → 原样下发（静默退回，不报错）。
+ */
+const BASE_OPENING = "You are an expert coding assistant operating inside pi, a coding agent harness.";
+const PIENT_OPENING = "You are Pient, an expert coding assistant operating inside pi (a coding agent harness).";
+
+/** 追加段开头这句同时充当幂等标记 */
+const ENV_MARK = "You are running inside Pient";
+const ENV_SECTION = `You are running inside Pient, the Android client for pi. The user interacts with you through a mobile chat interface; there is no terminal UI or keyboard shortcuts.
+- /workspace is the project folder the user selected in Pient; the in-app terminal shares the same Ubuntu environment as your bash tool.
+- Answer in the language the user writes in.
+- Quoted blocks ("> ...") at the start of a user message and trailing "[附件] ..." / "[附件未直发] ..." lines are metadata injected by Pient (the message the user quoted / the files they attached), not text the user typed.`;
+
+/** pi 基座提示词 → Pient 形态（幂等：首句命中才替换、追加段已存在则跳过） */
+function pientify(prompt: string): string {
+  let out = prompt.replace(BASE_OPENING, PIENT_OPENING);
+  if (!out.includes(ENV_MARK)) out = `${out}\n\n${ENV_SECTION}`;
+  return out;
+}
 
 /** Android shell 回桥的端点文件（应用写；结构见 ExecBridge.kt） */
 const BRIDGE_FILE = ".pient-exec-bridge.json";
@@ -152,14 +185,25 @@ function formatResult(r: BridgeResult, cmd: string): string {
 }
 
 export default function (pi: ExtensionAPI) {
+  // ── 系统提示词的 Pient 化（2026-09-17）──────────────────────────────────────
+  // 官方 hook（docs/extensions.md「before_agent_start」）：返回 { systemPrompt } =
+  // **替换本轮系统提示词**（chained across extensions）。内容没变就不返回（别把
+  // 「无改写」也标成 modified）。
+  pi.on("before_agent_start", async (event) => {
+    const next = pientify(event.systemPrompt);
+    return next === event.systemPrompt ? undefined : { systemPrompt: next };
+  });
+
   // ── 系统提示词回流（2026-09-15）──────────────────────────────────────────────
   // 提示词的持有者是 pi（base prompt + 项目 context 文件 + 扩展改写），App 看不到。
   // Pient 的「系统提示词」只读面板打开时触发这条命令 → 把**真实下发的那一份**写到
   // `~/.pi/agent/.pient-sysprompt.txt`（App 侧从 rootfs 里读回）。
+  // 改写只对运行中的那一轮有效，命令是回合外跑的 → 套 [pientify]（与 before_agent_start
+  // 同一个函数）才等于模型真实收到的形态；对已改写的文本幂等。
   pi.registerCommand("pient-sysprompt", {
     description: "Pient: 把当前生效的系统提示词写到 ~/.pi/agent/.pient-sysprompt.txt（供 App 只读展示）",
     handler: async (_args, ctx) => {
-      const text = ctx.getSystemPrompt();
+      const text = pientify(ctx.getSystemPrompt());
       try {
         mkdirSync(agentDir(), { recursive: true });
         writeFileSync(join(agentDir(), SYSPROMPT_FILE), text, "utf8");
@@ -244,7 +288,7 @@ export default function (pi: ExtensionAPI) {
       "而且**即发即走** —— 每次调用都是新进程，`cd` / `export` 之类的状态**不跨调用保留**" +
       "（需要先切目录就写在同一句里：`cd /sdcard && ls`）。反过来，Ubuntu 沙盘里的文件、构建、包管理一律用 bash 工具。\n" +
       "需要用户先在 Pient 里开启「调试权限（Shizuku）」或「Root 权限」——标准档下会返回明确的不可用说明。",
-    promptSnippet: "android_shell: 在 Android 系统 shell 里执行命令（pm/am/cmd/dumpsys/settings 等；需 Shizuku 或 Root）",
+    promptSnippet: "在 Android 系统 shell 里执行命令（pm/am/cmd/dumpsys/settings 等；需 Shizuku 或 Root）",
     promptGuidelines: [
       "android_shell 用于操作 Android 系统本身（安装应用、启动组件、改系统设置、读系统属性、模拟输入）；Ubuntu 内的文件与构建操作一律用 bash。",
       "android_shell 需要用户在 Pient 里开启 Shizuku（调试权限）或 Root 权限；工具返回不可用说明时，如实转告用户并给出开启路径，不要改用别的方式硬凑。",
