@@ -1,5 +1,7 @@
 package com.pient.app.ui.files
 
+import android.widget.Toast
+
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,11 +15,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import com.pient.app.data.ChatState
 import com.pient.app.data.CodeLanguage
 import com.pient.app.data.FileNode
+import com.pient.app.data.i18n.L
+import com.pient.app.ui.chat.mentionTextFor
 
 /**
  * 代码文件编辑器（2026-09-11 新增）：正文（行号 + 语法着色 + 缩进标记）+ 底部符号工具栏。
@@ -37,6 +42,7 @@ internal fun CodeSourceEditor(
     codeLanguage: CodeLanguage,
 ) {
     val key = chatState.fileKey(node)
+    val context = LocalContext.current
 
     // ── 编辑缓冲：TextFieldValue（选区是符号配对插入的前提）──
     var value by remember(key) { mutableStateOf(TextFieldValue(text)) }
@@ -103,6 +109,37 @@ internal fun CodeSourceEditor(
                     chatState.editDraft(node, next.text)
                 }
             },
+            onMentionLines = {
+                // 「@ 引用行」：有选区 → `@路径:起-止`，无选区 → `@路径:当前行`
+                // 只把引用文本插进聊天输入栏，**不改文件**（不进编辑缓冲、不进撤销）
+                val rel = node.relPath.ifBlank { node.name }
+                val mention = mentionTextFor(rel, lines = selectedLineRange(value))
+                chatState.mentionInsertRequest = mention
+                Toast.makeText(
+                    context,
+                    L.files.mentionInserted(mention.trim().removePrefix("@")),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            },
         )
     }
+}
+
+/**
+ * 选区 → 行范围（1-based、含两端）：无选区 = 光标所在行；选区末端落在换行符上算上一行的收尾。
+ * 行号口径与 `EditableTextView` 的行号槽一致（按逻辑行计，折行的续行不给号）。
+ */
+internal fun selectedLineRange(value: TextFieldValue): IntRange {
+    val text = value.text
+    val s = minOf(value.selection.start, value.selection.end).coerceIn(0, text.length)
+    val e = maxOf(value.selection.start, value.selection.end).coerceIn(0, text.length)
+    return lineNumberAt(text, s)..lineNumberAt(text, if (e > s) e - 1 else e)
+}
+
+/** 文本偏移 → 1-based 逻辑行号 */
+private fun lineNumberAt(text: String, offset: Int): Int {
+    val o = offset.coerceIn(0, text.length)
+    var n = 1
+    for (i in 0 until o) if (text[i] == '\n') n++
+    return n
 }

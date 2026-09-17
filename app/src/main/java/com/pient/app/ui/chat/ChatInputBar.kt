@@ -78,7 +78,7 @@ import com.pient.app.data.InputBarStyle
 import com.pient.app.data.Quote
 import com.pient.app.data.SettingsStore
 import com.pient.app.ui.components.ContextIndicator
-import com.pient.app.ui.files.fileIcon
+import com.pient.app.ui.files.nodeIcon
 import com.pient.app.ui.theme.PientGlassSurface
 import com.kyant.backdrop.Backdrop
 
@@ -204,8 +204,8 @@ fun ChatInputBar(
                 }
                 refMatches.forEach { m ->
                     AttachmentPill(
-                        label = m.file.path,
-                        icon = fileIcon(m.file.ext),
+                        label = m.label,   // 带行范围后缀（如 tooltest/sample.py:6-9），别只显示路径
+                        icon = nodeIcon(m.file.isDir, m.file.ext),
                         onRemove = {
                             // 移除整个 "@路径"（连同尾随空格），光标移到 token 起点
                             var end = m.endExclusive

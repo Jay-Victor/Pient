@@ -43,7 +43,6 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.FileUpload
-import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
@@ -88,6 +87,8 @@ import androidx.compose.ui.window.PopupProperties
 import com.pient.app.data.ChatState
 import com.pient.app.data.FileNode
 import com.pient.app.data.ProjectFiles
+import com.pient.app.data.sortFileNodesByName
+import com.pient.app.ui.chat.mentionTextFor
 import com.pient.app.ui.components.PientButton
 import com.pient.app.ui.components.PientDialog
 import com.pient.app.ui.components.PientSegmented
@@ -701,8 +702,14 @@ fun FileTreePanel(
                 DropdownMenuItem(
                     text = { Text(L.files.mentionInsert) },
                     onClick = {
-                        chatState.mentionInsertRequest = node.name
-                        Toast.makeText(context, L.files.mentionInserted(node.name), Toast.LENGTH_SHORT).show()
+                        // 项目相对路径（唯一口径 = FileNode.relPath）：修「子目录里的文件只插基名」
+                        val rel = node.relPath.ifBlank { node.name }
+                        chatState.mentionInsertRequest = mentionTextFor(rel, node.isDir)
+                        Toast.makeText(
+                            context,
+                            L.files.mentionInserted(if (node.isDir) "$rel/" else rel),
+                            Toast.LENGTH_SHORT,
+                        ).show()
                         menuFor = null
                     },
                 )
@@ -826,6 +833,8 @@ fun FileTreePanel(
 
 /** 排序：文件夹恒在文件前（文件夹按名称），文件按所选模式（大小/时间降序，未知值排后） */
 private fun sortedChildren(children: List<FileNode>, mode: FileSort): List<FileNode> {
+    // 「按名称」= 与 @ 引用候选表**同一份**排序（目录在前 + 名称升序）
+    if (mode == FileSort.NAME) return sortFileNodesByName(children)
     val dirs = children.filter { it.isDir }.sortedBy { it.name.lowercase() }
     val files = when (mode) {
         FileSort.NAME -> children.filter { !it.isDir }.sortedBy { it.name.lowercase() }
@@ -1107,8 +1116,7 @@ private fun TreeRow(
         Icon(
             when {
                 node.isDir && expanded -> Icons.Outlined.FolderOpen
-                node.isDir -> Icons.Outlined.Folder
-                else -> fileIcon(node.ext)
+                else -> nodeIcon(node.isDir, node.ext)
             },
             null,
             tint = if (node.isDir) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,

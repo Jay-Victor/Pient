@@ -2754,7 +2754,8 @@ class ChatState {
     var symbolToolbarVisible by mutableStateOf(false)
     // 行号不设开关（2026-09-10 用户定）：是否显示由预览的文件类型决定，见 FileContentView.CodeView
     val expandedDirs = mutableStateSetOf<String>() // 文件树展开路径
-    // 文件树长按菜单「@ 提及插入输入框」请求（ChatScreen 消费后置 null）
+    // 文件树长按菜单「@ 提及插入输入框」请求（**成品引用文本**：`@路径 ` / `@"含空格 路径" `，
+    // 由 FileTreePanel 按 mentionTextFor 生成；ChatScreen 消费后置 null）
     var mentionInsertRequest by mutableStateOf<String?>(null)
 
     // ── 编辑态（2026-09-10：文本/代码可编辑，参照 Operit 工作区编辑器）──

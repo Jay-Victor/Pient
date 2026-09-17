@@ -28,23 +28,27 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pient.app.data.FileNode
-import com.pient.app.ui.files.PREVIEW_IMAGE_EXTS
-import com.pient.app.ui.files.fileIcon
+import com.pient.app.data.sortFileNodesByName
+import com.pient.app.ui.files.nodeIcon
 import com.pient.app.ui.theme.PientPanel
 
-/** @ 引用候选文件（mock 文件树扁平化产物） */
+/** @ 引用候选（项目文件树扁平化产物；目录 + 文件） */
 data class MentionFile(
     val name: String,
-    val path: String,   // 项目相对路径（@ 引用格式用）
+    val path: String,   // 项目相对路径（@ 引用格式用；目录带尾斜杠）
     /**
      * 小写扩展名（FileNode.ext 同源）。图标与类型判定必须走文件树同一函数
-     * `fileIcon(ext)` —— 此前本模型自带 `isImage` 布尔 + 各处各写一份图标
+     * `nodeIcon(isDir, ext)` —— 此前本模型自带 `isImage` 布尔 + 各处各写一份图标
      * （非图片一律 Description），与文件树（video=MOVIE / audio=MUSIC_NOTE /
      * 其它=INSERT_DRIVE_FILE）不一致，@ 引用 chip 的图案与文件树对不上。
      */
     val ext: String = "",
+    /** 目录（2026-09-17 加，与 pi-web 一致：候选与引用都含目录，引用文本带尾斜杠） */
+    val isDir: Boolean = false,
 ) {
-    val isImage: Boolean get() = ext in PREVIEW_IMAGE_EXTS
+    /** 小写缓存：候选过滤每击键都要比较 —— 别在过滤里反复 lowercase（大树下每键的分配） */
+    internal val nameLower: String = name.lowercase()
+    internal val pathLower: String = path.lowercase()
 }
 
 /** 文本中已提交的 @ 引用路径（含起止下标；供 chip 派生与输入框高亮共用） */
@@ -52,6 +56,11 @@ data class MentionPathMatch(
     val start: Int,          // '@' 下标
     val endExclusive: Int,   // '@路径' 末尾下标
     val file: MentionFile,
+    /**
+     * 引用文本（`@` 之后的部分：路径 + 可选行范围后缀，不含引号，如 `tooltest/sample.py:6-9`）
+     * —— 引用 chip 标签显示它：只显示 [file].path 会丢掉行范围那段信息。
+     */
+    val label: String = file.path,
 )
 
 /**
@@ -60,17 +69,15 @@ data class MentionPathMatch(
  */
 fun findMentionPathMatches(text: String, files: List<MentionFile>): List<MentionPathMatch> {
     if (text.isBlank() || files.isEmpty()) return emptyList()
-    val byPath = files.sortedByDescending { it.path.length }
     val result = mutableListOf<MentionPathMatch>()
     var i = 0
     while (i < text.length) {
         val at = text.indexOf('@', i)
         if (at < 0) break
-        val rest = text.substring(at + 1)
-        val match = byPath.firstOrNull { rest.startsWith(it.path) }
-        if (match != null) {
-            result += MentionPathMatch(at, at + 1 + match.path.length, match)
-            i = at + 1 + match.path.length
+        val hit = matchMentionAt(text.substring(at + 1), files)
+        if (hit != null) {
+            result += MentionPathMatch(at, at + 1 + hit.segLen, hit.file, hit.file.path + hit.suffix)
+            i = at + 1 + hit.segLen
         } else {
             i = at + 1
         }
@@ -78,25 +85,95 @@ fun findMentionPathMatches(text: String, files: List<MentionFile>): List<Mention
     return result
 }
 
-/** 遍历项目文件树，扁平化为 @ 引用候选（仅文件，含相对路径） */
-fun buildMentionFiles(node: FileNode, prefix: String = ""): List<MentionFile> {
+/**
+ * `@` 之后的文本里能认出的引用：返回（命中的候选, 引用段长度）。
+ * - `路径…` → 段长 = 路径长度；`"路径"…` → 段长 = 路径长度 + 2（**闭合引号必须紧跟路径**，
+ *   半截的 `@"abc` 不算命中）；路径之后可再跟行范围后缀 `:12` / `:12-20`（算进段长）。
+ *
+ * 最长优先 =「路径最长且是当前文本前缀」的那个 —— 与原实现（按路径长度降序取首个命中）
+ * 等义，但不必每次击键重排一份列表（候选可达上万条）。
+ */
+private fun matchMentionAt(rest: String, files: List<MentionFile>): MentionHit? {
+    val quoted = rest.startsWith("\"")
+    val body = if (quoted) rest.substring(1) else rest
+    var best: MentionFile? = null
+    for (f in files) {
+        if (f.path.length <= (best?.path?.length ?: -1)) continue
+        if (!body.startsWith(f.path)) continue
+        if (quoted && (body.length <= f.path.length || body[f.path.length] != '"')) continue
+        best = f
+    }
+    val hit = best ?: return null
+    val pathSeg = if (quoted) hit.path.length + 2 else hit.path.length
+    val suffixStart = if (quoted) hit.path.length + 1 else hit.path.length
+    val suffixLen = lineRangeSuffixLength(body.substring(suffixStart))
+    val suffix = if (suffixLen > 0) body.substring(suffixStart, suffixStart + suffixLen) else ""
+    return MentionHit(hit, pathSeg + suffixLen, suffix)
+}
+
+/** 一次 @ 命中：命中的候选 + 引用段长度（含引号与行范围后缀）+ 行范围后缀原文（如 `:6-9`） */
+private data class MentionHit(val file: MentionFile, val segLen: Int, val suffix: String)
+
+/**
+ * 行范围后缀长度：`:` 后是数字（可再接 `-数字`）才算，否则 0（正文里的普通冒号不受影响）。
+ * 与 [mentionTextFor] 的行范围形态同源（pi-web `buildFileLineMentionText` 口径）。
+ */
+private fun lineRangeSuffixLength(s: String): Int {
+    if (!s.startsWith(":")) return 0
+    var i = 1
+    while (i < s.length && s[i].isDigit()) i++
+    if (i == 1) return 0
+    val afterFirst = i
+    if (i < s.length && s[i] == '-') {
+        var j = i + 1
+        while (j < s.length && s[j].isDigit()) j++
+        if (j > i + 1) return j
+    }
+    return afterFirst
+}
+
+/**
+ * @ 引用文本的**唯一实现**（插入输入框用）：`@路径 `；目录带尾斜杠；含空白加引号；
+ * 可选行范围（`@路径:12` / `@路径:12-20`，后缀写在引号外）。
+ * 引号写法 = pi-web `buildAtMentionText` / pi TUI `buildCompletionValue` 同规则
+ * （`@"my file.txt" `）—— 不加引号时模型只看到被空格切开的半截路径；行范围后缀 =
+ * pi-web `buildFileLineMentionText` 同格式。
+ */
+fun mentionTextFor(path: String, isDir: Boolean = false, lines: IntRange? = null): String {
+    val p = if (isDir && !path.endsWith("/")) "$path/" else path
+    val body = if (p.any { it.isWhitespace() }) "@\"$p\"" else "@$p"
+    val suffix = when {
+        lines == null -> ""
+        lines.first == lines.last -> ":${lines.first}"
+        else -> ":${lines.first}-${lines.last}"
+    }
+    return "$body$suffix "
+}
+
+/**
+ * 遍历项目文件树，扁平化为 @ 引用候选（**目录 + 文件**；目录路径带尾斜杠）。
+ * 路径一律取 [FileNode.relPath]（树加载时算一次）——与文件树长按「@ 提及插入输入框」
+ * 同一份口径（原实现在这里按遍历前缀另拼一份、长按那边只拿得到基名 → 必然漂移）。
+ */
+fun buildMentionFiles(node: FileNode): List<MentionFile> {
     val result = mutableListOf<MentionFile>()
-    for (child in node.children) {
-        val p = if (prefix.isEmpty()) child.name else "$prefix/${child.name}"
-        if (child.isDir) {
-            result += buildMentionFiles(child, p)
-        } else {
-            result += MentionFile(
-                name = child.name,
-                path = p,
-                ext = child.ext,
-            )
+    fun walk(parent: FileNode) {
+        // 排序与文件树面板「按名称」档同一份实现（目录在前 + 名称升序）
+        for (child in sortFileNodesByName(parent.children)) {
+            val rel = child.relPath.ifBlank { child.name }
+            if (child.isDir) {
+                result += MentionFile(name = child.name, path = "$rel/", isDir = true)
+                walk(child)
+            } else {
+                result += MentionFile(name = child.name, path = rel, ext = child.ext)
+            }
         }
     }
+    walk(node)
     return result
 }
 
-/** 图标一律走文件树共享函数：见 ui/files/FilesPanel.kt 的 fileIcon(ext)（原 IMAGE_EXTS 清单已废弃） */
+/** 图标一律走文件树共享函数：见 ui/files/FilesPanel.kt 的 nodeIcon(isDir, ext) */
 
 /** 光标处正在输入的 @ 引用查询：[@ 下标, 光标) 区间 + 查询串（可能为空 = 刚敲下 @） */
 data class MentionQuery(
@@ -137,15 +214,14 @@ fun findMentionQueryAt(value: TextFieldValue): MentionQuery? {
  * 同级保持文件树原顺序（sortedBy 稳定）。查询串为空 = 原样列出全部。
  */
 fun filterMentionFiles(files: List<MentionFile>, query: String): List<MentionFile> {
-    val q = query.trim().lowercase()
+    // 查询串可能带着引号形态的开头（`@"含 空格的…`）—— 过滤只看路径本身
+    val q = query.trim().removePrefix("\"").lowercase()
     if (q.isEmpty()) return files
     return files.mapNotNull { f ->
-        val name = f.name.lowercase()
-        val path = f.path.lowercase()
         val rank = when {
-            name.startsWith(q) -> 0
-            name.contains(q) -> 1
-            path.contains(q) -> 2
+            f.nameLower.startsWith(q) -> 0
+            f.nameLower.contains(q) -> 1
+            f.pathLower.contains(q) -> 2
             else -> return@mapNotNull null
         }
         rank to f
@@ -212,7 +288,7 @@ fun normalizeMentionDeletion(
 @Composable
 fun MentionFileCard(
     files: List<MentionFile>,
-    onPick: (String) -> Unit,
+    onPick: (MentionFile) -> Unit,
     bottomOffset: Dp = 8.dp, // 弹窗底部到屏幕底的距离（与模型选择器同口径）
     query: String = "",
     modifier: Modifier = Modifier,
@@ -246,7 +322,7 @@ fun MentionFileCard(
         } else {
             // fill = false：候选少时卡片随内容收缩，多时占满上限后内部滚动
             LazyColumn(Modifier.padding(top = 2.dp).weight(1f, fill = false)) {
-                items(files) { f -> MentionFileRow(f) { onPick(f.path) } }
+                items(files) { f -> MentionFileRow(f) { onPick(f) } }
             }
         }
     }
@@ -291,5 +367,5 @@ private fun MentionFileRow(f: MentionFile, onClick: () -> Unit) {
     }
 }
 
-/** @ 候选行图标 = 文件树同一函数（fileIcon(ext)：图片/视频/音频/其它四态一致） */
-private fun iconFor(f: MentionFile): ImageVector = fileIcon(f.ext)
+/** @ 候选行图标 = 文件树同一函数（nodeIcon：目录 / 图片 / 视频 / 音频 / 其它五态一致） */
+private fun iconFor(f: MentionFile): ImageVector = nodeIcon(f.isDir, f.ext)

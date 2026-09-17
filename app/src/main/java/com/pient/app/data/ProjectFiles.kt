@@ -79,7 +79,7 @@ object ProjectFiles {
         }
     }
 
-    private fun loadLocal(dir: File, depth: Int, budget: ScanBudget): FileNode {
+    private fun loadLocal(dir: File, depth: Int, budget: ScanBudget, rel: String = ""): FileNode {
         val all = dir.listFiles()               // File API：一次系统调用拿到全部子项元数据
         var capped = all != null && all.size > MAX_CHILDREN
         if (capped) budget.dirCapped = true
@@ -92,9 +92,15 @@ object ProjectFiles {
                 }
                 children += if (f.isDirectory) {
                     if (depth >= MAX_DEPTH) {
-                        FileNode(f.name, isDir = true, source = f.absolutePath, truncated = true)
+                        FileNode(
+                            f.name,
+                            isDir = true,
+                            source = f.absolutePath,
+                            truncated = true,
+                            relPath = childRel(rel, f.name),
+                        )
                     } else {
-                        loadLocal(f, depth + 1, budget)
+                        loadLocal(f, depth + 1, budget, childRel(rel, f.name))
                     }
                 } else {
                     FileNode(
@@ -103,6 +109,7 @@ object ProjectFiles {
                         size = f.length(),
                         modifiedAt = f.lastModified(),
                         source = f.absolutePath,
+                        relPath = childRel(rel, f.name),
                     )
                 }
             }
@@ -113,8 +120,13 @@ object ProjectFiles {
             children = children,
             source = dir.absolutePath,
             truncated = capped || budget.hit || budget.dirCapped,
+            relPath = rel,
         )
     }
+
+    /** 子项的项目相对路径（根下的项 = 名字本身，更深 = "父/名"）—— @ 引用与文件树同一份口径 */
+    private fun childRel(parentRel: String, name: String): String =
+        if (parentRel.isEmpty()) name else "$parentRel/$name"
 
     // ── SAF：每个目录一次 cursor 查询（大目录防护的核心，2026-09-12）──
 
@@ -166,7 +178,7 @@ object ProjectFiles {
         val rootDocId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull() ?: return null
         // 根显示名（一次查询）：DocumentFile 只用来读名字，列目录一律走 listSafChildren
         val name = runCatching { DocumentFile.fromTreeUri(context, treeUri)?.name }.getOrNull().orEmpty()
-        val children = loadSafChildren(context, treeUri, rootDocId, 0, budget)
+        val children = loadSafChildren(context, treeUri, rootDocId, 0, budget, "")
         return FileNode(
             name = name,
             isDir = true,
@@ -182,6 +194,7 @@ object ProjectFiles {
         parentDocId: String,
         depth: Int,
         budget: ScanBudget,
+        parentRel: String,
     ): List<FileNode> {
         val entries = listSafChildren(context, treeUri, parentDocId)
         if (entries.size > MAX_CHILDREN) budget.dirCapped = true
@@ -189,11 +202,12 @@ object ProjectFiles {
         for (e in entries.take(MAX_CHILDREN)) {
             if (!budget.take()) break
             val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, e.docId).toString()
+            val rel = childRel(parentRel, e.name)
             children += if (e.isDir) {
                 if (depth >= MAX_DEPTH) {
-                    FileNode(e.name, isDir = true, size = e.size, modifiedAt = e.modified, source = childUri, truncated = true)
+                    FileNode(e.name, isDir = true, size = e.size, modifiedAt = e.modified, source = childUri, truncated = true, relPath = rel)
                 } else {
-                    val kids = loadSafChildren(context, treeUri, e.docId, depth + 1, budget)
+                    val kids = loadSafChildren(context, treeUri, e.docId, depth + 1, budget, rel)
                     FileNode(
                         name = e.name,
                         isDir = true,
@@ -202,10 +216,11 @@ object ProjectFiles {
                         modifiedAt = e.modified,
                         source = childUri,
                         truncated = kids.size >= MAX_CHILDREN,
+                        relPath = rel,
                     )
                 }
             } else {
-                FileNode(name = e.name, isDir = false, size = e.size, modifiedAt = e.modified, source = childUri)
+                FileNode(name = e.name, isDir = false, size = e.size, modifiedAt = e.modified, source = childUri, relPath = rel)
             }
         }
         return children

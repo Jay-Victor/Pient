@@ -1036,15 +1036,28 @@ class FileNode(
      * 面板只在根节点上展示页脚提示（「仅显示部分文件」）。
      */
     val truncated: Boolean = false,
+    /**
+     * 项目相对路径（**@ 引用的唯一路径口径**，2026-09-17）：树加载器建节点时写入，
+     * 根 = ""、子项 = "父/名"，目录不带尾斜杠（`/` 只在生成引用文本时补，见
+     * `ui/chat/MentionFileCard.kt` 的 mentionTextFor）。此前 @ 的相对路径由两处各自
+     * 拼装（候选表按遍历前缀拼、文件树长按只拿得到基名）→ 两处必然漂移。
+     */
+    val relPath: String = "",
 ) {
     val ext: String
         // 统一小写：扩展名判定一律忽略大小写（Operit `endsWith(..., ignoreCase = true)` 口径）
         get() = if (isDir) "" else name.substringAfterLast('.', "").lowercase()
+}
 
-    // 注意：不要给 FileNode 实现 equals/hashCode——fileTreeRoot 是 mutableStateOf，
-    // 结构相等会让 refreshFileTree 的新树根与旧树根「相等」而静默跳过状态更新，
-    // 导致创建/删除文件后树不刷新（2026-09-03 实测，曾加 equals 后踩坑）。
-    // 同一文件判定一律显式按 name + source 比较（见 ChatState.openFile）。
+/**
+ * 文件树子项的默认排序（**一份实现**，2026-09-17）：目录在前、各自按名称小写升序。
+ * 文件树面板的「按名称」档与 @ 引用候选表（`buildMentionFiles`）都走它 ——
+ * 两处顺序必须一致（用户会逐项对比「@ 列表和文件树不一样」）。
+ */
+fun sortFileNodesByName(nodes: List<FileNode>): List<FileNode> {
+    val dirs = nodes.filter { it.isDir }.sortedBy { it.name.lowercase() }
+    val files = nodes.filter { !it.isDir }.sortedBy { it.name.lowercase() }
+    return dirs + files
 }
 
 // ─────────────────────────────────────────────────────────────

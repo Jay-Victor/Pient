@@ -32,6 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.InsertDriveFile
@@ -333,3 +334,10 @@ fun fileIcon(ext: String): ImageVector = when (ext) {
     in PREVIEW_AUDIO_EXTS -> Icons.Outlined.MusicNote
     else -> Icons.Outlined.InsertDriveFile
 }
+
+/**
+ * 目录 / 文件统一图标（**同一语义一份实现**，2026-09-17）：目录 = Folder，文件走 [fileIcon]。
+ * 调用点：文件树行（展开态另有 FolderOpen）、@ 引用候选行、输入栏 @ chip。
+ */
+fun nodeIcon(isDir: Boolean, ext: String): ImageVector =
+    if (isDir) Icons.Outlined.Folder else fileIcon(ext)

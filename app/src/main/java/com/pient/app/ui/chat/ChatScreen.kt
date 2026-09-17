@@ -206,10 +206,14 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
     val mentionCandidates = remember(mentionFiles, mentionQuery?.text) {
         filterMentionFiles(mentionFiles, mentionQuery?.text.orEmpty())
     }
-    // 文件树长按菜单「@ 提及插入输入框」：插入已是完整引用（尾随空格），引用卡不再弹出
+    // 文件树长按菜单「@ 提及插入输入框」：请求里已是成品引用文本（`@路径 ` / `@"含空格 路径" `，
+    // 由 FileTreePanel 用 mentionTextFor 生成），这里只做追加；引用卡不再弹出
     LaunchedEffect(chatState.mentionInsertRequest) {
-        chatState.mentionInsertRequest?.let { name ->
-            inputText = TextFieldValue(inputText.text + "@$name ")
+        chatState.mentionInsertRequest?.let { mention ->
+            // 光标停在插入文本末尾（与候选卡点选同一口径）—— 此前默认落在文本开头，
+            // 长按插入后接着打字会跑到最前面
+            val merged = inputText.text + mention
+            inputText = TextFieldValue(merged, selection = TextRange(merged.length))
             chatState.mentionInsertRequest = null
             // 插引用 = 用户改动了提示词 → 润色态作废（回退键变回润色键）
             chatState.clearPolishRevert()
@@ -769,11 +773,12 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                 MentionFileCard(
                     files = mentionCandidates,
                     query = mentionQuery.text,
-                    onPick = { rel ->
-                        // 把「@ + 已输入筛选字符」整段替换为 "@路径 "（尾随空格提交 token），光标置末尾
+                    onPick = { picked ->
+                        // 把「@ + 已输入筛选字符」整段替换为引用文本（@路径 / @"含空格 路径"，
+                        // 尾随空格提交 token），光标置末尾 —— 格式的唯一实现在 mentionTextFor
                         val start = mentionQuery.start
                         val end = mentionQuery.endExclusive
-                        val mention = "@$rel "
+                        val mention = mentionTextFor(picked.path, picked.isDir)
                         val newText = inputText.text.replaceRange(start, end, mention)
                         inputText = TextFieldValue(newText, selection = TextRange(start + mention.length))
                         // 同上：插入引用也算用户改动了提示词 → 润色态作废

@@ -9,6 +9,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Redo
 import androidx.compose.material.icons.automirrored.outlined.Undo
+import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -147,6 +148,8 @@ internal fun CodeSymbolToolbar(
     onUndo: () -> Unit,
     onRedo: () -> Unit,
     onSymbol: (CodeSymbol) -> Unit,
+    /** 非空 = 显示「@ 引用行」键（把本文件 / 本选区引用进聊天输入栏；无行号场景传 null） */
+    onMentionLines: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val pairShift = EditorToolbarPairShift
@@ -171,6 +174,15 @@ internal fun CodeSymbolToolbar(
                 onClick = onRedo,
             )
             EditorToolbarDivider()
+            // 「@ 引用行」：与撤销 / 重做同区（文档级动作，不参与符号组的横向滚动）
+            if (onMentionLines != null) {
+                EditorToolbarButton(
+                    icon = Icons.Outlined.AlternateEmail,
+                    desc = L.files.mentionInsert,
+                    onClick = onMentionLines,
+                )
+                EditorToolbarDivider()
+            }
 
             // 前一项的字形位移（0.dp = 普通键 / 分组竖线）
             var prevNudge: Dp = 0.dp
