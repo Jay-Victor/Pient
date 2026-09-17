@@ -44,6 +44,12 @@ object PiPackages {
     val global = mutableStateListOf<PluginItem>()
     val project = mutableStateListOf<PluginItem>()
 
+    /** 成功拉过一次（插件页每次进页面都重拉；输入栏 `!` 卡据此决定要不要现拉一次 `pi list`） */
+    var loadedOnce by mutableStateOf(false); private set
+
+    /** 最近一次 `pi list` 的退出码（null = 还没拉过；0 = 拿到列表）—— `!` 卡据此区分「读取中 / 未就绪」 */
+    var listExit by mutableStateOf<Int?>(null); private set
+
     /** 命令跑完后的回调（页面用来重新拉列表；由调用方设置，跑完即清） */
     private var onFinished: (() -> Unit)? = null
 
@@ -85,10 +91,12 @@ object PiPackages {
     suspend fun refresh(context: Context): String? {
         val (code, out) = runPi(context, "list", 30_000)
         val text = stripAnsi(out)
+        listExit = code
         if (code != 0) return text.trim().ifBlank { L.runtime.piListFailed(code) }
         val (g, p) = parseList(text)
         global.clear(); global.addAll(g)
         project.clear(); project.addAll(p)
+        loadedOnce = true
         PientLog.i(TAG, "pi list：用户 ${g.size} 个 / 项目 ${p.size} 个包")
         return null
     }
@@ -99,10 +107,35 @@ object PiPackages {
         runInTerminal(context, L.runtime.installSource(source), cmd, onDone)
     }
 
-    /** 删包（pi remove 支持 `-l`；source 要与 settings 里配置的写法一致） */
-    fun remove(context: Context, source: String, local: Boolean, onDone: (() -> Unit)? = null) {
-        val cmd = "pi remove $source" + if (local) " -l" else ""
+    /**
+     * 删包（pi remove 支持 `-l`；source 要与 settings 里配置的写法一致）。
+     *
+     * ★ **本地路径源必须传「解析后的绝对路径」**（2026-09-17 真机实测）：pi 删包是两边各算一个
+     * 匹配 key —— 设置里那条按 `getBaseDirForScope(scope)` 解析（项目级 = `<项目>/.pi/`），
+     * 而命令行输入按**当前 cwd（=/workspace）**解析（`getSourceMatchKeyForInput`）。
+     * 项目设置里存的是 `../local-demo-late` → 输入同样写 `../local-demo-late` 会解析成
+     * `/local-demo-late`，与设置的 `/workspace/local-demo-late` 对不上，报
+     * `No matching package found for ../local-demo-late`（实测）。传 `installedPath`
+     * （= `pi list` 打印的那个绝对路径）两边就是同一个 key。
+     * npm / git 源按 `名字` / `host+path` 匹配，不受影响 → 只在本地路径源上替换。
+     */
+    fun remove(
+        context: Context,
+        source: String,
+        local: Boolean,
+        installedPath: String? = null,
+        onDone: (() -> Unit)? = null,
+    ) {
+        val target = if (isLocalSource(source) && installedPath.orEmpty().startsWith("/")) installedPath!! else source
+        val cmd = "pi remove $target" + if (local) " -l" else ""
         runInTerminal(context, L.runtime.removeSource(source), cmd, onDone)
+    }
+
+    /** 是不是**本地路径源**（pi `parseSource` 口径：带 `npm:`/`git:`/协议前缀/git@ 之外的都算本地路径） */
+    internal fun isLocalSource(source: String): Boolean {
+        val s = source.trim()
+        return !(s.startsWith("npm:") || s.startsWith("git:") || s.startsWith("https://") ||
+            s.startsWith("http://") || s.startsWith("ssh://") || s.startsWith("git://") || s.startsWith("git@"))
     }
 
     /** 更新单个包 */
@@ -120,12 +153,22 @@ object PiPackages {
         step = label
         lastExit = null
         onFinished = onDone
-        // 会话固定 Ubuntu（见 GuestScripts / TerminalSessions.Session.execEnvOverride）
-        GuestScripts.runInTerminal(context, SESSION, label, cmd) { code ->
+        // 会话固定 Ubuntu（见 GuestScripts / TerminalSessions.Session.execEnvOverride）。
+        //
+        // ★ 必须 `cd /workspace`：终端会话的 cwd 是 **~(= /root)**（见 TerminalSessions 的
+        //   「结束并重建会话进程时 cwd 回到 ~」），而 pi 找**项目设置**是按它自己的 cwd
+        //   （=`/workspace`）找 `<cwd>/.pi/settings.json` —— 不 cd 的话
+        //   `pi install <src> -l` 会把包写进 `/root/.pi/settings.json` 这个 pi 根本不读的文件：
+        //   退出码 0、页面重拉 `pi list` 也看不到，**项目级安装静默失效**（2026-09-17 真机实测：
+        //   文件 mtime 与安装时刻一致）。`runPi`（`pi list`）早就是这么做的，这里对齐。
+        val full = "cd /workspace 2>/dev/null; $cmd"
+        GuestScripts.runInTerminal(context, SESSION, label, full) { code ->
             running = false
             step = ""
             lastExit = code
             PientLog.i(TAG, "$label 结束，退出码 $code")
+            // 装 / 删 / 更新成功 → 让 pi 重扫一次（否则新插件在输入栏 `!` 卡里要等通道重启才出现）
+            if (code == 0) PiCommands.reloadAsync(context)
             onFinished?.invoke()
             onFinished = null
         }

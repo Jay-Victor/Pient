@@ -185,7 +185,7 @@ fun PluginsScreen(nav: NavController) {
             item = item,
             onDismiss = { detailFor = null },
             onDelete = {
-                PiPackages.remove(context, item.source, local = !item.global, onDone = { reload() })
+                PiPackages.remove(context, item.source, local = !item.global, installedPath = item.installedPath, onDone = { reload() })
                 toast(context, L.plugins.removeStarted(item.name))
                 detailFor = null
             },
