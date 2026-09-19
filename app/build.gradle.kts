@@ -1,8 +1,20 @@
 import java.io.RandomAccessFile
+import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// ===== release =====
+// 凭据在仓库根的 keystore.properties（不入库，见 .gitignore）；文件不存在时 release 变体不配签名
+// （打出来是 app-release-unsigned.apk，装不上）—— `scripts/gen_release_keystore.sh` 生成一次即可。
+// ⚠️ 这把 key 一旦用于发布就不能换：换了已装的旧版会拒绝安装（只能卸载重装）。
+val pientKeystoreProperties = Properties()
+val pientKeystoreFile = rootProject.file("keystore.properties")
+val pientHasKeystore = pientKeystoreFile.exists()
+if (pientHasKeystore) {
+    pientKeystoreFile.inputStream().use { pientKeystoreProperties.load(it) }
 }
 
 android {
@@ -17,8 +29,22 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        if (pientHasKeystore) {
+            create("release") {
+                storeFile = file(pientKeystoreProperties.getProperty("storeFile"))
+                storePassword = pientKeystoreProperties.getProperty("storePassword")
+                keyAlias = pientKeystoreProperties.getProperty("keyAlias")
+                keyPassword = pientKeystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (pientHasKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
