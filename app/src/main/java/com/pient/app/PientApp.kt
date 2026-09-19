@@ -49,6 +49,8 @@ import com.pient.app.ui.settings.AboutScreen
 import com.pient.app.ui.settings.BehaviorSettingsScreen
 import com.pient.app.ui.settings.ChangelogScreen
 import com.pient.app.ui.settings.LanguageSettingsScreen
+import com.pient.app.ui.settings.LicenseTextScreen
+import com.pient.app.ui.settings.LicensesScreen
 import com.pient.app.ui.settings.LogManagementScreen
 import com.pient.app.ui.settings.LogViewerScreen
 import com.pient.app.ui.settings.ModelConfigScreen
@@ -398,6 +400,13 @@ fun PientApp() {
                     }
                     composable("changelog") {
                         ChangelogScreen(nav = nav)
+                    }
+                    // 开源许可声明：第三方组件清单 + GPL-3.0 全文（见 ui/settings/LicensesScreen.kt）
+                    composable("licenses") {
+                        LicensesScreen(nav = nav)
+                    }
+                    composable("license_text") {
+                        LicenseTextScreen(nav = nav)
                     }
                 }
 

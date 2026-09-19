@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.Badge
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Copyright
@@ -251,6 +252,7 @@ fun AboutScreen(nav: NavController) {
                     icon = Icons.Outlined.Gavel,
                     title = L.settings.openSourceLicenses,
                     subtitle = L.settings.openSourceNote,
+                    onClick = { nav.navigate("licenses") },
                 )
                 DividerLine()
                 AboutInfoRow(
@@ -382,18 +384,20 @@ private fun AboutLinkRow(
     }
 }
 
-/** 静态信息行（无点击、无箭头）：左侧图标+标题+副标题小字，右侧灰色值 */
+/** 静态信息行（无点击、无箭头）：左侧图标+标题+副标题小字，右侧灰色值；传 [onClick] 则整行可点并显示右箭头 */
 @Composable
 private fun AboutInfoRow(
     icon: ImageVector,
     title: String,
     subtitle: String? = null,
     value: String? = null,
+    onClick: (() -> Unit)? = null,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
         Icon(
@@ -424,6 +428,13 @@ private fun AboutInfoRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(end = 6.dp),
+            )
+        }
+        if (onClick != null) {
+            Icon(
+                Icons.Outlined.ChevronRight, null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
             )
         }
     }

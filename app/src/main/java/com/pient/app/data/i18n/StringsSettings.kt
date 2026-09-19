@@ -15,6 +15,15 @@ interface SettingsStrings {
     val openSourceNote: String
     val copyrightOwner: String
     val copyrightText: String
+    // ── 开源许可声明页（第三方组件清单 + GPL-3.0 全文）──
+    val licensesIntro: String
+    val licensesSectionRuntime: String
+    val licensesSectionLibraries: String
+    val licensesSectionFonts: String
+    val licensesSectionData: String
+    val licensesFullText: String
+    val licensesVarious: String
+    val licensesOpenData: String
     val noChangelog: String
     val copyEmail: String
     val languageTitle: String
@@ -167,9 +176,17 @@ object ZhSettings : SettingsStrings {
     override val contactInfo: String = "联系方式"
     override val copyright: String = "版权"
     override val openSourceLicenses: String = "开源许可声明"
-    override val openSourceNote: String = "本项目以开源许可发布"
+    override val openSourceNote: String = "以 GPL-3.0 许可发布"
     override val copyrightOwner: String = "版权所有"
-    override val copyrightText: String = "© 2026 Pient 保留所有权利"
+    override val copyrightText: String = "© 2026 Pient · GPL-3.0"
+    override val licensesIntro: String = "Pient 依据 GNU GPL-3.0 发布。下列第三方组件随应用一同分发，各自遵循其许可；点任意一行可打开上游页面。"
+    override val licensesSectionRuntime: String = "随应用分发"
+    override val licensesSectionLibraries: String = "应用依赖"
+    override val licensesSectionFonts: String = "字体"
+    override val licensesSectionData: String = "数据来源"
+    override val licensesFullText: String = "GPL-3.0 全文"
+    override val licensesVarious: String = "各组件各自许可"
+    override val licensesOpenData: String = "开放数据"
     override val noChangelog: String = "暂无更新日志"
     override val copyEmail: String = "复制邮箱"
     override val languageTitle: String = "语言设置"
@@ -318,9 +335,17 @@ object EnSettings : SettingsStrings {
     override val contactInfo: String = "Contact"
     override val copyright: String = "Copyright"
     override val openSourceLicenses: String = "Open-source licenses"
-    override val openSourceNote: String = "Released under an open-source license"
+    override val openSourceNote: String = "Released under GPL-3.0"
     override val copyrightOwner: String = "Copyright holder"
-    override val copyrightText: String = "© 2026 Pient. All rights reserved."
+    override val copyrightText: String = "© 2026 Pient · GPL-3.0"
+    override val licensesIntro: String = "Pient is released under GNU GPL-3.0. The following third-party components are distributed with the app, each under its own license; tap a row to open its upstream page."
+    override val licensesSectionRuntime: String = "Bundled with the app"
+    override val licensesSectionLibraries: String = "App dependencies"
+    override val licensesSectionFonts: String = "Fonts"
+    override val licensesSectionData: String = "Data sources"
+    override val licensesFullText: String = "Full text of GPL-3.0"
+    override val licensesVarious: String = "Various component licenses"
+    override val licensesOpenData: String = "Open data"
     override val noChangelog: String = "No changelog yet"
     override val copyEmail: String = "Copy email"
     override val languageTitle: String = "Language"
