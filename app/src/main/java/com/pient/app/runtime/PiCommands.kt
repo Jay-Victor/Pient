@@ -15,8 +15,8 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * pi 的**命令面**（RPC `get_commands` 的解析）—— 输入栏两张候选卡的数据源：
- * `/`（技能）与 `!`（插件贡献的可调用项）。
+ * pi 的**命令面**（RPC `get_commands` 的解析）—— 输入栏 `/` 候选卡的数据源（技能），
+ * 同时供「这条消息是不是扩展命令」的判断（见 [isExtensionCommand]）。
  *
  * 为什么以 pi 的 RPC 为准，而不是自己扫盘（用户 2026-09-17 拍板）：
  * - `get_commands`（`docs/rpc.md` §get_commands、`modes/rpc/rpc-mode.ts` 的 get_commands 分支）
@@ -93,24 +93,8 @@ object PiCommands {
     }
 
     /**
-     * 某个插件贡献的**可调用项**（`!` 卡展开后的子行）。
-     * 归属优先用 `sourceInfo.source` == 包 source 串；再用 installedPath 前缀兜底
-     * （本地路径安装时 pi 存的是相对 `~/.pi/agent` 的写法，未必逐字符相等）。
-     */
-    fun pluginItems(source: String, installedPath: String? = null): List<Item> {
-        val path = installedPath?.trim().orEmpty()
-        return items.filter { it.pluginSource != null && it.pluginSource == source }
-            .ifEmpty {
-                if (path.isEmpty()) emptyList()
-                else items.filter {
-                    it.pluginSource != null && (it.path.startsWith(path) || it.path.contains(path))
-                }
-            }
-    }
-
-    /**
      * 问 pi 要一次命令面并解析。返回 true = 拿到（哪怕为空）；false = 通道没回话（pi 未就绪）。
-     * 调用点：两张候选卡打开时（RPC 往返很短，缓存在 [items] 里，卡开着就即时显示）。
+     * 调用点：`/` 候选卡打开时（RPC 往返很短，缓存在 [items] 里，卡开着就即时显示）。
      */
     suspend fun refresh(context: Context): Boolean = withContext(Dispatchers.IO) {
         loading = true
@@ -148,7 +132,7 @@ object PiCommands {
      * pi 侧磁盘变了（技能页导入 / 插件页装删）→ 让 pi 重扫一次再拉命令面。
      *
      * 为什么必须有这一步：pi 只在**进程启动**时扫描技能与插件目录 → 不重扫的话，
-     * 刚导入的技能 / 刚装的插件在输入栏 `/`、`!` 两张卡里要等通道重启才出现。
+     * 刚导入的技能 / 刚装的插件（含插件带来的技能）在输入栏 `/` 卡里要等通道重启才出现。
      *
      * 两条前置：① **通道得在跑**（pi 是按需启动的：聊过天 / 开过画布才起）——
      * 没跑就跳过，反正下次启动通道时 pi 自己会读到新技能 / 新插件；

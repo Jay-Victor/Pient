@@ -98,14 +98,9 @@ interface ChatStrings {
     val noFilesInProject: String
     val noMatchingFiles: String
     val skillPicker: String
-    val pluginPicker: String
     val noMatchingSkills: String
-    val noMatchingPlugins: String
     val emptyGlobalSkills: String
     val emptyProjectSkills: String
-    val emptyGlobalPlugins: String
-    val emptyProjectPlugins: String
-    val noInvocableItems: String
     val loadingCommands: String
     fun commandRan(a0: Any?): String
     fun commandFailed(a0: Any?): String
@@ -307,14 +302,9 @@ object ZhChat : ChatStrings {
     override val noFilesInProject: String = "项目文件夹内暂无文件"
     override val noMatchingFiles: String = "无匹配文件"
     override val skillPicker: String = "技能"
-    override val pluginPicker: String = "插件"
     override val noMatchingSkills: String = "无匹配技能"
-    override val noMatchingPlugins: String = "无匹配插件"
     override val emptyGlobalSkills: String = "还没有全局技能"
     override val emptyProjectSkills: String = "当前项目没有技能"
-    override val emptyGlobalPlugins: String = "还没有全局插件"
-    override val emptyProjectPlugins: String = "当前项目没有插件"
-    override val noInvocableItems: String = "无可调用项"
     override val loadingCommands: String = "正在读取 pi 的命令列表…"
     override fun commandRan(a0: Any?): String = "已执行 ${a0}（扩展命令）"
     override fun commandFailed(a0: Any?): String = "扩展命令 ${a0} 没执行成"
@@ -497,14 +487,9 @@ object EnChat : ChatStrings {
     override val noFilesInProject: String = "No files in the project folder"
     override val noMatchingFiles: String = "No matching files"
     override val skillPicker: String = "Skills"
-    override val pluginPicker: String = "Plugins"
     override val noMatchingSkills: String = "No matching skills"
-    override val noMatchingPlugins: String = "No matching plugins"
     override val emptyGlobalSkills: String = "No global skills yet"
     override val emptyProjectSkills: String = "This project has no skills"
-    override val emptyGlobalPlugins: String = "No global plugins yet"
-    override val emptyProjectPlugins: String = "This project has no plugins"
-    override val noInvocableItems: String = "No invocable items"
     override val loadingCommands: String = "Reading pi's command list…"
     override fun commandRan(a0: Any?): String = "Ran ${a0} (extension command)"
     override fun commandFailed(a0: Any?): String = "Extension command ${a0} failed"

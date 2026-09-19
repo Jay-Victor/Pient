@@ -87,7 +87,6 @@ import com.pient.app.data.SettingsStore
 import com.pient.app.data.SidebarStyle
 import com.pient.app.data.turnXml
 import com.pient.app.runtime.PiCommands
-import com.pient.app.runtime.PiPackages
 import com.pient.app.ui.components.isTabletLayout
 import com.pient.app.ui.components.StatusBadge
 import com.pient.app.ui.files.FilesPanel
@@ -230,31 +229,20 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
     val mentionBottomOffset =
         if (dockTopY > 0f) with(density) { (screenHpx - dockTopY).toDp() + 8.dp } else 8.dp
 
-    // ── 输入栏命令词候选卡（2026-09-17 用户 spec）：`/` 技能卡、`!` 插件卡 ──
-    // 只在**整条消息以此字符开头**时弹：pi 只在消息以 `/skill:名字` / `/命令` 开头时才展开/执行
+    // ── 输入栏命令词候选卡（2026-09-17 用户 spec）：`/` 技能卡 ──
+    // 只在**整条消息以 `/` 开头**时弹：pi 只在消息以 `/skill:名字` / `/命令` 开头时才展开/执行
     // （`core/agent-session.ts` 的 `_expandSkillCommand` 用 startsWith 判定；pi-web 斜杠菜单同口径），
-    // 词中的 `/`、`!` 插进去发到 pi 那儿只是一段普通文本 —— 不给「看着能点、发出去不生效」的入口。
+    // 词中的 `/` 插进去发到 pi 那儿只是一段普通文本 —— 不给「看着能点、发出去不生效」的入口。
     val skillQuery = remember(inputText.text, inputText.selection) { findPickerQueryAt(inputText, '/') }
-    val pluginQuery = remember(inputText.text, inputText.selection) { findPickerQueryAt(inputText, '!') }
     // 点外/返回键关闭后，同一查询串不再自动弹出（继续输入改变查询串 = 重新出现；与 @ 引用卡同款）
     var skillDismissedQuery by remember { mutableStateOf<String?>(null) }
-    var pluginDismissedQuery by remember { mutableStateOf<String?>(null) }
-    // 润色进行中输入框只读（不许在润色中改提示词）→ 这两张卡同样不开
+    // 润色进行中输入框只读（不许在润色中改提示词）→ 这张卡同样不开
     val skillCardOpen = skillQuery != null && skillQuery.text != skillDismissedQuery && !chatState.polishing
-    val pluginCardOpen = pluginQuery != null && pluginQuery.text != pluginDismissedQuery && !chatState.polishing
     LaunchedEffect(skillQuery) { if (skillQuery == null) skillDismissedQuery = null }
-    LaunchedEffect(pluginQuery) { if (pluginQuery == null) pluginDismissedQuery = null }
-    // 分段（0 = 全局 / 1 = 项目）：与技能页、插件页同一档语义；两张卡各自记
+    // 分段（0 = 全局 / 1 = 项目）：与技能页、插件页同一档语义
     var skillSegment by rememberSaveable { mutableStateOf(0) }
-    var pluginSegment by rememberSaveable { mutableStateOf(0) }
-    // 卡片打开时向 pi 要一次命令面（技能 + 插件贡献项）——结果缓存在 PiCommands，卡上是即时显示
-    LaunchedEffect(skillCardOpen, pluginCardOpen) {
-        if (skillCardOpen || pluginCardOpen) PiCommands.refresh(context)
-    }
-    // 插件列表 = `pi list`（与插件页读同一份状态）；没拉过就先拉一次
-    LaunchedEffect(pluginCardOpen) {
-        if (pluginCardOpen && !PiPackages.loadedOnce) PiPackages.refresh(context)
-    }
+    // 卡片打开时向 pi 要一次命令面（技能）——结果缓存在 PiCommands，卡上是即时显示
+    LaunchedEffect(skillCardOpen) { if (skillCardOpen) PiCommands.refresh(context) }
 
     // 输入栏背后内容层（2026-09-12，修「玻璃输入框看着像遮罩、内容滑过不透」）：
     // 输入栏改为覆盖在面板内容之上（Operit ClassicChatInputSection 同款 —— 其输入栏是
@@ -293,9 +281,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
             forkMenuTarget != null -> forkMenuTarget = null
             // 引用卡关闭 = 记住当前查询串（同一串不再弹；继续输入即重新筛选显示）
             mentionOpen -> mentionDismissedQuery = mentionQuery.text
-            // 命令词候选卡（/ 技能、! 插件）同款：关掉 = 记住查询串
+            // 命令词候选卡（/ 技能）同款：关掉 = 记住查询串
             skillCardOpen -> skillDismissedQuery = skillQuery.text
-            pluginCardOpen -> pluginDismissedQuery = pluginQuery.text
             urlDialogOpen -> urlDialogOpen = false
             attachSheetOpen -> attachSheetOpen = false
             systemPromptOpen -> systemPromptOpen = false
@@ -846,40 +833,6 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                     onPick = { item ->
                         // 整条命令词换成 `/skill:名字 `（命令词之后的参数原样保留），光标置末尾
                         inputText = applyPickerInsert(inputText.text, skillQuery.endExclusive, item.insert)
-                        chatState.clearPolishRevert()
-                    },
-                    modifier = Modifier.align(Alignment.BottomStart),
-                )
-            }
-        }
-
-        // ── `!` 插件卡（2026-09-17）：`pi list` 的全局/项目包；点插件行展开它贡献的可调用项 ──
-        if (pluginCardOpen) {
-            val pool = filterPickerRows(
-                if (pluginSegment == 0) PiPackages.global.toList() else PiPackages.project.toList(),
-                pluginQuery.text,
-                { it.name },
-                { it.source },
-            )
-            Box(Modifier.fillMaxSize().zIndex(3f)) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .clickable(onClick = { pluginDismissedQuery = pluginQuery.text }),
-                )
-                PluginPickerCard(
-                    plugins = pool,
-                    // 该插件的可调用项 = pi 命令面里归属于它的那些（扩展命令 / 技能 / 提示模板）
-                    itemsFor = { p -> PiCommands.pluginItems(p.source, p.installedPath) },
-                    segment = pluginSegment,
-                    onSegment = { pluginSegment = it },
-                    query = pluginQuery.text,
-                    loading = PiCommands.loading || PiPackages.running || PiPackages.listExit == null,
-                    // `pi list` 走的是 Ubuntu 里的 pi CLI：退出码 0 才算拿到了包列表
-                    ready = PiCommands.reachable && PiPackages.listExit == 0,
-                    bottomOffset = mentionBottomOffset,
-                    onPick = { item ->
-                        inputText = applyPickerInsert(inputText.text, pluginQuery.endExclusive, item.insert)
                         chatState.clearPolishRevert()
                     },
                     modifier = Modifier.align(Alignment.BottomStart),
