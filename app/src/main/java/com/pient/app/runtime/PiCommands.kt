@@ -9,6 +9,8 @@ import com.pient.app.data.PientLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -68,6 +70,13 @@ object PiCommands {
     var loaded by mutableStateOf(false); private set
     var loading by mutableStateOf(false); private set
 
+    /**
+     * `items` 的写入串行化：卡片打开 / 草稿以 `/` 开头 / reload 成功后 三处都可能同时刷新 ——
+     * 两次 `clear()+addAll()` 交错会让表里留下**重复项**，`/` 卡 LazyColumn 的 key 撞车直接崩
+     * （2026-09-19 真机 FATAL：`Key "skill:pdf" was already used`）。
+     */
+    private val itemsLock = Mutex()
+
     /** 最近一次 [refresh] 是否拿到了 pi 的答复（false = 通道没回话；卡片据此如实显示「未就绪」） */
     var reachable by mutableStateOf(false); private set
 
@@ -107,9 +116,12 @@ object PiCommands {
                 false
             } else {
                 val project = runCatching { PiRuntime.workspaceDir(context) }.getOrNull()
-                val list = parse(data, project)
-                items.clear()
-                items.addAll(list)
+                // 去重（pi 回包理论上不会有重名）+ 原子替换：见 [itemsLock]
+                val list = parse(data, project).distinctBy { it.name }
+                itemsLock.withLock {
+                    items.clear()
+                    items.addAll(list)
+                }
                 loaded = true
                 reachable = true
                 PientLog.i(
