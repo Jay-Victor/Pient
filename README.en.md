@@ -26,7 +26,7 @@ Conversations, tools (file read/write, shell, search), sessions and context mana
 - Bundled Ubuntu 24.04 (PRoot by default, chroot in Root mode) — no separate Linux download, no Termux
 - The workspace is the project folder you opened: both the AI and the terminal land there
 
-> Version 0.1.0, under active development.
+> Under active development; see [Releases](https://github.com/Jay-Victor/Pient/releases) for the latest version and downloads.
 
 ## Features
 
@@ -60,6 +60,28 @@ Conversations, tools (file read/write, shell, search), sessions and context mana
 - 8 UI languages: 简体中文 / 繁體中文 / English / 日本語 / Español / Français / Português / हिन्दी
 - Three permission tiers: Standard / Debug (Shizuku) / Root
 - On-disk app logs with export, keep-alive, and in-app "Check for updates" with download & install
+
+## Screenshots
+
+| Chat & tool calls | Branch canvas |
+| --- | --- |
+| ![Chat](docs/screenshots/chat.png) | ![Branch canvas](docs/screenshots/branch-canvas.png) |
+| Assign tasks as soon as you open a project: tool calls, file trees and usage all in the message stream | Session branches drawn as a node tree — the blue line is the active path |
+
+| Terminal (bundled Ubuntu 24.04) | File tree |
+| --- | --- |
+| ![Terminal](docs/screenshots/terminal.png) | ![File tree](docs/screenshots/file-tree.png) |
+| One persistent shell per session; commands run by the AI get their own read-only mirror tab | The project's real filesystem: create / rename / import / export |
+
+| File preview | Providers & models |
+| --- | --- |
+| ![File preview](docs/screenshots/file-preview.png) | ![Model config](docs/screenshots/model-config.png) |
+| GFM rendering with a one-tap switch to source editing; code comes with line numbers and highlighting | A built-in provider catalog with per-model parameters, endpoints and a connectivity test |
+
+| Settings | Open-source licenses |
+| --- | --- |
+| ![Settings](docs/screenshots/settings.png) | ![Licenses](docs/screenshots/licenses.png) |
+| Theme & appearance, language, behaviour, models, data & permissions, about | Third-party components bundled with the app, plus the full GPL-3.0 text |
 
 ## Download & install
 

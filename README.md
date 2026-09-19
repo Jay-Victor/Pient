@@ -26,7 +26,7 @@ Pient = **Pi** + **Agent**。它把 [Pi Agent](https://github.com/earendil-works
 - 内置 Ubuntu 24.04（默认 PRoot，Root 时走 chroot），不需要额外下载整个 Linux 系统，也不需要 Termux
 - 工作区 = 你当前打开的项目文件夹，AI 与终端都落在那里
 
-> 版本 0.1.0，仍在活跃开发中。
+> 仍在活跃开发中；最新版本与下载见 [Releases](https://github.com/Jay-Victor/Pient/releases)。
 
 ## 特性
 
@@ -60,6 +60,28 @@ Pient = **Pi** + **Agent**。它把 [Pi Agent](https://github.com/earendil-works
 - 8 种界面语言：简体中文 / 繁體中文 / English / 日本語 / Español / Français / Português / हिन्दी
 - 三档系统权限：标准 / 调试（Shizuku）/ Root
 - 应用日志管理与导出、后台保活、关于页「检查更新」+ 应用内下载安装
+
+## 界面截图
+
+| 对话与工具调用 | 分支画布 |
+| --- | --- |
+| ![对话页](docs/screenshots/chat.png) | ![分支画布](docs/screenshots/branch-canvas.png) |
+| 打开项目就能派任务：工具调用、文件树、用量统计都在消息流里 | 会话的分支结构画成节点树，蓝线 = 当前活跃路径 |
+
+| 终端（内置 Ubuntu 24.04） | 文件树 |
+| --- | --- |
+| ![终端](docs/screenshots/terminal.png) | ![文件树](docs/screenshots/file-tree.png) |
+| 每个会话一个常驻 shell；AI 执行的命令另有只读镜像标签页 | 项目的真实文件系统：新建 / 重命名 / 导入导出 / 刷新 |
+
+| 文件预览 | 服务商与模型配置 |
+| --- | --- |
+| ![文件预览](docs/screenshots/file-preview.png) | ![模型配置](docs/screenshots/model-config.png) |
+| Markdown 走 GFM 渲染、一键切源码编辑；代码带行号与高亮 | 内置服务商目录，逐模型参数、端点与连接测试 |
+
+| 设置 | 开源许可声明 |
+| --- | --- |
+| ![设置](docs/screenshots/settings.png) | ![开源许可](docs/screenshots/licenses.png) |
+| 主题外观、语言、行为、模型、数据与权限、关于 | 随应用分发的第三方组件清单与 GPL-3.0 全文 |
 
 ## 下载与安装
 
