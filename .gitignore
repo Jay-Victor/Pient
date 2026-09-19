@@ -26,6 +26,11 @@ local.properties
 *.keystore
 keystore.properties
 *.p12
+# 整个签名目录一起挡：漏文件名也进不去（目录里可能有备份/临时件）
+keystore/
+
+# ===== 发版说明（本地留档：建 release 时复制过去，不入库）=====
+release-notes/
 
 # ===== IDE =====
 .idea/
