@@ -3,9 +3,8 @@ package com.pient.app.ui.theme
 import androidx.compose.ui.graphics.Color
 
 // ─────────────────────────────────────────────────────────────
-// Pient 视觉令牌 —— Hermes 桌面端实测同源（GitHub-dark 系）
-// 设计计划《Pient UI 设计计划.md》附录 A
-// 主色为蓝色（品牌决策 2026-08-26：暗 #58a6ff / 亮 #0969da）
+// Pient 视觉令牌（GitHub-dark 系）
+// 主色为蓝色（暗 #58a6ff / 亮 #0969da）
 // ─────────────────────────────────────────────────────────────
 
 // ▸ 暗色
@@ -21,10 +20,10 @@ val DarkError = Color(0xFFF85149)               // --destructive
 val DarkOnSurfaceVariant = Color(0xFF8B949E)    // --mutedForeground（GitHub-dark muted；#7d8590 在 OLED 上偏暗）
 val DarkUserBubble = Color(0xFF0D1F33)          // --userBubble（蓝系 tint）
 val DarkWarn = Color(0xFFD29922)                // --warn
-val DarkBrandPurple = Color(0xFFA371F7)         // 品牌紫（Codex 滑块同系）
-// ▸ 上下文用量分类色（Hermes 上下文卡片语义 → GitHub 色系映射，2026-08-28）
-val DarkCategoryRules = Color(0xFF3FB950)       // 规则（Hermes --context-usage-rules 绿）
-val DarkCategoryConversation = Color(0xFF39C5CF) // 对话（--context-usage-conversation 青）
+val DarkBrandPurple = Color(0xFFA371F7)         // 品牌紫
+// ▸ 上下文用量分类色（各分类语义 → GitHub 色系映射）
+val DarkCategoryRules = Color(0xFF3FB950)       // 规则（绿）
+val DarkCategoryConversation = Color(0xFF39C5CF) // 对话（青）
 // 其余分类复用既有令牌：系统提示词=OnSurfaceVariant(灰)、工具定义=BrandPurple(紫)、技能=Warn(黄)
 // （pi 无记忆/子代理上下文分类，橙/蓝无需令牌）
 val DarkSurface = Color(0xFF0D1117)
@@ -45,7 +44,7 @@ val LightOnSurfaceVariant = Color(0xFF656D76)
 val LightUserBubble = Color(0xFFDBE7F2)
 val LightWarn = Color(0xFF9A6700)
 val LightBrandPurple = Color(0xFF8250DF)
-// ▸ 上下文用量分类色（Hermes 上下文卡片语义 → GitHub 色系映射，2026-08-28）
+// ▸ 上下文用量分类色（各分类语义 → GitHub 色系映射）
 val LightCategoryRules = Color(0xFF1A7F37)
 val LightCategoryConversation = Color(0xFF1B7C83)
 val LightSurface = Color(0xFFFFFFFF)

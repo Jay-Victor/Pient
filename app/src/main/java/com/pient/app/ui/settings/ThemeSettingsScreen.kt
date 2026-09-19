@@ -169,9 +169,8 @@ private val RainbowBrush = Brush.horizontalGradient(
 )
 
 /**
- * 主题与外观（2026-08-31 重设计）：顶部标签栏（主题设置/背景设置/字体设置/外观设置）。
+ * 主题与外观：顶部标签栏（主题设置/背景设置/字体设置/外观设置）。
  * 主题设置 = 主题模式卡 + 主题色卡（分区标题在卡片外上方，与服务商与模型配置/关于页同款）；
- * 其余标签暂不制作（占位）。
  */
 @Composable
 fun ThemeSettingsScreen(nav: NavController) {
@@ -199,7 +198,7 @@ fun ThemeSettingsScreen(nav: NavController) {
             )
         }
 
-        // 标签栏（Operit ThemeSettingsTabbedContent 同款参数）
+        // 标签栏
         ScrollableTabRow(
             selectedTabIndex = selectedTab.ordinal,
             edgePadding = 0.dp,
@@ -263,7 +262,7 @@ private fun ThemeTabContent() {
                         }
                     }
 
-                    // ── 自定义主题色（2026-09-01）：开关 → 彩虹色相滑轨，拖动即时改全局主题色 ──
+                    // ── 自定义主题色：开关 → 彩虹色相滑轨，拖动即时改全局主题色 ──
                     DividerLine(Modifier.padding(top = 12.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -415,7 +414,7 @@ private fun AccentColorCard(preset: AccentPreset, modifier: Modifier = Modifier)
 @Composable
 private fun BackgroundTabContent() {
     // 视频裁剪弹窗状态提升到 LazyColumn 之外（PientDialog 的 fillMaxSize 需要页面级约束；
-    // 放在 item 内会被无限高度约束压塌、弹窗不可见——2026-08-31 修复"点击视频裁剪无跳转"）
+    // 放在 item 内会被无限高度约束压塌、弹窗不可见）
     var showTrimDialog by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
         LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -436,14 +435,14 @@ private fun BackgroundTabContent() {
     }
 }
 
-/** 自定义背景卡：图片/视频分段 → 预览窗（200dp，Operit 同款）→ 移除/选择按键（随分段联动文案） */
+/** 自定义背景卡：图片/视频分段 → 预览窗（200dp）→ 移除/选择按键（随分段联动文案） */
 @Composable
 private fun CustomBackgroundCard(onTrimVideo: () -> Unit) {
     val context = LocalContext.current
     val isImage = SettingsStore.backgroundMediaType == BackgroundMediaType.IMAGE
     val currentUri = if (isImage) SettingsStore.backgroundImageUri else SettingsStore.backgroundVideoUri
 
-    // ── 图片裁剪（Operit CropImageContract 同款：导入即裁剪 + 预览角标二次裁剪） ──
+    // ── 图片裁剪（导入即裁剪 + 预览角标二次裁剪） ──
     val cropLauncher = rememberLauncherForActivityResult(CropImageContract()) { result ->
         if (result.isSuccessful) {
             val cropped = result.uriContent
@@ -462,7 +461,7 @@ private fun CustomBackgroundCard(onTrimVideo: () -> Unit) {
         }
     }
     // 裁剪页主题色（launchImageCrop 为非 Composable 局部函数，颜色在 Composable 作用域预解析；
-    // 图标色 = Operit 同款 isNightMode 逻辑：暗色白图标、亮色黑图标——不能直接用 onPrimary）
+    // 图标色 = 暗色白图标、亮色黑图标——不能直接用 onPrimary）
     val cropPrimary = MaterialTheme.colorScheme.primary.toArgb()
     val cropIconColor = if (LocalPientIsDark.current) Color.White.toArgb() else Color.Black.toArgb()
     val cropSurface = MaterialTheme.colorScheme.surfaceContainer.toArgb()
@@ -496,13 +495,13 @@ private fun CustomBackgroundCard(onTrimVideo: () -> Unit) {
     val mediaLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { result ->
         if (result != null) {
             when (SettingsStore.backgroundMediaType) {
-                // 导入图片 → 立即进入裁剪（Operit 同款流程：选图后直接 launchImageCrop）
+                // 导入图片 → 立即进入裁剪（选图后直接 launchImageCrop）
                 BackgroundMediaType.IMAGE -> launchImageCrop(result)
                 BackgroundMediaType.VIDEO -> {
                     runCatching {
                         context.contentResolver.takePersistableUriPermission(result, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
-                    // 视频也复制到内部存储（Operit copyFileToInternalStorage 同款）：
+                    // 视频也复制到内部存储：
                     // media documents URI 对 MediaMetadataRetriever/ExoPlayer 读取不稳，
                     // file:// 内部副本保证预览取帧、时长读取与播放全部可靠。
                     scope.launch {
@@ -550,7 +549,7 @@ private fun CustomBackgroundCard(onTrimVideo: () -> Unit) {
                     modifier = Modifier.weight(1f),
                 )
             }
-            // ── 图片：图片裁剪行；视频：视频裁剪/视频声音/视频循环三行（2026-08-31 从预览角标移入） ──
+            // ── 图片：图片裁剪行；视频：视频裁剪/视频声音/视频循环三行 ──
             if (isImage) {
                 DividerLine(Modifier.padding(top = 12.dp))
                 SettingsRow(
@@ -599,8 +598,8 @@ private fun CustomBackgroundCard(onTrimVideo: () -> Unit) {
 
 /**
  * 预览窗：图片直接解码展示；视频取 MediaMetadataRetriever 帧（裁剪后取裁剪起点帧）；
- * 未选择/解码失败时显示占位提示（Operit theme_no_bg_selected 同款文案）。
- * 注：操作入口（裁剪/声音/循环）已移至按键行下方设置行，预览窗保持纯净。
+ * 未选择/解码失败时显示占位提示。
+ * 注：操作入口（裁剪/声音/循环）在按键行下方设置行，预览窗保持纯净。
  */
 @Composable
 private fun BackgroundPreview(mediaType: BackgroundMediaType, uri: String?) {
@@ -665,7 +664,7 @@ private fun BackgroundPreview(mediaType: BackgroundMediaType, uri: String?) {
 private fun VideoTrimDialog(videoUri: String, onDismiss: () -> Unit) {
     val context = LocalContext.current
     // null = 时长读取中；>0 = 就绪；读取失败 → Toast + 关闭。
-    // 修复（2026-08-31）：此前 durationSec 初始 0，异步读取未完成时首次组合命中
+    // durationSec 初始 0 时，异步读取未完成前首次组合就命中
     // "durationSec <= 0f 直接关闭"分支 → 弹窗闪现即消失，看起来像"没跳转"。
     var durationSec by remember { mutableStateOf<Float?>(null) }
     var startSec by remember { mutableStateOf(SettingsStore.videoTrimStartSec ?: 0f) }
@@ -673,7 +672,7 @@ private fun VideoTrimDialog(videoUri: String, onDismiss: () -> Unit) {
     var cropMode by remember { mutableStateOf(SettingsStore.videoCropMode) }
     var speed by remember { mutableStateOf(SettingsStore.videoPlaybackSpeed) }
     LaunchedEffect(videoUri) {
-        // file:// URI 经 ContentResolver 解析在 MediaMetadataRetriever 上不可靠（实测返回 0），
+        // file:// URI 经 ContentResolver 解析在 MediaMetadataRetriever 上不可靠（返回 0），
         // 直接传文件路径（path 重载绕过 URI 解析）。
         val path = Uri.parse(videoUri).path
         val dur = withContext(Dispatchers.IO) {
@@ -798,7 +797,7 @@ private fun copyToInternalStorage(context: android.content.Context, uri: Uri): U
 
 /** 复制视频到应用私有 filesDir/background/（替换旧视频；media documents URI 读取不稳，内部副本保证可靠）
  *  注意：MediaMetadataRetriever 走 media server 进程（不同 uid），私有目录默认 600 读不了
- *  （实测时长读取返回 0），必须 setReadable 后 media 服务才能解析。 */
+ *  （时长读取返回 0），必须 setReadable 后 media 服务才能解析。 */
 private fun copyVideoToInternalStorage(context: android.content.Context, uri: Uri): Uri? = runCatching {
     val dir = java.io.File(context.filesDir, "background").apply { mkdirs() }
     dir.listFiles()?.filter { it.name.startsWith("bg_video") }?.forEach { it.delete() }
@@ -812,7 +811,6 @@ private fun copyVideoToInternalStorage(context: android.content.Context, uri: Ur
 }.getOrNull()
 
 /** 按目标边长等比降采样解码（预览窗只需 ~屏宽分辨率，避免大图整幅载入；实现共享于 ui/theme/BackgroundLayer.kt） */
-// decodeSampled 定义移至 com.pient.app.ui.theme.decodeSampled（背景层与预览共用）
 
 /**
  * 背景效果卡：高斯模糊（图标 + 标题/辅助说明 + 开关 + 1..25 模糊强度滑轨）
@@ -912,7 +910,7 @@ private fun SliderRangeRow(range: String, value: String) {
 // ─────────────────────────────────────────────────────────────
 // 字体设置标签：字体样式（内置/自定义分段 + 字体选择 + 预览）+ 字体大小（数值 + 滑轨 + 预览）
 // ─────────────────────────────────────────────────────────────
-/** 导入字体的 SAF MIME 过滤（仅 ttf/otf 及其 mime 变体写法，2026-08-31 用户要求只允许这两种格式） */
+/** 导入字体的 SAF MIME 过滤（仅 ttf/otf 及其 mime 变体写法） */
 private val FONT_MIME_TYPES = arrayOf(
     "font/ttf", "font/otf", "application/x-font-ttf", "application/x-font-opentype",
     "application/vnd.ms-opentype",
@@ -1277,12 +1275,12 @@ private fun copyFontToInternalStorage(context: android.content.Context, uri: Uri
 }
 
 // ─────────────────────────────────────────────────────────────
-// 输入框设置标签：输入框样式 + 输入框材质（2026-09-12）
+// 输入框设置标签：输入框样式 + 输入框材质
 // ─────────────────────────────────────────────────────────────
 /**
- * 输入框设置（用户 spec 2026-09-12；原「外观设置」占位标签及页面已移除）：
+ * 输入框设置：
  * - 输入框样式：贴底输入框（默认）/ 悬浮输入框（输入框变为悬浮的全圆角矩形）；
- * - 输入框材质：默认 / 磨砂玻璃 / 液态玻璃（材质效果与依赖参考 Mdcito 的卡片风格）。
+ * - 输入框材质：默认 / 磨砂玻璃 / 液态玻璃。
  * 两处即时生效于聊天页输入栏，并写 prefs 持久化。
  */
 @Composable
@@ -1316,8 +1314,7 @@ private fun InputBarTabContent() {
                         selected = SettingsStore.inputBarMaterial == option.material,
                         onClick = { SettingsStore.inputBarMaterial = option.material },
                     )
-                    // 选中材质后在其下方展开该材质的可调项（Mdcito 同款：
-                    // 简约 → 透明度；磨砂玻璃 → 纹理强度；液态玻璃无可调项）
+                    // 选中材质后在其下方展开该材质的可调项（简约 → 透明度；磨砂玻璃 → 纹理强度；液态玻璃无可调项）
                     if (SettingsStore.inputBarMaterial == option.material) {
                         when (option.material) {
                             PanelMaterial.DEFAULT -> MaterialSliderRow(
@@ -1343,13 +1340,13 @@ private fun InputBarTabContent() {
             }
         }
 
-        // ── 卡片预览（版式对齐 Mdcito CardPreview：渐变底容器 + 材质徽标 + 彩色预览区） ──
+        // ── 卡片预览（渐变底容器 + 材质徽标 + 彩色预览区） ──
         item { InputBarPreviewCard() }
     }
 }
 
 /**
- * 侧边栏设置（用户 spec 2026-09-12，与输入框设置标签同构）：
+ * 侧边栏设置（与输入框设置标签同构）：
  * - 侧边栏样式：贴边侧边栏（默认）/ 悬浮侧边栏（侧边栏变为悬浮的全圆角矩形）；
  * - 侧边栏材质：简约（默认）/ 磨砂玻璃 / 液态玻璃（与输入框同一套材质与可调项）；
  * 两处即时生效于聊天页会话侧栏，并写 prefs 持久化。
@@ -1417,7 +1414,7 @@ private fun SidebarTabContent() {
 }
 
 /**
- * 输入框预览（2026-09-12 用户 spec；版式参考 Mdcito CardPreview）：
+ * 输入框预览：
  * 渐变底容器（标题行「卡片预览」+ 当前材质徽标）+ 固定高度彩色预览区，
  * 区内渲染一枚按当前设置（样式 / 材质 / 透明度 / 纹理强度）实时生效的样例输入栏。
  */
@@ -1432,7 +1429,7 @@ private fun InputBarPreviewCard() {
 }
 
 /**
- * 侧边栏预览（2026-09-12 用户 spec，版式与输入框预览同一外壳）：
+ * 侧边栏预览（版式与输入框预览同一外壳）：
  * 彩色预览区内渲染一枚按当前设置（样式 / 材质 / 透明度 / 纹理强度）实时生效的样例侧栏
  * ——贴边 = 贴预览区左缘、仅右侧两角圆角；悬浮 = 四周留白 + 四角全圆角。
  */
@@ -1448,7 +1445,7 @@ private fun SidebarPreviewCard() {
 
 /**
  * 预览卡外壳（输入框 / 侧边栏共用）：「卡片预览」标题行 + 当前材质徽标 + [preview] 预览区。
- * 版式逐项对齐 Mdcito CardPreview（渐变底容器 + 圆角 + 描边 + 16dp 内边距）。
+ * 版式（渐变底容器 + 圆角 + 描边 + 16dp 内边距）。
  */
 @Composable
 private fun PanelPreviewCard(material: PanelMaterial, preview: @Composable () -> Unit) {
@@ -1746,7 +1743,7 @@ private fun MaterialSliderRow(
     }
 }
 
-/** 输入框样式选项（顺序即卡片内排列顺序；「默认」项按用户 spec 写进标题） */
+/** 输入框样式选项（顺序即卡片内排列顺序；「默认」项写进标题） */
 private data class InputBarStyleOption(
     val style: InputBarStyle,
     val icon: ImageVector,
@@ -1770,7 +1767,7 @@ private val InputBarStyleOptions: List<InputBarStyleOption>
     ),
 )
 
-/** 侧边栏样式选项（顺序即卡片内排列顺序；「默认」项按用户 spec 写进标题） */
+/** 侧边栏样式选项（顺序即卡片内排列顺序；「默认」项写进标题） */
 private data class SidebarStyleOption(
     val style: SidebarStyle,
     val icon: ImageVector,
@@ -1794,7 +1791,7 @@ private val SidebarStyleOptions: List<SidebarStyleOption>
     ),
 )
 
-/** 面板材质选项（输入框材质 / 侧边栏材质共用；说明文案沿用 Mdcito 卡片风格的同名项） */
+/** 面板材质选项（输入框材质 / 侧边栏材质共用） */
 private data class PanelMaterialOption(
     val material: PanelMaterial,
     val icon: ImageVector,

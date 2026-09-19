@@ -86,12 +86,12 @@ import com.pient.app.ui.theme.PientGlassSurface
 import com.kyant.backdrop.Backdrop
 
 /**
- * 输入栏 dock（P1 核心，设计计划 3.4）：
+ * 输入栏 dock：
  * 多行输入框（2–6 行，中文全拼/IME 组合态）；左下方
  * 模型选择器 + 上下文指示器；右下方 "+" 与发送键；流式中发送键
  * 变停止（abort），模型选择器禁用置灰。
  *
- * 外观由「主题与外观 → 输入框设置」决定（2026-09-12）：
+ * 外观由「主题与外观 → 输入框设置」决定：
  * - 输入框样式：贴底（与屏幕底边齐平、上两角 16dp）/ 悬浮（四角全圆角、四周留白浮起）；
  * - 输入框材质：默认（纯色面板）/ 磨砂玻璃 / 液态玻璃（见 [PientGlassSurface]）。
  */
@@ -116,12 +116,12 @@ fun ChatInputBar(
     focusTick: Int = 0,
     onChipPositioned: (Float) -> Unit = {}, // 模型按键上缘 y（root 坐标，px）：供弹窗底部锚定
     onDockTopPositioned: (Float) -> Unit = {}, // dock 上缘 y（root 坐标，px）：供 @ 引用卡锚定
-    /** 输入栏背后内容层的 backdrop（2026-09-12）：玻璃采样「内容滑过输入栏」的实时画面 */
+    /** 输入栏背后内容层的 backdrop：玻璃采样「内容滑过输入栏」的实时画面 */
     backdrop: Backdrop? = null,
 ) {
     var fullscreenOpen by rememberSaveable { mutableStateOf(false) }
     val streaming = chatState.isStreaming
-    // 润色提示词（2026-09-16，用户 spec）：润色期间输入框只读 —— 用户不得在润色进行中改动提示词，
+    // 润色提示词：润色期间输入框只读 —— 用户不得在润色进行中改动提示词，
     // 直到结果回来（润色键此时转圈、发送键与全屏输入一并禁用）
     val polishing = chatState.polishing
     val polishRevertable = chatState.polishRevertTarget != null
@@ -130,11 +130,11 @@ fun ChatInputBar(
     LaunchedEffect(focusTick) {
         if (focusTick > 0) runCatching { focusRequester.requestFocus() }
     }
-    // 输入框 token 高亮（@ 引用照 Operit MentionVisualTransformation 同款规格，2026-09-19 起 `/命令` 同款：
-    // 主色 14% 底 + 主色字 + 0.88x + Medium）—— 用户要求「用 / 调用技能也要像 @ 那样有个块」
+    // 输入框 token 高亮（@ 引用与开头的 `/命令` 同款规格：
+    // 主色 14% 底 + 主色字 + 0.88x + Medium）
     val tokenTransformation = rememberTokenVisualTransformation(mentionFiles, slashCommands)
 
-    // 输入框设置（2026-09-12）：贴底 / 悬浮 + 材质（默认 / 磨砂玻璃 / 液态玻璃）
+    // 输入框设置：贴底 / 悬浮 + 材质（默认 / 磨砂玻璃 / 液态玻璃）
     val floating = SettingsStore.inputBarStyle == InputBarStyle.FLOATING
     val dockShape = if (floating) RoundedCornerShape(28.dp)
     else RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
@@ -156,8 +156,8 @@ fun ChatInputBar(
                 end = if (floating) 12.dp else 0.dp,
                 bottom = if (floating) 10.dp else 0.dp,
             )
-            // ★ 整块面板 = 输入框的点击面（2026-09-12 修「有时点输入框键盘不弹」）：
-            //   面板高 289px 里原先只有输入框那一条 126px 响应该点，其余全是死区
+            // ★ 整块面板 = 输入框的点击面（防「有时点输入框键盘不弹」）：
+            //   面板高 289px 里只有输入框那一条 126px 响应该点，其余全是死区
             //   （左右 12dp 内边距、面板上/下内边距、输入框与控件行之间的空白条、
             //   控件行中央 Spacer 约 81dp×48dp）——空面板看着像「一个大输入框」，
             //   用户点在哪儿都以为点的是输入框。这里让面板空白处也算输入框：
@@ -181,7 +181,7 @@ fun ChatInputBar(
             .fillMaxWidth() // ★ 高度必须 wrap：fillMaxSize 会占满父级全部高度，把消息区挤没
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
-        // ── 引用块卡（引用某条消息追问；在附件 chip 行之上，2026-09-11） ──
+        // ── 引用块卡（引用某条消息追问；在附件 chip 行之上） ──
         if (quote != null) {
             QuoteCard(
                 quote = quote,
@@ -189,7 +189,7 @@ fun ChatInputBar(
                 modifier = Modifier.padding(bottom = 8.dp),
             )
         }
-        // ── 附件 chip 行（输入框上方；Hermes AttachmentPill 规格 2026-08-28） ──
+        // ── 附件 chip 行（输入框上方） ──
         // 左侧 = "+" 菜单附件；右侧 = @ 引用文件 chip（由输入文本派生，单一事实源）
         val refMatches = remember(text.text, mentionFiles) { findMentionPathMatches(text.text, mentionFiles) }
         // `/命令` token（整条消息以 `/` 开头且命中 pi 命令面）：与 @ 引用同款，出一枚可删的 pill
@@ -265,10 +265,10 @@ fun ChatInputBar(
                     inner()
                 },
             )
-            // 润色提示词（2026-09-16，用户 spec）：
+            // 润色提示词：
             // 润色 → 结果回填、本键变回退键 → 用户一改（ChatScreen 清回退态）就变回润色键；
             // 润色进行中：本键转圈、不可点，输入框只读。
-            // **常显**（2026-09-17 用户口径：空框也要在位，只是灰态、不可点）——
+            // **常显**（空框也要在位，只是灰态、不可点）——
             // 键位固定、不随打字闪烁；灰态取仓库既有的「禁用图标」写法 onSurfaceVariant 30%。
             val canPolish = text.text.isNotBlank()
             Box(
@@ -308,7 +308,7 @@ fun ChatInputBar(
                     )
                 }
             }
-            // 全屏输入入口（设计计划 3.4；点开 FullscreenInputDialog）
+            // 全屏输入入口（点开 FullscreenInputDialog）
             // 润色中禁用：那是同一份文本的另一个编辑器（润色期间不许改动提示词）
             IconButton(
                 onClick = { fullscreenOpen = true },
@@ -328,8 +328,8 @@ fun ChatInputBar(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         ) {
-            // 模型选择器（流式中禁用置灰；不再替换为 steer/followUp——用户反馈
-            // 发送后模型名"变掉"很困惑，2026-08-27 移除替换段控件）
+            // 模型选择器（流式中禁用置灰；不替换为 steer/followUp ——
+            // 发送后模型名"变掉"很困惑）
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -345,13 +345,13 @@ fun ChatInputBar(
                     color = if (streaming) MaterialTheme.colorScheme.onSurfaceVariant
                     else MaterialTheme.colorScheme.primary,
                     // 模型名过长时截断：Text 无上限会按固有宽度把 chip 撑到整行，
-                    // 挤掉右侧上下文指示器/发送键（2026-09-09 修复）
+                    // 挤掉右侧上下文指示器/发送键
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.widthIn(max = 120.dp),
                 )
                 // 箭头用 Material 图标（与模型弹窗卡片内一致）并可上下指示开合；
-                // 之前用文本字符 " ▾"，字形与弹窗内图标不一致（2026-08-27 修复）
+                // 文本字符 " ▾" 的字形与弹窗内图标不一致
                 Icon(
                     if (modelSelectorOpen) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
                     null,
@@ -366,8 +366,8 @@ fun ChatInputBar(
                 onToggle = onToggleContextCard,
             )
 
-            // 系统提示词只读按键（2026-09-01，pi-web system 面板同款：
-            // 文件图标；systemPrompt 非空时 accent 高亮，点击弹出只读全文浮层）
+            // 系统提示词只读按键：
+            // 文件图标；systemPrompt 非空时 accent 高亮，点击弹出只读全文浮层
             Icon(
                 Icons.Outlined.Description, L.chat.systemPrompt,
                 tint = if (chatState.systemPrompt.isNotEmpty()) MaterialTheme.colorScheme.primary
@@ -467,7 +467,7 @@ private fun slashCommandIcon(kind: PiCommands.Kind): ImageVector = when (kind) {
 }
 
 /**
- * 附件 pill（Hermes AttachmentPill 规格）：12dp 圆角 + hairline 边框 +
+ * 附件 pill：12dp 圆角 + hairline 边框 +
  * 28dp 圆角图标容器 + 文件名 + 常驻删除 ×。
  */
 @Composable
@@ -490,7 +490,7 @@ private fun AttachmentPill(
             )
             .padding(6.dp),
     ) {
-        // 类型图标容器（Hermes size-8 rounded-lg + border + muted 底）
+        // 类型图标容器
         Box(
             modifier = Modifier
                 .size(28.dp)
@@ -534,7 +534,7 @@ private fun AttachmentPill(
 }
 
 /**
- * 输入框 token 高亮（参照 Operit MentionVisualTransformation.kt）：
+ * 输入框 token 高亮：
  * 对已匹配的完整 "@路径" 与开头的 "/命令" 施加 主色文字 + 主色 14% 背景 + 0.88x 字号 + Medium 字重。
  * 只高亮已知文件路径与 pi 真认的命令（未输完的 @ / 半截 `/` 不高亮）。
  */

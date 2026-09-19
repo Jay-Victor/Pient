@@ -47,7 +47,7 @@ import com.pient.app.ui.theme.MonoFont
 import kotlinx.coroutines.launch
 
 /**
- * 插件管理（**真数据层**，2026-09-15 接回 pi）：
+ * 插件管理（**真数据层**）：
  *
  * 页面上的每个动作 = 一条 pi 官方命令（[PiPackages]，口径见那里的 KDoc）：
  * 列表 = `pi list`（全局段 = 用户设置里的包，项目段 = 项目设置里的包）；
@@ -179,7 +179,7 @@ fun PluginsScreen(nav: NavController) {
         )
     }
 
-    // 插件详情弹窗（2026-09-08：点插件卡片弹出；删除 = 从列表移除插件及全部文件）
+    // 插件详情弹窗（点插件卡片弹出；删除 = 从列表移除插件及全部文件）
     detailFor?.let { item ->
         PluginDetailDialog(
             item = item,
@@ -245,7 +245,7 @@ private fun PluginRow(item: PluginItem, onClick: () -> Unit) {
             )
         }
         // 注意：不能用 Modifier.size() 压缩 Switch——内部轨道仍按默认 52dp 绘制并居中
-        // 溢出，会向左侵入内容文字造成视觉重叠（实测溢出 ~10dp）
+        // 溢出，会向左侵入内容文字造成视觉重叠
         Switch(
             checked = enabled,
             onCheckedChange = null,

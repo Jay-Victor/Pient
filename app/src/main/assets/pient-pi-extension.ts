@@ -24,9 +24,9 @@
  * pi 的 RPC 说明里写明扩展命令属于 `get_commands` 并且 **"available for invocation via prompt"**，
  * 因此 Pient 侧只要 `{"type":"prompt","message":"/pient-nav <id>"}` 即可触发。
  *
- * ── 用户消息条目：锚点标记（2026-09-15）────────────────────────────────────────
+ * ── 用户消息条目：锚点标记 ────────────────────────────────────────
  * `navigateTree` 对 **role=user 的条目**走的是 TUI 的"重编辑"语义：叶退到该条目的**父条目**，
- * 消息文本作为 `editorText` 回填编辑器（`agent-session.ts:3236-3251`）。Pient 的
+ * 消息文本作为 `editorText` 回填编辑器。Pient 的
  * 「创建分支 / 切换分支」要的是**停在该消息本身**——选中节点 = 上下文切到这次对话（画布节点
  * 就是这次对话），此后发消息从它长出新枝。对**尚无回答**的节点尤其重要：它的回合链是空的、
  * 没有任何可用的锚点条目，pi 里"叶 = 某条用户消息"这个状态只有重载（文件末条目）才偶然出现。
@@ -67,8 +67,8 @@ const ANCHOR_TYPE = "pient_anchor";
  * 让 App 重建上屏流时把**引用卡与附件清单（含文件名）**挂回去。
  *
  * 为什么附件名要单独存：pi 的 `image` 内容块只有 `data/mimeType`（协议里没有文件名字段），
- * 而直发时正文尾部那行 "[附件] 名称 · 路径" 又按 Operit「移除链接」口径被去掉 —— 于是
- * pi 会话文件里完全查不到名字，只有 App 的本地镜像知道。（旧版 `pient_quote` 只带引用，读侧仍认。）
+ * 而直发时正文尾部那行 "[附件] 名称 · 路径" 又会被去掉 —— 于是
+ * pi 会话文件里完全查不到名字，只有 App 的本地镜像知道。（旧的 `pient_quote` 只带引用，读侧仍兼容。）
  */
 const META_TYPE = "pient_meta";
 
@@ -76,7 +76,7 @@ const META_TYPE = "pient_meta";
 const SYSPROMPT_FILE = ".pient-sysprompt.txt";
 
 /**
- * ── 系统提示词的 Pient 化（2026-09-17 用户拍板）────────────────────────────────
+ * ── 系统提示词的 Pient 化 ────────────────────────────────────────
  * pi 的基座提示词由官方包生成（`core/system-prompt.ts` 的 `buildSystemPrompt()`），
  * Pient 不动 pi 源码，只做**确定性字符串改写**：
  *   ① 首句换成 Pient 身份句；② 末尾追加一段运行环境说明（Android 客户端 / `/workspace`
@@ -187,7 +187,7 @@ function formatResult(r: BridgeResult, cmd: string): string {
 }
 
 export default function (pi: ExtensionAPI) {
-  // ── 系统提示词的 Pient 化（2026-09-17）──────────────────────────────────────
+  // ── 系统提示词的 Pient 化 ──────────────────────────────────────
   // 官方 hook（docs/extensions.md「before_agent_start」）：返回 { systemPrompt } =
   // **替换本轮系统提示词**（chained across extensions）。内容没变就不返回（别把
   // 「无改写」也标成 modified）。
@@ -196,7 +196,7 @@ export default function (pi: ExtensionAPI) {
     return next === event.systemPrompt ? undefined : { systemPrompt: next };
   });
 
-  // ── 系统提示词回流（2026-09-15）──────────────────────────────────────────────
+  // ── 系统提示词回流 ─────────────────────────────────────────────
   // 提示词的持有者是 pi（base prompt + 项目 context 文件 + 扩展改写），App 看不到。
   // Pient 的「系统提示词」只读面板打开时触发这条命令 → 把**真实下发的那一份**写到
   // `~/.pi/agent/.pient-sysprompt.txt`（App 侧从 rootfs 里读回）。
@@ -216,11 +216,11 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ── 用户消息元数据标记（2026-09-17）──────────────────────────────────────────
+  // ── 用户消息元数据标记 ────────────────────────────────────────
   // Pient 把「引用」拼成用户消息正文开头的 markdown 块引用、把附件清单拼成正文尾部的
   // "[附件] 名称 · 路径" 行 —— 两者都**只有文本**：一旦 App 按 pi 重建上屏流（开画布 / 切分支 /
-  // fork / 中止 / 压缩），引用卡就退化成 "> …" 字面行；而**直发**的图片更彻底：那行清单按
-  // Operit「移除链接」口径被去掉、`image` 内容块又只有 data/mimeType（协议无文件名字段）
+  // fork / 中止 / 压缩），引用卡就退化成 "> …" 字面行；而**直发**的图片更彻底：那行清单会被去掉、
+  // `image` 内容块又只有 data/mimeType（协议无文件名字段）
   // → pi 会话文件里连名字都查不到。这条命令把这些元数据另存一份结构化副本：
   //
   //   /pient-meta <base64(JSON)>  →  pi.appendEntry("pient_meta", { v, quote?, attachments?, at })
@@ -385,7 +385,7 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       // ★ **不能在 `await ctx.reload()` 之后再碰 ctx** —— pi 明确声明 reload 后旧 ctx 失效
       //   （`agent-session.ts` 的 stale-ctx 守卫）：照旧写 notify 会抛异常，
-      //   App 侧只看到 `pi 事件：extension_error`（实测踩过）。所以先报"正在重载"，再 reload。
+      //   App 侧只看到 `pi 事件：extension_error`。所以先报"正在重载"，再 reload。
       ctx.ui.notify("pient-reload: 正在重新加载技能 / 插件 / 设置…", "info");
       await ctx.reload();
     },

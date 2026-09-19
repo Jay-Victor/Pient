@@ -9,7 +9,7 @@ import androidx.compose.ui.unit.sp
 import com.pient.app.R
 
 /**
- * 字体分工（设计计划 1.1）：
+ * 字体分工：
  * - UI 文本 = 系统无衬线（思源黑体系），正文行高 1.5
  * - 代码 / 终端 / 路径 = JetBrains Mono（内置资源）
  * 两者严禁混用。
@@ -18,8 +18,7 @@ val MonoFont: FontFamily = FontFamily(Font(R.font.jetbrains_mono))
 
 /**
  * 等宽字体**关闭连字**：JetBrains Mono 自带 liga/calt，会把 `!=` 渲染成 ≠、`->` 渲染成 →、
- * `==` 渲染成长等号、`<=`/`>=` 渲染成 ≤/≥ —— 代码 / 源码编辑区必须原样显示字符本身
- * （用户 2026-09-11：「这又不是 markdown 文件，原样输入就行，不要有无谓的渲染」）。
+ * `==` 渲染成长等号、`<=`/`>=` 渲染成 ≤/≥ —— 代码 / 源码编辑区必须原样显示字符本身。
  * 用法：代码文本样式与工具栏符号键都带上本设置；UI 正文字体不涉及。
  * 语法 = CSS font-feature-settings（Android `Painting.fontFeatureSettings` 同款解析）。
  */

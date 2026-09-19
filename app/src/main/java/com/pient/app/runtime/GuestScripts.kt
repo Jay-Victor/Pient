@@ -30,7 +30,7 @@ object GuestScripts {
         onDone: ((Int) -> Unit)? = null,
     ): TerminalSessions.Session {
         val session = sessionFor(context, sessionName)
-        // 终端脚本同样要保活（2026-09-16，M5）：apt / npm / pi install 动辄几十秒起，
+        // 终端脚本同样要保活：apt / npm / pi install 动辄几十秒起，
         // 用户切走看一眼消息、系统就把进程清了 —— 前台服务挂到脚本结束。
         val keepAliveKey = "script:$sessionName"
         PiKeepAlive.acquire(context, keepAliveKey, L.runtime.scriptRunning)

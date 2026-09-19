@@ -12,9 +12,9 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * 单个服务商的真实配置（2026-09-09 实现 AI 接入；替换原型期 mock）。
+ * 单个服务商的真实配置。
  *
- * **持久化（2026-09-14 用户拍板「pi 原生文件为唯一真相源」）**：
+ * **持久化（pi 原生文件为唯一真相源）**：
  * - 服务商 / 模型 / 密钥 / 思考写法 / 上下文压缩 → 写进 guest 的
  *   `~/.pi/agent/{models.json, auth.json, settings.json}`（见 [PiAgentFiles]），pi 直接读它；
  * - **Pient 自有、pi 没有对应概念**的字段（媒体直发三开关、上下文媒体裁剪回合数、
@@ -25,7 +25,6 @@ import java.io.File
  * （`contextWindow` / `maxTokens` / `input` / `samplingParams`）。
  *
  * 每个字段**留空 = 不写该键**（pi 用它自己那一层的默认：窗口 128000 / 输出 16384 / 采样交给服务商）。
- * pi-web 的 ModelsConfig 也是逐模型编辑这几个字段（`v ? ["text","image"] : undefined` 同款口径）。
  */
 data class ModelSetting(
     val ctxLenK: String = "",
@@ -51,7 +50,7 @@ data class ProviderConfig(
     val endpoint: String = "",
     val apiKey: String = "",
     /**
-     * **API 类型**（pi-ai 的 `api`，2026-09-15 要求 3 加）：空串 = 跟随服务商预设（[ProviderCatalog.apiOf]）。
+     * **API 类型**（pi-ai 的 `api`）：空串 = 跟随服务商预设（[ProviderCatalog.apiOf]）。
      * pi 的 `api` 是 per-model 的、provider 级是默认值；配置页把它做成显式旋钮，
      * 网关/自建端点（一个 URL 能说多种协议）才有得选。
      */
@@ -60,20 +59,19 @@ data class ProviderConfig(
     val modelList: String = "",
     // 上下文长度 / 最大输出 / 采样参数**不在这里**：pi 的 `models.json` 把它们放在**每个模型**上
     // （`models[].contextWindow` / `maxTokens` / `samplingParams`，没有服务商级这个概念）——
-    // 页面改成在「模型选择列表 → 铅笔」里逐个模型设（见 [modelSettings] / [ModelSetting]）。
-    // 2026-09-17 用户指出「卡面字段与逐模型浮层重复」，拍板**只留逐模型**这一处。
+    // 页面在「模型选择列表 → 铅笔」里逐个模型设（见 [modelSettings] / [ModelSetting]）。
     /**
-     * 思考参数写法（2026-09-12 真实化）：决定「思考模式开关」在线上怎么表达——
+     * 思考参数写法：决定「思考模式开关」在线上怎么表达——
      * 关闭 = 显式禁用字面量、开启 = 显式启用（详见 [ReasoningFormat]）。
      * 落盘到 pi 的 `compat.thinkingFormat`。
      */
     val reasoningFormat: ReasoningFormat = ReasoningFormat.AUTO,
 
-    // ── 媒体能力（照 Operit 的 direct-processing 口径；默认关 = 不直发）──
-    // 口径（2026-09-14 用户拍板「照 Operit 对齐」；2026-09-17 收口为**只有图片**）：
+    // ── 媒体能力（默认关 = 不直发）──
+    // 口径（**只有图片**）：
     // - **开** = 图片转成内容部件**直发**给模型（pi RPC `prompt.images`）；
     //   **关** = 不直发，附件仍以「名称 · 路径」留在正文里，消息照常发送。
-    // - 音频 / 视频两个开关**已删**：pi 的用户消息内容类型只有 text / image（`ImageContent`），
+    // - 不设音频 / 视频开关：pi 的用户消息内容类型只有 text / image（`ImageContent`），
     //   音频 / 视频在 pi 通道里根本发不出去 —— 开着只会把附件行从请求里抹掉（比关着更糟）。
     // 识图开关本身也是**逐模型**的（pi `models[].input`）—— 放在「模型选择列表 → 铅笔」里设，
     // 一个服务商下「文本模型 + 视觉模型」并存时本来就得分开（见 [ModelSetting.image]）。
@@ -157,12 +155,12 @@ object AiConfigStore {
     /** AI 是否通过连接测试（聊天页首次引导第二步；测试连接成功即置真并持久化） */
     var aiConfigured by mutableStateOf(false)
 
-    // ── 模型定价（2026-09-11 按 Operit 的处理方式实现）──
+    // ── 模型定价 ──
     // 内置表（ModelPricingDefaults：assets/model_pricing.tsv）+ 用户覆盖（此处的 pricing）。
-    // 覆盖键 = "provider:model"（Operit providerModel 同款键形态）；有覆盖用覆盖，否则用内置默认。
+    // 覆盖键 = "provider:model"；有覆盖用覆盖，否则用内置默认。
     val pricing = mutableStateMapOf<String, ModelPricing>()
 
-    /** 美元 → 人民币汇率（内置价为 USD 的模型按此折算展示；Operit 汇率设置同款） */
+    /** 美元 → 人民币汇率（内置价为 USD 的模型按此折算展示） */
     var usdToCnyRate by mutableStateOf(ModelPricingDefaults.DEFAULT_USD_TO_CNY_RATE)
 
     /** 覆盖键：`provider:model`（provider 小写） */
@@ -234,7 +232,7 @@ object AiConfigStore {
             val o = arr.getJSONObject(i)
             val id = o.optString("providerId")
             if (id.isBlank()) continue
-            // 老格式是**服务商级**的窗口 / 采样 / 识图（2026-09-17 起只留逐模型）—— 迁移时把它们
+            // 老格式是**服务商级**的窗口 / 采样 / 识图 —— 迁移时把它们
             // 展开到该服务商**每一个列出的模型**上（老语义本来就是「对该服务商所有模型生效」，
             // 展开后逐模型的值与原来完全等价，且与 pi 的文件结构一致）。
             val legacyCtx = o.optString("ctxLenK", "")

@@ -4,8 +4,7 @@ package com.pient.app.data
  * `/skill:<名字>` 命令的**显示还原**（读端）—— 与 [ContextPolicy] 里的附件清单同族：
  * pi 侧存的是**展开全文**，界面要显示用户实际敲的那个紧凑命令。
  *
- * 谁写的（写端 = pi 自己，`Refences/pi-0.85.1/packages/coding-agent/src/core/agent-session.ts`
- * 的 `_expandSkillCommand`）：prompt 以 `/skill:<名字> [args]` 开头时，pi 把它换成
+ * 谁写的（写端 = pi 自己的 `_expandSkillCommand`）：prompt 以 `/skill:<名字> [args]` 开头时，pi 把它换成
  *
  * ```
  * <skill name="<名字>" location="<SKILL.md 路径>">
@@ -21,13 +20,13 @@ package com.pient.app.data
  * 复制 XML 都会照着显示；而用户记得自己发的是 `/skill:<名字>`。本对象把它还原回去
  * （**只在显示层**用，回写 pi 的路径一律用原文本 → 不会把展开态写坏）。
  *
- * 口径与 pi-web 的 `lib/slash-display.ts`（`skillExpansionToCommand`）逐条对齐 —— 同一份正则形状：
+ * 正则形状：
  * 首尾信封必须完整、必须带 `References are relative to …` 那一行、正文贪婪匹配以最后一个 `</skill>`
  * 收口（技能正文里出现示例 `</skill>` 标签也不会被误截）。
  */
 object SkillExpansion {
 
-    /** pi 展开信封的完整形状；用 [Regex.matchEntire] 全串匹配（等价 pi-web 的 `^…$`） */
+    /** pi 展开信封的完整形状；用 [Regex.matchEntire] 全串匹配 */
     private val ENVELOPE = Regex(
         "<skill name=\"([^\"\\n]+)\" location=\"([^\"\\n]+)\">\\n" +
             "References are relative to [^\\n]+\\.\\n\\n([\\s\\S]*)\\n</skill>" +

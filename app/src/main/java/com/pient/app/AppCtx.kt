@@ -3,7 +3,7 @@ package com.pient.app
 import android.content.Context
 
 /**
- * **应用上下文的唯一持有者**（2026-09-14）。
+ * **应用上下文的唯一持有者**。
  *
  * 为什么需要它：内核各处（对话循环、上下文压缩、附件直发……）都需要一个应用上下文，
  * 而又不适合被业务流程直接持有 Activity / Application —— 这里放进程级单例，

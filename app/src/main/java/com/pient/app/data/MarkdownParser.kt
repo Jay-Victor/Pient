@@ -1,14 +1,14 @@
 package com.pient.app.data
 
 /**
- * Markdown（GFM 子集）解析 —— 口径对齐 pi-web 文件预览（react-markdown + remark-gfm + remark-frontmatter）：
+ * Markdown（GFM 子集）解析：
  *
  * 块级：ATX/Setext 标题（1~6 级）、段落（软换行折叠为空格、硬换行保留）、围栏代码块（含 ``` / ~~~ 与 info 串）、
  * 引用（可嵌套）、列表（有序/无序/嵌套/任务项/loose 空行）、GFM 表格（含对齐行）、分隔线、块级公式（`$$…$$` / `\[…\]`）、YAML frontmatter；
  * 行内：粗体、斜体、粗斜体、删除线、行内代码、链接、图片、自动链接、行内公式（`$…$` / `\(…\)`）、硬换行、反斜杠转义、常见 HTML 实体。
  *
  * 本层是纯 Kotlin（零 Compose 依赖），解析结果由 `ui/components/MarkdownText.kt` 渲染（公式渲染在 `ui/components/Latex.kt`）；
- * 未覆盖：内联 HTML 块、引用式链接（`[x][ref]`）、Mermaid —— 与 pi-web 的差距记在该组件的注释里。
+ * 未覆盖：内联 HTML 块、引用式链接（`[x][ref]`）、Mermaid。
  */
 
 // ───────────────────────────── 数据模型 ─────────────────────────────
@@ -59,7 +59,7 @@ sealed class MdBlock {
     data object Hr : MdBlock()
 }
 
-/** YAML frontmatter（渲染为 pi-web FrontmatterCard 同构卡片；无 frontmatter 时为 null） */
+/** YAML frontmatter（渲染为 frontmatter 卡片；无 frontmatter 时为 null） */
 data class MdFrontmatter(
     val title: String?,
     val tags: List<String>,
@@ -76,7 +76,7 @@ fun parseMarkdown(source: String): MarkdownDoc {
     var start = 0
     var front: MdFrontmatter? = null
 
-    // frontmatter：首行 `---` + 后续某行 `---`（pi-web extractFrontmatter 同款判定）
+    // frontmatter：首行 `---` + 后续某行 `---`
     if (lines.firstOrNull()?.trimEnd() == "---") {
         val close = (1 until lines.size).firstOrNull { lines[it].trimEnd() == "---" }
         if (close != null) {
@@ -240,11 +240,11 @@ private class BlockParser(private val lines: List<String>) {
 
     // ── 块级公式（`$$…$$` / `\[…\]`）──
     /**
-     * 读入一个块级公式（口径对齐 pi-web `normalizeDisplayMath`：模型常把开/闭标记贴在公式行上，
+     * 读入一个块级公式（模型常把开/闭标记贴在公式行上，
      * 也常写成 `\[…\]`）。四种写法都收：
      * ① `$$x$$` / `\[x\]` 单行闭合；② 独占一行的开标记 + 后续内容行 + 独占一行的闭标记；
      * ③ 开标记紧贴首个公式行（`$$x = 1` … `y = 2$$`）；④ 闭标记紧贴最后一个公式行。
-     * 碰到其它 Markdown 块起始行（围栏/列表/标题/引用/另一个公式开标记 = pi-web 的块边界判定）
+     * 碰到其它 Markdown 块起始行（围栏/列表/标题/引用/另一个公式开标记）
      * 即认为没有配对，返回 null 让调用方按普通段落处理（避免把后续正文吞进公式）。
      */
     private fun readMathBlock(): MdBlock? {
@@ -395,7 +395,7 @@ private fun gluedMathContent(line: String, close: String): String? {
     return inner
 }
 
-/** 公式块边界行：围栏 / 列表项 / 标题 / 引用 / 另一个公式开标记（pi-web isDisplayMathBlockBoundary 同款） */
+/** 公式块边界行：围栏 / 列表项 / 标题 / 引用 / 另一个公式开标记 */
 private fun isMathBoundary(line: String): Boolean {
     if (fenceInfo(line) != null || listMarker(line) != null) return true
     if (atxHeading(line) != null || quoteContent(line) != null) return true
@@ -640,7 +640,7 @@ private fun appendInline(src: String, flags: MdSpanFlags, out: MutableList<MdSpa
             c == '\\' && i + 1 < src.length && src[i + 1] in ESCAPABLE -> {
                 appendChar(src[i + 1]); i += 2
             }
-            // 换行：行尾两空格或反斜杠 = 硬换行，否则软换行折叠为空格（HTML 语义，pi-web 同）
+            // 换行：行尾两空格或反斜杠 = 硬换行，否则软换行折叠为空格（HTML 语义）
             c == '\n' -> {
                 var hard = buffer.length >= 2 && buffer.endsWith("  ")
                 while (buffer.isNotEmpty() && buffer.last() == ' ') buffer.deleteAt(buffer.length - 1)
@@ -966,12 +966,12 @@ private fun decodeEntity(src: String, index: Int): Pair<Char, Int>? {
 // ──────────────── Markdown → 纯文本（复制消息卡「纯文本」态） ────────────────
 
 /**
- * Markdown → 适合直接粘贴的纯文本。参照 Operit `MarkdownPlainTextRenderer`：
+ * Markdown → 适合直接粘贴的纯文本：
  * **复用同一份 AST**（parseMarkdown / parseMdInline），不另写解析——保证「复制出来的内容」
  * 与屏幕上渲染的内容共享同一套块/行内边界判断。
  *
- * 规则（逐条对齐 Operit）：标题去 `#`；无序列表前缀「• 」、有序列表保留「N. 」、
- * 任务项「[x]/[ ] 」；代码块取源码（有语言标注时按 Operit 加 `----lang-----` 头）；
+ * 规则：标题去 `#`；无序列表前缀「• 」、有序列表保留「N. 」、
+ * 任务项「[x]/[ ] 」；代码块取源码（有语言标注时加 `----lang-----` 头）；
  * 表格行 `\n` 分隔、单元格 `\t` 分隔；链接「文字 (地址)」、图片取 alt；
  * 分割线丢弃。相邻列表项单换行、其余块间空行，最后折叠多余空行并 trim
  * （模型输出里残留的全角空格行会被折叠，避免多出空行）。
@@ -1009,7 +1009,7 @@ private fun plainBlock(b: MdBlock): String = when (b) {
     is MdBlock.Table -> (listOf(b.head) + b.rows).joinToString("\n") { row ->
         row.joinToString("\t") { plainInline(it) }
     }
-    // 公式取 LaTeX 源码（Operit MarkdownPlainTextRenderer 口径：分隔符剥掉，只留公式本身）
+    // 公式取 LaTeX 源码（分隔符剥掉，只留公式本身）
     is MdBlock.MathBlock -> b.latex
     MdBlock.Hr -> ""
 }

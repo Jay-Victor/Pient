@@ -25,16 +25,16 @@ import com.pient.app.data.CodeLanguages
 import com.pient.app.data.FileNode
 
 /**
- * Markdown 源码编辑器（2026-09-11 新增）：正文编辑区 + 底部格式工具栏 + 搜索卡。
+ * Markdown 源码编辑器：正文编辑区 + 底部格式工具栏 + 搜索卡。
  *
  * 结构 = `Box { Column { 编辑区(weight 1f) + MarkdownEditorToolbar } + 搜索浮层 }`：
  * 工具栏只在源码模式出现（渲染模式走 MarkdownText），随系统键盘一起上移（IME 避让由工具栏承担）；
  * 搜索卡贴在标签栏下方（整宽贴顶），点卡片外关闭。
  *
- * 编辑语义参照 `Refences/Mdcito-1.2.0`（`ui/editor/EditorViewModel.kt`）：
+ * 编辑语义：
  * - 格式动作：行内包裹（有选区包裹选区、无选区插入占位文字并选中）/ 行前缀（同类前缀再点即取消、
  *   异类前缀替换）/ 光标插入（分割线、代码块、链接、图片、表格）
- * - 撤销栈：快照式（Mdcito pushUndo 同思路），但**粒度按编辑动作而非时间**——
+ * - 撤销栈：快照式，但**粒度按编辑动作而非时间**——
  *   连续输入（同一处逐字接续的整段）合并为一步、每次删除各算一步、剪切/粘贴/格式动作/搜索替换各算一步、
  *   光标移动只作边界不入栈；**每步快照带光标位置，撤销与重做都整步恢复（重做后光标回到原位）**；
  *   新改动清空重做栈，栈深 100（详见 [mdDiff] / [MdSnapshot] 与 [MarkdownSourceEditor] 的 onTyping）
@@ -43,7 +43,7 @@ import com.pient.app.data.FileNode
  * 已知边界：撤销栈、搜索卡状态为「本标签会话态」（切标签或切渲染模式即重置；编辑缓冲在 ChatState 里不丢）。
  */
 
-/** 占位文字（取 Mdcito strings.xml：文本 / 链接文本 / 代码） */
+/** 占位文字（文本 / 链接文本 / 代码） */
 private val MdPlaceholderText: String get() = L.files.placeholderText
 private val MdPlaceholderLinkText: String get() = L.files.placeholderLinkText
 private val MdPlaceholderCode: String get() = L.files.placeholderCode
@@ -214,7 +214,7 @@ internal fun MarkdownSourceEditor(chatState: ChatState, node: FileNode, text: St
                     val all = matchedLines.flatMap { it.matchIndices }.toSet()
                     selectedMatches = if (all.isNotEmpty() && selectedMatches.containsAll(all)) emptySet() else all
                 },
-                // 位置：文件预览页标签栏正下方、整宽贴顶（Mdcito EditorSearchModal 顶部落下同款）
+                // 位置：文件预览页标签栏正下方、整宽贴顶
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth(),
@@ -223,7 +223,7 @@ internal fun MarkdownSourceEditor(chatState: ChatState, node: FileNode, text: St
     }
 }
 
-// ───────────────────────────── 格式插入（Mdcito EditorViewModel 同款语义） ─────────────────────────────
+// ───────────────────────────── 格式插入 ─────────────────────────────
 
 internal fun applyMdFormat(value: TextFieldValue, format: MdFormat): TextFieldValue = when (format) {
     is MdFormat.Heading -> mdLinePrefix(value, "#".repeat(format.level) + " ")
@@ -243,7 +243,7 @@ internal fun applyMdFormat(value: TextFieldValue, format: MdFormat): TextFieldVa
     MdFormat.Table -> mdTable(value)
 }
 
-/** 行内包裹：有选区 → 包裹选区、光标落在包裹之后；无选区 → 插入占位文字并选中（Mdcito insertFormatting） */
+/** 行内包裹：有选区 → 包裹选区、光标落在包裹之后；无选区 → 插入占位文字并选中 */
 private fun mdInlineFormat(value: TextFieldValue, prefix: String, suffix: String, placeholder: String): TextFieldValue {
     val text = value.text
     val start = value.selection.start.coerceIn(0, text.length)
@@ -262,7 +262,7 @@ private fun mdInlineFormat(value: TextFieldValue, prefix: String, suffix: String
     }
 }
 
-/** 前缀识别（Mdcito insertLinePrefix 同款判定顺序：任务 → 有序 → 无序 → 标题 → 引用） */
+/** 前缀识别（判定顺序：任务 → 有序 → 无序 → 标题 → 引用） */
 private val MdTaskPrefix = Regex("""^-\s\[[ x]\]\s""")
 private val MdOrderedPrefix = Regex("""^\d+\.\s""")
 private val MdListPrefix = Regex("""^[-*+]\s""")
@@ -271,7 +271,7 @@ private val MdQuotePrefix = Regex("""^>\s""")
 
 /**
  * 行前缀（标题 / 列表 / 引用）：当前行已有同类前缀 → 再点即取消；已有异类前缀 → 替换；
- * 无前缀 → 在行首插入（Mdcito insertLinePrefix）。
+ * 无前缀 → 在行首插入。
  */
 private fun mdLinePrefix(value: TextFieldValue, prefix: String): TextFieldValue {
     val text = value.text
@@ -307,7 +307,7 @@ private fun mdLinePrefix(value: TextFieldValue, prefix: String): TextFieldValue 
     return TextFieldValue(newText, TextRange(newCursor.coerceIn(0, newText.length)))
 }
 
-/** 光标插入（分割线等）：Mdcito insertAtCursor 同款换行守卫，避免与相邻行粘连 */
+/** 光标插入（分割线等）：换行守卫，避免与相邻行粘连 */
 private fun mdInsertAtCursor(value: TextFieldValue, insert: String): TextFieldValue {
     val text = value.text
     val start = value.selection.start.coerceIn(0, text.length)
@@ -319,7 +319,7 @@ private fun mdInsertAtCursor(value: TextFieldValue, insert: String): TextFieldVa
     return TextFieldValue(newText, TextRange(start + piece.length))
 }
 
-/** 代码块（Mdcito insertCodeBlock 同款：有选区围栏包裹；无选区插占位并选中「代码」二字） */
+/** 代码块（有选区围栏包裹；无选区插占位并选中「代码」二字） */
 private fun mdCodeBlock(value: TextFieldValue): TextFieldValue {
     val text = value.text
     val start = value.selection.start.coerceIn(0, text.length)
@@ -347,7 +347,7 @@ private fun mdCodeBlock(value: TextFieldValue): TextFieldValue {
     }
 }
 
-/** 链接（Mdcito insertLink：有选区 → [选区](默认地址) 并选中地址；无选区 → [链接文本](默认地址)） */
+/** 链接（有选区 → [选区](默认地址) 并选中地址；无选区 → [链接文本](默认地址)） */
 private fun mdLink(value: TextFieldValue): TextFieldValue {
     val text = value.text
     val start = value.selection.start.coerceIn(0, text.length)
@@ -381,7 +381,7 @@ private fun mdImage(value: TextFieldValue): TextFieldValue {
     )
 }
 
-/** 表格：3 列 × 1 数据行（Mdcito insertTable 同构，列名/内容取占位文字） */
+/** 表格：3 列 × 1 数据行（列名/内容取占位文字） */
 private fun mdTable(value: TextFieldValue): TextFieldValue {
     val text = value.text
     val start = value.selection.start.coerceIn(0, text.length)

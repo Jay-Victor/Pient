@@ -92,7 +92,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 /**
- * GFM 渲染器（文件预览 / 对话 / 弹窗共用）—— 规格逐项对齐 pi-web：
+ * GFM 渲染器（文件预览 / 对话 / 弹窗共用）：
  * - 基础排版 = `.markdown-body`（font-size 14px、line-height 1.7、p margin-bottom 12px、
  *   h1~h6 margin 10px 0 5px + weight 600 + line-height 1.35、ul/ol padding-left 22px / margin 5px 0 8px、
  *   li margin 3px 0、marker 色 mix(accent 72%, text-muted) + weight 600、strong mix(text 88%, accent) + 700、
@@ -102,10 +102,10 @@ import kotlinx.coroutines.withContext
  * - 文件预览增量 = `.markdown-file-preview`（h1 1.8em / h2 1.4em / h3 1.15em，h4~h6 浏览器默认 1em/0.83em/0.67em，
  *   容器留白 24px 32px 见 FileContentView）
  * - 代码块 = `.markdown-code-block`（外框 border + radius 7px、头部 padding 5px 10px + bg panel + 11px 语言标、
- *   正文 padding 11px 13px + 12.5px/1.62 + 行号 text-dim + 复制键）→ 高亮走 Operit 同款 VS Code 调色板
- * - frontmatter = pi-web FrontmatterCard（标题 / 标签胶囊 / 键值行）
+ *   正文 padding 11px 13px + 12.5px/1.62 + 行号 text-dim + 复制键）→ 高亮走 VS Code 调色板
+ * - frontmatter（标题 / 标签胶囊 / 键值行）
  *
- * 与 pi-web 的已知差距（本层不做）：Mermaid、内联 HTML 块、表格横向滚动（改为列宽自适应换行）、
+ * 已知差距（本层不做）：Mermaid、内联 HTML 块、表格横向滚动（改为列宽自适应换行）、
  * 行内代码的背景圆角与内边距（Compose 的 SpanStyle 不支持逐片段 padding/圆角）、远端图片（无图片加载库）。
  * 数学公式走 jlatexmath 原生渲染（`ui/components/Latex.kt`），不引入 KaTeX/WebView —— 命令覆盖度比 KaTeX
  * 略窄（缺 `\begin{align}` 之类），渲染不出来的公式退化为等宽源码显示。
@@ -169,7 +169,7 @@ private fun rememberMdStyles(filePreview: Boolean, reasoning: Boolean = false): 
     val isDark = LocalPientIsDark.current
     val base = MaterialTheme.typography.bodyMedium
     val prose = when {
-        // 思考/推理正文（Hermes `text-xs leading-snug text-muted-foreground/85`）：
+        // 思考/推理正文：
         // 12px + 1.375 行高——比回答正文（13px/1.5）更小更紧凑，读起来是「过程」不是「回答」
         reasoning -> base.copy(fontSize = base.fontSize * (12f / 14f), lineHeight = 1.375.em)
         // `.markdown-body`：14px / line-height 1.7（字号随全局字体设置缩放）
@@ -209,7 +209,7 @@ fun MarkdownText(
     filePreview: Boolean = false,
     /** 本地图片解析（相对路径 → 文件树节点）；null 时图片只显示 alt 文本 */
     imageResolver: ((String) -> FileNode?)? = null,
-    /** 思考/推理正文口径（Hermes：12px、行高 1.375、muted 85%）；思考折叠块专用 */
+    /** 思考/推理正文口径（12px、行高 1.375、muted 85%）；思考折叠块专用 */
     reasoning: Boolean = false,
 ) {
     val s = rememberMdStyles(filePreview, reasoning)
@@ -288,7 +288,7 @@ private fun InlineText(
     modifier: Modifier = Modifier,
 ) {
     if (spans.isEmpty()) return
-    // 图片是块级元素（pi-web `.markdown-body img { display: block }`）→ 逐段拆成「文本行 + 图片行」
+    // 图片是块级元素 → 逐段拆成「文本行 + 图片行」
     var buffer = ArrayList<MdSpan>()
     val groups = ArrayList<Pair<Boolean, List<MdSpan>>>()   // true = 图片组
     spans.forEach { span ->
@@ -352,7 +352,7 @@ private class MdAnnotated(
     val placeholders: List<AnnotatedString.Range<Placeholder>>,
 )
 
-/** 公式字号 = 所在文本字号 ×1.05（pi-web `.markdown-body .katex { font-size: 1.05em }`） */
+/** 公式字号 = 所在文本字号 ×1.05 */
 private fun mathTextSizePx(style: TextStyle, s: MdStyles, density: Density): Float {
     val size = if (style.fontSize.isSp) style.fontSize else s.base.fontSize
     return with(density) { size.toPx() } * 1.05f
@@ -360,9 +360,9 @@ private fun mathTextSizePx(style: TextStyle, s: MdStyles, density: Density): Flo
 
 /**
  * 行内片段 → AnnotatedString（数学公式以「内联内容」形式嵌入文本流，随文字一起换行，
- * 垂直方向按行内文字中心对齐 —— Operit `LatexDrawableSpan` 同口径：公式位图不贴基线，
+ * 垂直方向按行内文字中心对齐：公式位图不贴基线，
  * 否则分式/积分/下标会被整体顶高）。
- * 渲染不出来的公式退化为等宽源码（Operit 同款兜底），不影响其它行内样式。
+ * 渲染不出来的公式退化为等宽源码兜底，不影响其它行内样式。
  */
 private fun buildMdAnnotated(
     spans: List<MdSpan>,
@@ -449,8 +449,8 @@ private fun LatexInline(image: LatexImage) {
 }
 
 /**
- * 块级公式（`$$…$$` / `\[…\]`）：居中显示、超宽横向滚动（Operit BLOCK_LATEX 口径），
- * 字号 = 正文 ×1.05、上下留白见 [MdStyles.gaps]（pi-web `.katex-display { margin: .6em 0 }`）。
+ * 块级公式（`$$…$$` / `\[…\]`）：居中显示、超宽横向滚动，
+ * 字号 = 正文 ×1.05、上下留白见 [MdStyles.gaps]。
  */
 @Composable
 private fun LatexBlock(latex: String, s: MdStyles, modifier: Modifier = Modifier) {
@@ -861,7 +861,7 @@ private fun TableRow(
 /** 单元格左右内边距（列宽分配时要先从可用宽度里扣除） */
 private val TableCellHorizontalPadding = 10.dp
 
-/** 单元格文字样式（表头/正文两态）：水平居中为用户口径，表头行与左右两列同样居中 */
+/** 单元格文字样式（表头/正文两态）：水平居中，表头行与左右两列同样居中 */
 private fun tableCellStyle(s: MdStyles, header: Boolean): TextStyle = s.base.copy(
     fontSize = 13.sp,
     lineHeight = 1.55.em,
@@ -947,7 +947,7 @@ private fun isCjk(cp: Int): Boolean =
         cp in 0xFF00..0xFFEF || cp in 0x20000..0x2FA1F
 
 /**
- * 列宽分配（CSS auto table layout 的简化版；pi-web 那边由浏览器表格布局完成）：
+ * 列宽分配（CSS auto table layout 的简化版）：
  * ① Σ最大内容宽度 ≤ 可用文字区 → 每列都拿到自己的最大内容宽度，余量按最大内容宽度比例摊开铺满；
  * ② Σ最小内容宽度 > 可用文字区 → 表里存在超长不可断单元（长 URL / 长标识符），物理上放不下，
  *    改按「最大内容宽度」做 progressive filling：需求小的列先按需满足，剩下的列均分余量；

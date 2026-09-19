@@ -18,7 +18,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 /**
- * 项目真实文件系统读写（2026-09-02 文件树真实功能）：
+ * 项目真实文件系统读写：
  * - 本地项目（uri=null）：path 指向的真实目录（File API）
  * - SAF 项目（uri!=null）：tree URI 经 DocumentFile 读写（依赖持久化授权）
  * - 目录不存在返回 null，UI 层回退演示数据（内置 mock 项目）
@@ -27,14 +27,13 @@ object ProjectFiles {
 
     private const val MAX_DEPTH = 12        // 递归深度上限（防超深目录拖死 UI）
     private const val MAX_CHILDREN = 1000   // 单目录子项上限
-    private const val MAX_NODES = 20_000    // 整棵树节点预算（大目录防护，2026-09-12）
+    private const val MAX_NODES = 20_000    // 整棵树节点预算（大目录防护）
 
     /**
      * 扫描预算：节点总量上限（单次扫描新建，无跨次状态）。
      * 超限后 `take()` 返回 false，调用方停止下探。
      *
-     * 注：**不用时间预算**——2026-09-12 实测模拟器 FUSE 下 360 个目录就要 4s，
-     * 按墙钟截断会让「正常的大项目文件夹」随机丢文件；扫描已全在 IO 线程，
+     * 注：**不用时间预算**——按墙钟截断会让「正常的大项目文件夹」随机丢文件；
      * 慢只会让树晚出现，不会卡界面，故只按节点总量兜底。
      */
     private class ScanBudget {
@@ -54,7 +53,7 @@ object ProjectFiles {
     /**
      * 读取项目根树；目录不可读返回 null。
      *
-     * **大目录防护（2026-09-12）**：树要么小要么大，但**扫描本身必须廉价**——
+     * **大目录防护**：树要么小要么大，但**扫描本身必须廉价**——
      * ① SAF 分支不再用 `DocumentFile` 的逐项元数据 API（`listFiles()` 只返回 document id，
      * 之后的 `isDirectory`/`name`/`length`/`lastModified` 每个属性都是一次 ContentProvider
      * 查询：一个文件 4 次 IPC。用户在系统文件管理器里往项目文件夹丢了几千个文件后，
@@ -128,7 +127,7 @@ object ProjectFiles {
     private fun childRel(parentRel: String, name: String): String =
         if (parentRel.isEmpty()) name else "$parentRel/$name"
 
-    // ── SAF：每个目录一次 cursor 查询（大目录防护的核心，2026-09-12）──
+    // ── SAF：每个目录一次 cursor 查询（大目录防护的核心）──
 
     /** SAF 子项条目（一次 query 取回的全部元数据） */
     internal class SafEntry(
@@ -152,7 +151,7 @@ object ProjectFiles {
      *
      * `DocumentFile.listFiles()` 只 select 了 document id，其后每个 `child.isDirectory` /
      * `child.name` / `child.length()` / `child.lastModified()` 都会各自发起一次
-     * ContentResolver 查询（androidx.documentfile 1.0.1 字节码实测）——即每个文件 4 次 IPC。
+     * ContentResolver 查询——即每个文件 4 次 IPC。
      * 这里直接把需要的列一次查出（MIME 判目录、size/时间直接读游标）。
      */
     internal fun listSafChildren(context: Context, treeUri: Uri, parentDocId: String): List<SafEntry> {
@@ -281,8 +280,8 @@ object ProjectFiles {
     }
 
     /**
-     * HTML 预览基准 URL：本地文件用所在目录（`file://<parent>/`，让相对引用的 css/js/图片能加载，
-     * Operit HTML 分支同口径）；SAF 节点无目录语义，回退到文档预览用的占位基准地址。
+     * HTML 预览基准 URL：本地文件用所在目录（`file://<parent>/`，让相对引用的 css/js/图片能加载）；
+     * SAF 节点无目录语义，回退到文档预览用的占位基准地址。
      */
     fun htmlBaseUrl(node: FileNode): String {
         val src = node.source ?: return FALLBACK_BASE_URL
@@ -339,7 +338,7 @@ object ProjectFiles {
      *
      * SAF 分支**不能**用 `DocumentFile.fromSingleUri(...).renameTo()` ——
      * androidx.documentfile 1.0.0/1.0.1 的 `SingleDocumentFile.renameTo` 是未实现的占位
-     * （字节码实测直接 `throw UnsupportedOperationException`，"No implementation for renameTo()"），
+     * （直接 `throw UnsupportedOperationException`，"No implementation for renameTo()"），
      * 异常被本函数 catch 吞掉后表现为「SAF 项目里重命名永远失败」；只有 `TreeDocumentFile`
      * （fromTreeUri 那条路）才有真实实现。这里直接调框架 API（DocumentFile 的实现也是转调它）：
      * `DocumentsContract.renameDocument` 成功返回新文档 URI、失败抛异常（FileNotFound/Security/…）。
@@ -373,7 +372,7 @@ object ProjectFiles {
      * 节点位置的可读文本（FileTreePanel 详细信息弹窗用）。
      * **不要把 node.source 直接显示给用户**：SAF 项目的 source 是 percent-encoding 的 content URI，
      * 弹窗里「位置」末尾那段「文件名」会显示成 `primary%3AAlarms%2FAgentWork%2Fa.txt`，
-     * 与文件树里的真实名字对不上（用户实测反馈）。
+     * 与文件树里的真实名字对不上。
      */
     fun displayLocation(node: FileNode): String = readablePath(node.source)
 
@@ -421,13 +420,13 @@ object ProjectFiles {
     }
 
     /**
-     * 删除项目整个根文件夹及其中所有文件（2026-09-03「删除项目」真实化）。
+     * 删除项目整个根文件夹及其中所有文件。
      * 本地项目：File.deleteRecursively；目录已不存在视为成功（无物可删）。
      * SAF 项目：DocumentFile.delete——TreeDocumentFile 底层 DocumentsContract.deleteDocument
      * 对树文档递归删除整棵子树。
      */
     /**
-     * 重置工作区（2026-09-14 对齐 Operit `createAndResetWorkspaceDirectory`）：**清空项目根目录内容并保留根目录本身**。
+     * 重置工作区：**清空项目根目录内容并保留根目录本身**。
      *
      * 本地项目 = 删目录再重建；SAF 项目 = 只删根下的子节点（删掉 tree 根会连持久化授权一起丢）。
      * 破坏性操作，调用方必须先给红字确认弹窗。调用方须在 IO 线程执行。
@@ -436,14 +435,14 @@ object ProjectFiles {
         return try {
             if (project.uri != null) {
                 // SAF 项目：只删根下的子节点（删掉 tree 根会连持久化授权一起丢）。这里不补写项目标记 ——
-                // SAF 项目 2026-09-14 起已不再创建，本分支只服务历史记录。
+                // SAF 项目已不再创建，本分支只服务历史记录。
                 val tree = DocumentFile.fromTreeUri(context, Uri.parse(project.uri)) ?: return false
                 tree.listFiles().forEach { runCatching { it.delete() } }
                 true
             } else {
                 val root = File(project.path)
-                // 清空前先记下项目标记（类型 / 创建时间）：重置完按参考实现的 `createProjectConfigIfNeeded`
-                // 语义把它写回 —— 清空的是**内容**，不是「这是个 Pient 项目」这件事（2026-09-16）。
+                // 清空前先记下项目标记（类型 / 创建时间）：重置完把它写回 ——
+                // 清空的是**内容**，不是「这是个 Pient 项目」这件事。
                 val old = readProjectConfig(root)
                 val ok = when {
                     !root.exists() -> root.mkdirs()
@@ -485,11 +484,10 @@ object ProjectFiles {
     }
 
     /**
-     * 项目级统计（详细信息用；2026-09-16）：返回 `总字节数 to 最近修改时间`。
+     * 项目级统计（详细信息用）：返回 `总字节数 to 最近修改时间`。
      *
-     * **必须走这里，不要在 UI 组合期用 DocumentFile 递归**（旧 `computeProjectInfo` 就是那样：
-     * SAF 分支每文件 2~3 次 IPC → 几千文件的目录一打开详情弹窗就卡死/ANR，与 2026-09-12 那次
-     * 4080 文件事故同一成因）。这里复用 [listSafChildren] 的「每目录一次 cursor 查询」+
+     * **必须走这里，不要在 UI 组合期用 DocumentFile 递归**——SAF 分支每文件 2~3 次 IPC →
+     * 几千文件的目录一打开详情弹窗就卡死/ANR。这里复用 [listSafChildren] 的「每目录一次 cursor 查询」+
      * [MAX_NODES] 预算；**调用方须在 IO 线程执行**。
      */
     fun projectStat(context: Context, project: Project): Pair<Long, Long> {
@@ -532,11 +530,11 @@ object ProjectFiles {
     }
 
     /**
-     * 节点统计（详细信息，2026-09-02）：返回 大小 to 最近修改时间；目录递归汇总。
+     * 节点统计（详细信息）：返回 大小 to 最近修改时间；目录递归汇总。
      *
      * SAF 目录走 [listSafChildren]（每目录一次 query + 直接读游标里的 size/时间）；
-     * 旧实现用 `DocumentFile.listFiles()` + 逐项 `length()`/`lastModified()`，一个文件
-     * 2~3 次 IPC，大目录（几千文件）会让弹窗卡死（2026-09-12）。调用方须在 IO 线程执行。
+     * 若用 `DocumentFile.listFiles()` + 逐项 `length()`/`lastModified()`，一个文件 2~3 次 IPC，
+     * 大目录（几千文件）会让弹窗卡死。调用方须在 IO 线程执行。
      */
     fun nodeStat(context: Context, project: Project?, node: FileNode): Pair<Long, Long> {
         val src = node.source ?: return 0L to 0L
@@ -589,7 +587,7 @@ object ProjectFiles {
         }
     }
 
-    // ── 导入 / 导出（2026-09-02：SAF 多选文件 / 目录树，递归流拷贝） ──
+    // ── 导入 / 导出（SAF 多选文件 / 目录树，递归流拷贝） ──
 
     /** 导入多个文件到项目根（返回成功数）；文件类型不限 */
     fun importFiles(context: Context, project: Project, uris: List<Uri>): Int {
@@ -609,7 +607,7 @@ object ProjectFiles {
         return copyRecursive(context, src, dstRoot)
     }
 
-    /** 导出整个项目到用户选择的目录（2026-09-02 改为打包 zip：项目文件夹整体压缩导出） */
+    /** 导出整个项目到用户选择的目录（打包 zip：项目文件夹整体压缩导出） */
     fun exportProject(context: Context, project: Project, targetTreeUri: Uri): Boolean {
         val src = projectRoot(context, project) ?: return false
         val dst = DocumentFile.fromTreeUri(context, targetTreeUri) ?: return false
@@ -630,7 +628,7 @@ object ProjectFiles {
     }
 
     /**
-     * 批量导出（2026-09-02）：选中 1 个文件 → 直接拷贝；选中多个文件/文件夹 → 打包 zip。
+     * 批量导出：选中 1 个文件 → 直接拷贝；选中多个文件/文件夹 → 打包 zip。
      * 目标 = SAF 目录（tree URI）。
      */
     fun exportSelected(
@@ -742,7 +740,7 @@ object ProjectFiles {
             try {
                 if (dstDir.uri.scheme == "file") {
                     // 本地目标：File 直写——RawDocumentFile.createFile 会按 MIME 推断扩展名
-                    // 并追加到文件名（text/plain→.txt、octet-stream→.bin，2026-09-02 实测），
+                    // 并追加到文件名（text/plain→.txt、octet-stream→.bin），
                     // 必须绕开它才能原样保留文件名。
                     val target = File(dstDir.uri.path ?: return false, name)
                     ins.use { i -> target.outputStream().use { o -> i.copyTo(o) } }

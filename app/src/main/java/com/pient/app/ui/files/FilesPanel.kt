@@ -63,18 +63,18 @@ import com.pient.app.ui.theme.PientPanel
 import com.pient.app.ui.theme.MonoFont
 
 /**
- * 文件页面（P3，设计计划 3.5）：
- * 标签栏（36dp 高；标签宽度随名称自适应、上限 180dp 超长省略，pi-web TabBar 规格 maxWidth:180；
- * 2026-09-03 改：原 weight fill=true 恒撑满上限 = 视觉固定宽，改 fill=false 自适应）；markdown 激活时最右出现
+ * 文件页面：
+ * 标签栏（36dp 高；标签宽度随名称自适应、上限 180dp 超长省略，maxWidth:180；
+ * weight 用 fill=false 自适应——fill=true 会恒撑满上限 = 视觉固定宽）；markdown 激活时最右出现
  * 编辑/渲染切换键）+ 文件内容预览区 + 右下 FAB 弹出右侧文件树。
- * 安全边界：可浏览位置走允许根白名单（isPathWithinRoots 单一实现，v1 接入）。
+ * 安全边界：可浏览位置走允许根白名单（isPathWithinRoots 单一实现）。
  */
 @Composable
 fun FilesPanel(chatState: ChatState) {
     val context = LocalContext.current
     var treeOpen by remember { mutableStateOf(false) }
 
-    // 预览区底部工具栏占位 → FAB 抬到工具栏之上（Mdcito 同款）：
+    // 预览区底部工具栏占位 → FAB 抬到工具栏之上：
     // markdown 源码模式 = 格式工具栏；代码文件 = 符号工具栏（可见性由 CodeSourceEditor 汇报）
     val activeTab = chatState.openTabs.getOrNull(chatState.activeTabIndex)
     val mdToolbarVisible = activeTab != null &&
@@ -119,7 +119,7 @@ fun FilesPanel(chatState: ChatState) {
         }
 
         // 右下 FAB → 右侧文件树
-        // 预览区底部有工具栏时（md 源码格式栏 / 代码符号栏）：FAB 抬到工具栏之上（Mdcito 同款）
+        // 预览区底部有工具栏时（md 源码格式栏 / 代码符号栏）：FAB 抬到工具栏之上
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -139,8 +139,8 @@ fun FilesPanel(chatState: ChatState) {
         // 右侧文件树浮层（同窗口）：遮罩淡入 + 面板从右滑入，两层独立动画同 tween(300ms)
         // 逐帧同步（聊天页侧栏同款拆层：原同盒 slide 时遮罩随盒从右推出，动画前半程
         // 左侧屏幕无遮罩）。★ scrim 必须全屏铺底——面板左侧圆角弧裁掉的三角区露出的
-        // 是 scrim 压暗后的底层内容；若 scrim 只铺到面板左缘（旧 Row 并排结构），
-        // 圆角旁会有未压暗的「亮缝」（2026-09-02 用户反馈）。
+        // 是 scrim 压暗后的底层内容；若 scrim 只铺到面板左缘（Row 并排结构），
+        // 圆角旁会有未压暗的「亮缝」。
         AnimatedVisibility(
             visible = treeOpen,
             enter = fadeIn(tween(durationMillis = 300)),
@@ -175,7 +175,7 @@ fun FilesPanel(chatState: ChatState) {
         }
 
         // 关闭未保存文件的确认弹窗（页根浮层：scrim 覆盖标签栏 + 预览区；
-        // 文案/按钮结构对齐 Operit：[取消][不保存] 保存）
+        // 文案/按钮结构：[取消][不保存] 保存）
         val closingIndex = chatState.closingTabIndex
         val closingNode = closingIndex?.let { chatState.openTabs.getOrNull(it) }
         if (closingNode != null && closingIndex != null) {
@@ -265,10 +265,10 @@ private fun FileTabBar(chatState: ChatState, onSave: (FileNode) -> Unit) {
                         overflow = TextOverflow.Ellipsis,
                         // weight(1f, fill=false)：名称取内容宽（标签随名称长短自适应），
                         // 超长时被 180dp 上限钳制收缩省略，行尾 × 关闭键恒可见
-                        // （2026-09-03：原 weight 默认 fill=true 会把标签恒撑满 180dp = 视觉上固定宽度）
+                        // （weight 默认 fill=true 会把标签恒撑满 180dp = 视觉上固定宽度）
                         modifier = Modifier.weight(1f, fill = false).padding(start = 4.dp),
                     )
-                    // 行尾键：未保存时由 × 变实心圆点（Operit VSCodeTab 同款「一键两位图」），
+                    // 行尾键：未保存时由 × 变实心圆点（「一键两位图」），
                     // 点击仍是关闭——未保存会先弹确认（requestCloseTab）
                     val unsaved = chatState.isUnsaved(node)
                     val tailTint = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
@@ -296,7 +296,7 @@ private fun FileTabBar(chatState: ChatState, onSave: (FileNode) -> Unit) {
                 }
             }
         }
-        // 未保存改动的当前文件 → 保存键（Operit 工具栏同款：仅存在未保存改动时出现）
+        // 未保存改动的当前文件 → 保存键（仅存在未保存改动时出现）
         if (active != null && chatState.isUnsaved(active)) {
             Icon(
                 Icons.Outlined.Save, L.common.save,
@@ -336,7 +336,7 @@ fun fileIcon(ext: String): ImageVector = when (ext) {
 }
 
 /**
- * 目录 / 文件统一图标（**同一语义一份实现**，2026-09-17）：目录 = Folder，文件走 [fileIcon]。
+ * 目录 / 文件统一图标（**同一语义一份实现**）：目录 = Folder，文件走 [fileIcon]。
  * 调用点：文件树行（展开态另有 FolderOpen）、@ 引用候选行、输入栏 @ chip。
  */
 fun nodeIcon(isDir: Boolean, ext: String): ImageVector =

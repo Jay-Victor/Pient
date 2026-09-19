@@ -10,7 +10,7 @@ import java.util.zip.ZipInputStream
 /**
  * pi 技能（Skills）—— 与 pi 的**文件约定**同源，不引入任何自有格式。
  *
- * pi 侧规则取自 `Refences/pi-0.85.1/packages/coding-agent/docs/skills.md` 与 `src/core/skills.ts`：
+ * pi 侧规则：
  *
  * - **加载位置**：全局 `~/.pi/agent/skills/`、`~/.agents/skills/`；项目（仅在项目被信任后）
  *   `<cwd>/.pi/skills/`、`<cwd>/.agents/skills/`，以及包内 `skills/`、settings 里的 `skills` 数组、`--skill <path>`；
@@ -90,11 +90,11 @@ object PiSkills {
      * 启用/停用：把**整个技能条目**在 `<root>/<entry>` 与 `<root>/.disabled/<entry>` 之间挪动。
      *
      * 条目 = 目录型技能的那个目录（`<name>/`，不是里面的 SKILL.md —— 只挪 SKILL.md 会在原地
-     * 留一个空目录，实测踩过）；单文件型技能就是那个 `.md`。文件一个不删。
+     * 留一个空目录）；单文件型技能就是那个 `.md`。文件一个不删。
      */
     fun setEnabled(item: Local, enabled: Boolean): Boolean {
         // 注意：relPath 是相对**外层 skills 根**的，停用态的技能在它前面还带着 `.disabled/`
-        // —— 早先这里把两者又拼了一次，日志里出现过 `.disabled/.disabled/xxx`（实测踩过）。
+        // —— 别把两者再拼一次，否则会得到 `.disabled/.disabled/xxx` 这种路径。
         val relRaw = entryRelOf(item)                        // 如 `my-skill` 或 `.disabled/my-skill`
         val relPlain = relRaw.removePrefix("$DISABLED_DIR/") // 如 `my-skill`
         val from = File(item.root, if (enabled) relRaw else relPlain)
@@ -107,7 +107,7 @@ object PiSkills {
             target.parentFile?.mkdirs()
             val moved = from.renameTo(target)
             if (!moved) {
-                // 目标是已存在的目录（历史遗留的空壳）时 rename 会失败 → 退化为「合并复制 + 删源」
+                // 目标是已存在的目录（遗留的空壳）时 rename 会失败 → 退化为「合并复制 + 删源」
                 if (from.isDirectory) from.copyRecursively(target, overwrite = true)
                 else from.copyTo(target, overwrite = true)
                 from.deleteRecursively()
@@ -158,8 +158,7 @@ object PiSkills {
     }
 
     /**
-     * **ZIP 导入**（2026-09-16 真实化，取代原型 mock：原来点选择只写死假文件名、导入只用
-     * 假描述写一个 SKILL.md，既不打开文件选择器也不解压）。
+     * **ZIP 导入**。
      *
      * 流程：SAF 选中的 .zip → 逐条读出 → 定位 SKILL.md（允许整体套一层目录）→
      * 校验 frontmatter（name/description，与 pi 同规则）→ 只写 SKILL.md 所在目录下的文件

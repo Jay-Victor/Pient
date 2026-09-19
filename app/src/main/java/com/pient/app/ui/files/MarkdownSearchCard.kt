@@ -58,27 +58,24 @@ import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
 
 /**
- * Markdown 源码模式的搜索卡（2026-09-11 新增）。
+ * Markdown 源码模式的搜索卡。
  *
- * 参照 `Refences/Mdcito-1.2.0`（`ui/editor/EditorSearchModal.kt` + `EditorViewModel` 搜索段）
- * 逐值对齐：搜索行（20dp 图标 / 36dp 输入框 / 8dp 圆角 / surfaceVariant 底 / 32dp 清除键 /
+ * 布局：搜索行（20dp 图标 / 36dp 输入框 / 8dp 圆角 / surfaceVariant 底 / 32dp 清除键 /
  * 28dp 关闭键）、筛选行（28dp FilterChip ×3 + 右侧匹配数）、替换行（36dp 输入框 + 32dp 按钮 ×2）、
  * 结果列表（≤240dp、行距 4dp、行号 28dp + 等宽正文 maxLines 2、命中字 0xFFFFF9C4 / 当前 0xFFFFD54F 色块）。
- * 文案取 Mdcito `strings.xml`：搜索… / 替换为… / 区分大小写 / 全词匹配 / 正则表达式 / 替换 / 全部 / N 个匹配 / 未找到匹配结果。
+ * 文案：搜索… / 替换为… / 区分大小写 / 全词匹配 / 正则表达式 / 替换 / 全部 / N 个匹配 / 未找到匹配结果。
  *
- * 相对 Mdcito 的差异（Pient 侧需求 + 移动端可读性）：
- * - 高亮块上的文字固定用深墨色：Mdcito 用 onSurface，暗色主题下浅字压黄底不可读（Pient 默认验收暗色）。
- * - 结果行右侧加勾选框：Mdcito 无选择态（只有"当前匹配"）；Pient 支持单选/多选后「替换」只改选中项；
- *   行状态视觉只有勾选一种（勾上才给行底着色），不再按"当前命中"给行底/行内文字换色（会被读成"已勾选"）。
- * - 「全部」= **全选**（把结果行全部勾上，再点一次取消全选），不是 Mdcito 的 `replace_all`「全部替换」；
- *   替换始终只由「替换」键触发，作用集合 = 勾选行（用户 2026-09-11 澄清）。
- * - 搜索行只保留输入框的清空键（Mdcito 另有 28dp 关闭键）；关闭走「点卡片外」或工具栏搜索键（2026-09-11 去重）。
- * - 搜索历史（History）未移植：本轮需求未涉及。
+ * - 高亮块上的文字固定用深墨色：浅字压黄底在暗色主题下不可读（Pient 默认验收暗色）。
+ * - 结果行右侧加勾选框：支持单选/多选后「替换」只改选中项；
+ *   行状态视觉只有勾选一种（勾上才给行底着色），不按"当前命中"给行底/行内文字换色（会被读成"已勾选"）。
+ * - 「全部」= **全选**（把结果行全部勾上，再点一次取消全选），不是「全部替换」；
+ *   替换始终只由「替换」键触发，作用集合 = 勾选行。
+ * - 搜索行只保留输入框的清空键；关闭走「点卡片外」或工具栏搜索键。
  */
 
-// ───────────────────────────── 匹配引擎（Mdcito buildSearchRegex / buildMatchedLines 同构） ─────────────────────────────
+// ───────────────────────────── 匹配引擎 ─────────────────────────────
 
-/** 搜索选项（Mdcito SearchState 的检索相关字段） */
+/** 搜索选项（检索相关字段） */
 internal data class MdSearchOptions(
     val query: String = "",
     val replacement: String = "",
@@ -96,7 +93,7 @@ internal data class MdMatchedLine(
 )
 
 /**
- * 检索正则（Mdcito `buildSearchRegex` 同款口径）：
+ * 检索正则：
  * 正则模式直接用查询串；否则转义后按全词包 `\b`；默认忽略大小写。查询串非法正则 → null（视作无匹配）。
  */
 internal fun mdSearchRegex(options: MdSearchOptions): Regex? {
@@ -114,7 +111,7 @@ internal fun mdSearchRegex(options: MdSearchOptions): Regex? {
 internal fun findMdMatches(text: String, options: MdSearchOptions): List<IntRange> =
     mdSearchRegex(options)?.findAll(text)?.map { it.range }?.toList() ?: emptyList()
 
-/** 命中按行归并（Mdcito `buildMatchedLines` 同款：跨行匹配取与本行的交集） */
+/** 命中按行归并（跨行匹配取与本行的交集） */
 internal fun buildMdMatchedLines(text: String, matches: List<IntRange>): List<MdMatchedLine> {
     if (matches.isEmpty()) return emptyList()
     val out = mutableListOf<MdMatchedLine>()
@@ -137,14 +134,14 @@ internal fun buildMdMatchedLines(text: String, matches: List<IntRange>): List<Md
     return out
 }
 
-/** 命中色块（Mdcito SearchResultCard / SearchHighlightText 同值） */
+/** 命中色块 */
 internal val MdMatchHighlight = Color(0xFFFFF9C4)
 internal val MdCurrentMatchHighlight = Color(0xFFFFD54F)
 
-/** 色块上的文字色（Mdcito 用 onSurface；Pient 固定深墨色，两支主题下都可读） */
+/** 色块上的文字色（固定深墨色，两支主题下都可读） */
 internal val MdMatchInk = Color(0xFF1F2328)
 
-/** 行内命中高亮（Mdcito `buildHighlightedLineContent` 同构） */
+/** 行内命中高亮 */
 internal fun buildMdHighlightedLine(
     line: String,
     ranges: List<IntRange>,
@@ -181,7 +178,7 @@ internal fun MarkdownSearchCard(
     modifier: Modifier = Modifier,
 ) {
     val focusRequester = remember { FocusRequester() }
-    // 打开即聚焦搜索框（Mdcito 由对话框接管焦点；移动端搜索卡同款）
+    // 打开即聚焦搜索框
     LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
 
     PientPanel(
@@ -367,7 +364,7 @@ internal fun MarkdownSearchCard(
                     ) {
                         items(matchedLines, key = { it.lineNumber }) { line ->
                             // 勾选态 = 任一命中序号被选中（列表里唯一的「行状态」视觉来源；
-                            // 当前命中不再给行底/行内文字换色——它只驱动正文跳转，见「替换」语义与正文高亮）
+                            // 当前命中不给行底/行内文字换色——它只驱动正文跳转，见「替换」语义与正文高亮）
                             val checked = line.matchIndices.any { it in selectedIndices }
                             MdSearchResultRow(
                                 line = line,
@@ -385,7 +382,7 @@ internal fun MarkdownSearchCard(
     }
 }
 
-/** 筛选键（Mdcito FilterChip 同值：28dp 高、12sp 标签、选中 primaryContainer 底 + primary 描边 + 粗体） */
+/** 筛选键（28dp 高、12sp 标签、选中 primaryContainer 底 + primary 描边 + 粗体） */
 @Composable
 private fun MdFilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
     FilterChip(
@@ -413,10 +410,10 @@ private fun MdFilterChip(label: String, selected: Boolean, onClick: () -> Unit) 
 }
 
 /**
- * 结果行（Mdcito SearchResultCard 同值：8dp 圆角、h10 v6 内边距、行号 28dp、等宽正文 16sp 行高）。
+ * 结果行（8dp 圆角、h10 v6 内边距、行号 28dp、等宽正文 16sp 行高）。
  *
  * 行状态只有一种视觉来源 = **勾选**（行底 primaryContainer 15%）；命中文字一律浅色块 [MdMatchHighlight]。
- * 不含「当前命中」换色：当前命中只驱动正文跳转与正文内深色块，列表里换色会被读成「已勾选」（2026-09-11 用户报）。
+ * 不含「当前命中」换色：当前命中只驱动正文跳转与正文内深色块，列表里换色会被读成「已勾选」。
  */
 @Composable
 private fun MdSearchResultRow(

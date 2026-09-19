@@ -15,7 +15,7 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
- * 日志导出（2026-09-17，「应用日志管理」的产物组装）。
+ * 日志导出（「应用日志管理」的产物组装）。
  *
  * 一个导出文件 = 四段（顺序即阅读顺序）：
  *   ① 头部（导出时间 / Pient 版本）
@@ -34,7 +34,7 @@ object LogExport {
 
     private const val TAG = "PientExport"
 
-    /** 导出范围（用户拍板三选，2026-09-17）：全部 / 仅警告以上 / 最近 30 分钟 —— 作用于**应用日志段** */
+    /** 导出范围：全部 / 仅警告以上 / 最近 30 分钟 —— 作用于**应用日志段** */
     enum class LogScope(val minutes: Long) {
         ALL(0L),
         WARN(0L),
@@ -135,7 +135,7 @@ object LogExport {
     /**
      * 环境报告：`key: value` 一行一条。
      *
-     * 这些字段就是历次真机排障真正要问的那几个问题（ABI 对不对、rootfs 缺不缺 node、
+     * 这些字段就是排障真正要问的那几个问题（ABI 对不对、rootfs 缺不缺 node、
      * 档位/通道是哪条、pi 起没起来、连的哪个模型），所以固定列出来 —— 别在别处再拼第二份。
      */
     fun envReport(context: Context): String {

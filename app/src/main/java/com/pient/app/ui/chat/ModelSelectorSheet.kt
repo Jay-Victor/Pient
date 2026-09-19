@@ -53,17 +53,17 @@ import com.pient.app.ui.components.ThinkingLevelSlider
 import com.pient.app.ui.theme.PientPanel
 
 /**
- * 模型选择器浮层（设计计划 3.4.1；2026-08-27 按 Operit 重构 + 三轮优化）：
- * ① 思考折叠栏（Operit ClassicThinkingSettingsItem 风格）：
+ * 模型选择器浮层：
+ * ① 思考折叠栏：
  *    折叠态 = 图标 + "思考" + 思考程度名称（最低/低/中/高/最高；关闭显示 off）+ 折叠箭头；
  *    点击展开 → "思考模式"开关行，开启后出现思考程度滑块
- *    （标题行：思考程度 + 档位名；滑道加粗并带五档指示点，最低/最高位于两端；2026-08-27 重设计）。
- * ② Operit 风格头部："模型: 当前模型"（粗体主色，ellipsis）
- * ③ 模型列表（Operit config-row 规格：13sp 行高 34dp 圆角 4dp；选中 = 主色 15%
+ *    （标题行：思考程度 + 档位名；滑道加粗并带五档指示点，最低/最高位于两端）。
+ * ② 头部："模型: 当前模型"（粗体主色，ellipsis）
+ * ③ 模型列表（13sp 行高 34dp 圆角 4dp；选中 = 主色 15%
  *    底 + 粗体主色字；**一次只展开一个服务商**；展开列表左缩进 12dp 且左右边距对称，
  *    无底色块；卡片定宽 268.8dp（336dp 的 4/5）、贴屏幕右侧（右距屏 6dp）；边距体系收紧
  *    （列 12dp / 行 8dp / 展开区 12dp / 列表块 12dp），内容仍居卡片中央）
- * ④ "管理模型配置"（跳转设置页模型配置，Operit manage-button 同语义）
+ * ④ "管理模型配置"（跳转设置页模型配置）
  * 选择即时生效；点外关闭（无"完成"按钮）。最大高 60% 屏。
  */
 @Composable
@@ -74,11 +74,11 @@ fun ModelSelectorSheet(
     modifier: Modifier = Modifier,
     bottomOffset: Dp = 8.dp, // 弹窗底部到屏幕底的距离（锚定到模型按键上缘）
 ) {
-    // 模型数据源（2026-09-09 起）= 已配置服务商的模型列表（AiConfigStore）
+    // 模型数据源 = 已配置服务商的模型列表（AiConfigStore）
     val providers = chatState.availableModels.groupBy { it.provider }
     val screenH = LocalConfiguration.current.screenHeightDp
     var thinkingExpanded by remember { mutableStateOf(false) }
-    // 单选展开：一次只展开一个服务商（用户决策 2026-08-27）；默认全部收起（2026-08-30）
+    // 单选展开：一次只展开一个服务商；默认全部收起
     var expandedProvider by remember { mutableStateOf<String?>(null) }
 
     PientPanel(
@@ -92,8 +92,8 @@ fun ModelSelectorSheet(
             .fillMaxWidth() // 高度 wrap，避免撑满父级
             .padding(12.dp),
     ) {
-        // ① 思考折叠栏（Operit ClassicThinkingSettingsItem 风格）
-        // 2026-09-17：思考参数由 **pi** 发出去，所以这里的开关/滑轨必须推到 pi 才算数。
+        // ① 思考折叠栏
+        // 思考参数由 **pi** 发出去，所以这里的开关/滑轨必须推到 pi 才算数。
         // 打开面板 = 把界面偏好推给 pi 并回读（pi 会按模型能力夹取）；通道没起时自动跳过。
         LaunchedEffect(Unit) { chatState.syncThinkingToPi() }
         val piLevels = chatState.piThinkingLevels
@@ -106,12 +106,12 @@ fun ModelSelectorSheet(
         val levels = piLevels ?: info?.levels
         val effortSupported = info?.effortSupported ?: true
         val piSupportsThinking = levels == null || levels.any { it != "off" }
-        // **模型不支持思考 → 整项不出现**（2026-09-17 用户拍板）：pi 只回 `["off"]` 时，折叠栏、
-        // 开关、滑轨、说明全都不画 —— 一个用不上的功能项比一条解释更干扰（用户原话：不用出现「思考」一项）。
+        // **模型不支持思考 → 整项不出现**：pi 只回 `["off"]` 时，折叠栏、
+        // 开关、滑轨、说明全都不画 —— 一个用不上的功能项比一条解释更干扰。
         // `piLevels == null`（通道没起 / 还没答）时按支持渲染，避免刚开机闪一下消失、或无谓地藏起来。
         // 用户的偏好（`thinkingEnabled` / `thinkingLevel`）照旧保留，切回支持思考的模型自动恢复。
         // 模型**关不掉思考**（pi 的档位表里没有 off，1354 个模型里 334 个）→ 开关置为常开 + 说明，
-        // 不能摆一个按下去无效的假开关（用户口径：假控件零容忍）。未知（通道没起）时按可关处理。
+        // 不能摆一个按下去无效的假开关（假控件零容忍）。未知（通道没起）时按可关处理。
         val canDisable = (levels?.contains("off") ?: true) && piSupportsThinking
         val thinkingOn = if (canDisable) chatState.thinkingEnabled && piSupportsThinking else piSupportsThinking
         if (piSupportsThinking) {
@@ -164,12 +164,12 @@ fun ModelSelectorSheet(
                 }
                 // 到这里必然是「模型支持思考」（不支持时整项不出现）
                 if (thinkingOn) {
-                    // **档位 = pi 报的可用档位**（2026-09-17 照 pi-web 改）：pi 只列该模型真能用的档，
-                    // 界面就画几个停位 —— 不再拿固定五档去等距映射（那会在 `thinkingLevelMap` 砍过档、
+                    // **档位 = pi 报的可用档位**：pi 只列该模型真能用的档，
+                    // 界面就画几个停位 —— 不拿固定五档去等距映射（那会在 `thinkingLevelMap` 砍过档、
                     // 或只有一两档的模型上出现两个停位等价、「拖了没变化」的观感）。
                     // pi 还没答上来（通道没起 / 首次打开）时回退到内置档位表 [THINKING_LEVEL_FALLBACK]。
                     // pi 沉默时用内置回退表；**偏好不在表里也补进去**（如 `max`）—— 否则滑块会默默落到
-                    // 首档、与旁边那行档位名对不上（2026-09-17 自查的边角；pi 答了就以 pi 的列表为准，
+                    // 首档、与旁边那行档位名对不上（pi 答了就以 pi 的列表为准，
                     // 那时偏好不在列表里是正常的：pi 会夹取，真值由 `piNow` 显示）
                     val stops = levels?.filter { it != "off" }?.takeIf { it.isNotEmpty() }
                         ?: THINKING_LEVEL_FALLBACK.let { fb ->
@@ -185,7 +185,7 @@ fun ModelSelectorSheet(
                     val cfg = chatState.selectedModel?.provider?.let { AiConfigStore.configs[it] }
                     // 真值行（piNow != null）优先；否则给「预计」——估算行只在拿不到 pi 真值时出现。
                     // **pi 专有档位（如 `max`）不在应用枚举里** —— 不能拿 `?: MEDIUM` 兜底：
-                    // 那会把「开到最大」说成「预计服务商收到：medium」（实测踩到；DeepSeek V4.1 Flash
+                    // 那会把「开到最大」说成「预计服务商收到：medium」（DeepSeek V4.1 Flash
                     // 的档位是 low/high/max，medium 只是官方兼容映射，根本不是真档位）。
                     // 应用枚举里没有的档位 → 估算就是档位名原样（与 levelWire 默认分支同口径）。
                     val wire = if (piLevels == null && piNow == null) {
@@ -196,7 +196,7 @@ fun ModelSelectorSheet(
                         }
                     } else null
                     if (stops.size <= 1) {
-                        // 只有一档：画滑轨也没得选（2026-09-17）—— 如实说一句，不摆死控件
+                        // 只有一档：画滑轨也没得选 —— 如实说一句，不摆死控件
                         Text(
                             ThinkingLevel.labelOf(selected),
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
@@ -226,8 +226,8 @@ fun ModelSelectorSheet(
                             // 目录说这个模型的档位不上线（只发开关）→ 如实说，不装成「服务商收到 X」
                             !effortSupported -> L.chat.thinkingEffortNotSent
                             piNow != null -> L.chat.providerReceives(piNow)
-                            // 下面两条是**应用侧估算**（pi 没答上来时），措辞用「预计」——旧文案写成
-                            // 「服务商实际收到」，读起来像真值（2026-09-17 自查）
+                            // 下面两条是**应用侧估算**（pi 没答上来时），措辞用「预计」——写成
+                            // 「服务商实际收到」会读起来像真值
                             wire is AiBackend.LevelWire.Word -> L.chat.providerExpected(wire.value)
                             wire is AiBackend.LevelWire.Budget -> L.chat.providerExpected("${wire.tokens} tokens")
                             else -> L.chat.levelUnsupported
@@ -242,7 +242,7 @@ fun ModelSelectorSheet(
 
         Spacer(Modifier.height(10.dp))
 
-        // ② Operit 风格头部：图标 + "模型" + 当前模型名（粗体主色）
+        // ② 头部：图标 + "模型" + 当前模型名（粗体主色）
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -273,7 +273,7 @@ fun ModelSelectorSheet(
 
         Spacer(Modifier.height(10.dp))
 
-        // ③ 模型列表（Operit config-row 规格；单选展开；无已配置模型时提示引导）
+        // ③ 模型列表（单选展开；无已配置模型时提示引导）
         if (providers.isEmpty()) {
             Text(
                 L.chat.noModelsAvailable,
@@ -307,7 +307,7 @@ fun ModelSelectorSheet(
         }
         }
 
-        // ④ 管理模型配置（Operit manage-button 同语义）
+        // ④ 管理模型配置
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -327,7 +327,7 @@ fun ModelSelectorSheet(
 }
 
 /**
- * 折叠栏（Operit ClassicThinkingSettingsItem 折叠态规格）：
+ * 折叠栏：
  * 图标（启用主色/关闭弱化）+ 标题 + 状态名（粗体主色/off 弱化）+ 折叠箭头。
  * 思考栏与输出栏共用（图标参数化）。
  */
@@ -380,7 +380,7 @@ private fun ThinkingModeRow(
 }
 
 /**
- * 服务商行（Operit model-selector-config-row 规格）：
+ * 服务商行：
  * min-height 34dp · padding 6/8dp · 圆角 4dp · 名称 13sp ellipsis；
  * 多模型尾部 "N个模型"（11sp 弱化）+ 折叠箭头，单模型直接显示模型名；
  * 当前服务商：主色 15% 底 + 粗体主色名。
@@ -442,9 +442,9 @@ private fun ProviderHeader(
 }
 
 /**
- * 展开的模型列表块（Operit model-selector-model-list 规格）：
+ * 展开的模型列表块：
  * 左右边距对称（16+16+8 = 40dp）；左缩进相对头部行形成层级。
- * 原"表面变体底"已移除：暗色下呈纯黑块、亮色下与面板同色不可见，无分组价值。
+ * 不加"表面变体底"：暗色下呈纯黑块、亮色下与面板同色不可见，无分组价值。
  */
 @Composable
 private fun ModelListBlock(models: List<AiModel>, chatState: ChatState) {

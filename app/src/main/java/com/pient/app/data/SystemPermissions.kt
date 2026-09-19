@@ -16,7 +16,7 @@ import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 
 /**
- * 权限档位 —— 开发计划 6.1「三级权限体系」的 L0/L1/L2，全项目唯一文案与语义出处
+ * 权限档位 —— 「三级权限体系」的 L0/L1/L2，全项目唯一文案与语义出处
  * （首启引导页 P10 的「系统权限选项页」与设置页 P8 的「系统权限设置」页共用本枚举）。
  *
  *  - STANDARD L0：Android 运行时权限 + 用户手动开启的服务，开箱即用；
@@ -57,8 +57,7 @@ enum class PermissionTier(
 }
 
 /**
- * 四项基础权限（存储 / 电池优化豁免 / 位置 / 悬浮窗）的**检查与授权入口唯一实现**
- * （Operit PermissionGuideViewModel.checkPermissions 同款口径）。
+ * 四项基础权限（存储 / 电池优化豁免 / 位置 / 悬浮窗）的**检查与授权入口唯一实现**。
  *
  * 首启引导页「基础权限设置页」与设置页「系统权限设置」页都从本对象取状态、走同一套跳转，
  * 避免两处各写一份后漂移（同语义一份实现原则）。
@@ -88,7 +87,7 @@ object SystemPermissions {
     )
 
     /**
-     * 档位就绪快照 —— 「某档位能不能作为当前档位」的**唯一判据**（用户口径 2026-09-16）：
+     * 档位就绪快照 —— 「某档位能不能作为当前档位」的**唯一判据**：
      * 只有该档位卡里列出的**全部项**（基础权限 4 项 + 档位专属项）都配齐，才允许把它设为当前档位。
      * 「系统权限设置」页（「设为当前档位」门控 + 未配齐说明行）与首启引导页（进入 Pient 前的写入）共用本判定。
      */
@@ -218,13 +217,13 @@ object SystemPermissions {
     /** 是否走运行时权限弹窗路径（Android 10 及以下的存储权限） */
     val needsRuntimeStorage: Boolean get() = Build.VERSION.SDK_INT < Build.VERSION_CODES.R
 
-    /** <R 存储运行时权限组（Operit storagePermissionLauncher 同款） */
+    /** <R 存储运行时权限组 */
     val runtimeStoragePermissions = arrayOf(
         Manifest.permission.READ_EXTERNAL_STORAGE,
         Manifest.permission.WRITE_EXTERNAL_STORAGE,
     )
 
-    /** 位置运行时权限组（FINE + COARSE 一起请求，Operit locationPermissionLauncher 同款） */
+    /** 位置运行时权限组（FINE + COARSE 一起请求） */
     val runtimeLocationPermissions = arrayOf(
         Manifest.permission.ACCESS_FINE_LOCATION,
         Manifest.permission.ACCESS_COARSE_LOCATION,
@@ -232,10 +231,10 @@ object SystemPermissions {
 }
 
 /**
- * Shizuku（L1 调试通道）状态与授权 —— 走**官方 SDK**（`dev.rikka.shizuku:api` 13.1.5，
- * 与 Operit 同版本；manifest 需声明 ShizukuProvider，缺了 provider 时 SDK 直接抛异常）。
+ * Shizuku（L1 调试通道）状态与授权 —— 走**官方 SDK**（`dev.rikka.shizuku:api` 13.1.5；
+ * manifest 需声明 ShizukuProvider，缺了 provider 时 SDK 直接抛异常）。
  *
- * 三个状态的含义（对齐 Operit ShizukuAuthorizer）：
+ * 三个状态的含义：
  *  - installed：设备装了 Shizuku 应用（或 Sui 已内置后端）；
  *  - running  ：Shizuku 服务在跑（binder 可达）——设备重启后为 false，需重新激活；
  *  - authorized：Pient 已获 Shizuku 授权（弹窗同意后为 true）。
@@ -256,7 +255,7 @@ object ShizukuGateway {
         false
     }
 
-    /** 服务运行中：pingBinder 可达（Sui 后端退化看 binder 存活，Operit isSuiBackendAvailable 同款） */
+    /** 服务运行中：pingBinder 可达（Sui 后端退化看 binder 存活） */
     fun running(): Boolean = try {
         if (Shizuku.pingBinder()) true else Shizuku.getBinder()?.isBinderAlive == true
     } catch (e: Exception) {
@@ -322,17 +321,17 @@ object ShizukuGateway {
 }
 
 /**
- * Root（L2 通道）检测与授权 —— 用 `su -c <cmd>` 探测（Operit RootAuthorizer 的 exec 路径，
- * 适用于 Magisk / KernelSU / APatch 等提供 su 的 Root 管理器，零额外依赖）。
+ * Root（L2 通道）检测与授权 —— 用 `su -c <cmd>` 探测
+ * （适用于 Magisk / KernelSU / APatch 等提供 su 的 Root 管理器，零额外依赖）。
  *
- * 两级语义（对齐 Operit 的 isDeviceRooted / requestRootPermission 分工）：
+ * 两级语义：
  *  - [deviceRooted]：**轻量检测、无副作用**（su 二进制 / Root 管理器存在性）→ 用于「设备已 Root」状态行，
  *    打开页面不会弹授权框；
  *  - [requestAccess]：**真执行一次 su**（首次会弹 Root 管理器授权框）→ 用于「请求 Root 授权」，
  *    返回 uid=0 才算已授予。
  *
- * 说明：Operit 还接了 libsu（com.github.topjohnwu.libsu，仅 JitPack 发布）；本工程不做 Root 命令执行，
- * 只做检测与授权，走 exec 探测即可，将来接 Root 执行器时替换点集中在 [runSu]。
+ * 本工程不做 Root 命令执行，只做检测与授权，走 exec 探测即可，
+ * 将来接 Root 执行器时替换点集中在 [runSu]。
  */
 object RootGateway {
 
@@ -358,7 +357,7 @@ object RootGateway {
             }
 
     /**
-     * 「**已授权**」缓存（2026-09-15 加）：[requestAccess] 真跑通过一次 su（uid=0）后置真。
+     * 「**已授权**」缓存：[requestAccess] 真跑通过一次 su（uid=0）后置真。
      * 为什么需要它：`deviceRooted` 只说明设备**看起来**有 root，su 每次调用都可能弹授权框或被拒；
      * 而 Android shell 通道要按「现在到底能不能用」门控（工具描述、终端页选项都以它为准）。
      */
@@ -367,7 +366,7 @@ object RootGateway {
         private set
 
     /**
-     * 「**已跑过一次 su**」标记（2026-09-16 加）：区分状态行的「未验证 / 已拒绝」，
+     * 「**已跑过一次 su**」标记：区分状态行的「未验证 / 已拒绝」，
      * 也让权限页的刷新键知道该不该复检 su（未申请过就不主动弹 Root 授权框）。
      */
     @Volatile

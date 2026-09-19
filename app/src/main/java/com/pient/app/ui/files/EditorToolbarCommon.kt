@@ -41,21 +41,18 @@ import com.pient.app.ui.theme.MonoNoLigatures
 import com.pient.app.ui.theme.PientPanel
 
 /**
- * 文件预览页底部工具栏的共用外壳与按键（2026-09-11 抽出）：
+ * 文件预览页底部工具栏的共用外壳与按键：
  * - 外壳 [EditorToolbarContainer]：markdown 格式工具栏与代码符号工具栏**同一份实现**
  *   （顶圆角 20dp、0.5dp 顶部分隔线、触摸屏 64dp / 平板 56dp 高、IME 随键盘上移）
  * - 按键 [EditorToolbarButton] / 分组竖线 [EditorToolbarDivider]
  *
- * 规格来源 `Refences/Mdcito-1.2.0`（`ui/editor/EditorToolbar.kt`）逐值对齐后按用户反馈收窄：
- * 按键 32dp（小屏；Mdcito 原值 44dp → 2026-09-11 先收到 40dp，用户仍嫌「按键之间的间距太大」再收到 32dp）/
- * 平板 30dp、8dp 圆角、按下缩放 0.85（tween 100ms）、图标 20dp（平板 18dp）、文字键 13sp、
- * 分组竖线 1dp × 24dp（outline 30%、左右各 2dp）。
+ * 按键 32dp（小屏）/ 平板 30dp、8dp 圆角、按下缩放 0.85（tween 100ms）、图标 20dp（平板 18dp）、
+ * 文字键 13sp、分组竖线 1dp × 24dp（outline 30%、左右各 2dp）。
  *
- * 相对 Mdcito 的差异：容器用 PientPanel（Pient 统一材质：纯色面板底 + 1dp 描边，不用阴影）
- * 而非 Mdcito 的 Surface 阴影。
+ * 容器用 PientPanel（Pient 统一材质：纯色面板底 + 1dp 描边，不用阴影）。
  */
 
-/** 工具栏高度（触摸屏 64dp / 平板 56dp，Mdcito 同口径；FAB 抬升量按此计算） */
+/** 工具栏高度（触摸屏 64dp / 平板 56dp；FAB 抬升量按此计算） */
 @Composable
 internal fun editorToolbarHeight(): Dp =
     if (LocalConfiguration.current.smallestScreenWidthDp < 600) 64.dp else 56.dp
@@ -84,7 +81,7 @@ internal fun EditorToolbarContainer(
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
     ) {
         Column {
-            // 顶部 0.5dp 分隔线（Mdcito：outline 10%，压在面板上沿）
+            // 顶部 0.5dp 分隔线（outline 10%，压在面板上沿）
             HorizontalDivider(
                 thickness = 0.5.dp,
                 color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f),
@@ -175,7 +172,7 @@ internal fun EditorToolbarButton(
     }
 }
 
-/** 分组竖线（Mdcito ToolbarDivider 1dp × 24dp / outline 30%；左右内边距 4dp→2dp = 按键间距收窄） */
+/** 分组竖线（1dp × 24dp / outline 30%；左右内边距 2dp = 按键间距收窄） */
 @Composable
 internal fun EditorToolbarDivider() {
     Box(

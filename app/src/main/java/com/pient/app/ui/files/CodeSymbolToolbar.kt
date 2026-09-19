@@ -19,7 +19,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * 代码文件底部符号工具栏（2026-09-11 新增）。
+ * 代码文件底部符号工具栏。
  *
  * 触发范围（`FileContentView` 分流）：预览区是**代码 / 标记语言源文件**时显示——即除
  * 图片 / 视频 / 音频 / 文档（doc·docx·xls·xlsx·pdf）/ 二进制（无法按 UTF-8 解码或 >2MB）
@@ -32,13 +32,13 @@ import androidx.compose.ui.unit.dp
  * [EditorToolbarButton] / [EditorToolbarDivider]，见 `EditorToolbarCommon.kt`），
  * 按键为等宽字体的文字键（代码符号看等宽字形更直观）。
  *
- * 插入语义（代码编辑器惯例，同 VSCode / Acode 的自动配对）：
+ * 插入语义（代码编辑器惯例）：
  * - 成对符号（`()` `[]` `{}` `<>` 与 `"` `'` `` ` ``）：无选区 → 插入一对、光标落在中间；有选区 → 包裹选区
  * - 其余符号：插入到光标处（有选区 → 替换选区）
  *
- * 键距（2026-09-11 用户口径，两轮收紧）：**同种符号之间更紧、其余间距不变**——
+ * 键距：**同种符号之间更紧、其余间距不变**——
  * 成对键（同一 [CodeSymbol.kind]）键宽收窄 14dp + 字形向心内移 [EditorToolbarPairShift]（3.5dp）；
- * 距离经守恒计算（推导见 [EditorToolbarButton]）。**注意**：括号族已按用户要求合并成一枚键
+ * 距离经守恒计算（推导见 [EditorToolbarButton]）。**注意**：括号族合并成一枚键
  * （`()` `[]` `{}` `<>`），每个 kind 只剩一枚键 → 目前表里不存在「同种相邻」，该机制对当前数据
  * 不产生位移（整排为标准键距）；将来若有同 kind 的相邻键，它会照旧生效。
  */
@@ -57,7 +57,7 @@ internal data class CodeSymbol(
 
 /**
  * 符号分组（分组之间有竖线分隔；组内顺序 = 屏上顺序）。
- * 括号族：**同种括号（开 + 闭）合并成一枚按键**（2026-09-11 用户口径）——点一下插入一对、
+ * 括号族：**同种括号（开 + 闭）合并成一枚按键**——点一下插入一对、
  * 光标落中间，有选区时包裹选区（由 [insertCodeSymbol] 处理）。
  */
 internal val CodeSymbolGroups: List<List<CodeSymbol>>

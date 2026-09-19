@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit
  * 执行环境（`ubuntu` / `ubuntu-chroot`）由包装脚本**每次被执行时现读** `files/pient-rt/exec_env`
  * 决定 —— 改完下一条命令/新会话即生效，已在跑的会话进程不换环境。
  *
- * **Android shell 不在这条链上**（2026-09-15 用户口径）：它是**另一条独立通道** ——
+ * **Android shell 不在这条链上**：它是**另一条独立通道** ——
  * Shizuku / Root 把命令直接扔给 Android 系统执行，不经过 terminal、不经过 Ubuntu，
  * 且**即发即走、没有会话**（`runtime/AndroidShell.kt` + `runtime/ExecBridge.kt`）。
  *
@@ -48,7 +48,7 @@ object TerminalSessions {
          */
         val execEnvOverride: String? = null,
         /**
-         * AI 执行镜像会话（2026-09-16）：**不绑进程**，只用来收 pi 工具事件的镜像行。
+         * AI 执行镜像会话：**不绑进程**，只用来收 pi 工具事件的镜像行。
          * 它不参与前台保活（保活在 [start] 里挂），也不影响用户自己的会话。
          */
         val aiMirror: Boolean = false) {
@@ -81,12 +81,10 @@ object TerminalSessions {
     val AI_MIRROR_NAME: String get() = L.runtime.aiMirrorSession
 
     /**
-     * 把 pi 的**工具执行**镜像进终端页（2026-09-16；用户对照 Operit 提的需求）。
+     * 把 pi 的**工具执行**镜像进终端页。
      *
      * 为什么需要：pi 的 `bash` 工具是**它自己 spawn 的一次性进程**（`spawn(shellPath, ["-c", cmd])`），
-     * 与终端页这些常驻会话没有任何关系 —— 所以 AI 在 Ubuntu 里干活时，终端页里什么都看不到
-     * （对照 Operit：它的工具层直接走自己的 `TerminalManager`，命令天然出现在终端 UI 里，
-     * 见 `core/tools/defaultTool/standard/StandardTerminalCommandExecutor.kt`）。
+     * 与终端页这些常驻会话没有任何关系 —— 所以 AI 在 Ubuntu 里干活时，终端页里什么都看不到。
      *
      * 形态：一个**只读镜像会话**（`aiMirror = true`，不绑进程、不占前台保活），
      * 工具每跑一步就往里追一行；用户自己的命令仍在自己的会话里。
@@ -145,7 +143,7 @@ object TerminalSessions {
     /**
      * 前台保活的 key（一个会话一个）。
      *
-     * 口径（2026-09-16）：**会话活着就挂着** —— 无 PTY 时应用无从得知「用户手打的那条命令」
+     * **会话活着就挂着** —— 无 PTY 时应用无从得知「用户手打的那条命令」
      * 何时结束（只有 app 自己发起的脚本能靠哨兵拿到退出码），而系统清进程不区分命令来源。
      * 代价 = 终端页有会话时通知栏会有一条常驻通知（IMPORTANCE_LOW，不响不震）。
      */
@@ -222,10 +220,9 @@ object TerminalSessions {
 
         // 终端页 = **proot Ubuntu**（装工具链、跑脚本、AI 的 bash 工具都在这；chroot 是它的 Root 形态）。
         // 注：**Android shell 不走这里** —— 它是另一条独立通道（Shizuku / Root 直接把命令扔给系统执行、
-        // 即发即走、没有会话），实现在 runtime/AndroidShell.kt + ExecBridge.kt（2026-09-15 用户口径）。
+        // 即发即走、没有会话），实现在 runtime/AndroidShell.kt + ExecBridge.kt。
         if (!PiRuntime.rootfsReady(context)) {
-            // 对齐 Operit 的口径：**不需要用户手动点解包** —— Operit 把 install_ubuntu 写进生成的
-            // 启动脚本（common.sh），首次起会话自动解包并把进度回显到终端。这里照做。
+            // **不需要用户手动点解包** —— 首次起会话自动解包并把进度回显到终端。
             if (PiRuntime.isUnpacking()) {
                 append(session, TerminalLine(L.runtime.rootfsUnpackingTask, TerminalLineKind.OUTPUT))
                 return
@@ -290,7 +287,7 @@ object TerminalSessions {
         session.alive = true
         session.pending.setLength(0)
         PientLog.i(TAG, "会话${session.id} 启动 shell=${shell.name}")
-        // 前台保活（2026-09-16）：**手打命令也算在跑** —— 无 PTY 时应用不知道用户敲的那条命令
+        // 前台保活：**手打命令也算在跑** —— 无 PTY 时应用不知道用户敲的那条命令
         // 何时结束，只能按「会话活着」挂着（系统清进程是不区分命令来源的）；
         // 释放点 = 关会话（close）/ 进程真退出（pump 末尾，且只认当前这个进程）。
         appContext?.let { PiKeepAlive.acquire(it, keepAliveKey(session), L.runtime.terminalSessionRunning) }

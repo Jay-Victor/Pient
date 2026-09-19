@@ -27,7 +27,7 @@ import com.pient.app.data.i18n.L
 import com.pient.app.data.i18n.Languages
 
 /**
- * 语言设置（设计计划 6.3：Operit `LanguageSettingsScreen` 参考）：
+ * 语言设置：
  * 「跟随系统」置顶 + 语言列表（当前项 ✓）；**切换即时生效、无需重启**。
  *
  * 列表本身由 [Languages] 注册表驱动（新增语言只改语言包注册处），

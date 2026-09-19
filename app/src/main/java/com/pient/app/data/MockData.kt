@@ -3,8 +3,8 @@ package com.pient.app.data
 import androidx.compose.runtime.mutableStateListOf
 
 // ─────────────────────────────────────────────────────────────
-// 占位数据（UI 壳专用）。2026-09-14 用户拍板：技能页 / 插件页 / 终端页的功能整体移除，
-// 保留 UI 设计与交互 —— 三处的列表、开关、弹窗内容改由本文件的占位数据渲染
+// 占位数据（UI 壳专用）。技能页 / 插件页 / 终端页只保留 UI 设计与交互，
+// 三处的列表、开关、弹窗内容由本文件的占位数据渲染
 // （只在内存里读写、重启即重置，不落盘）。
 // 其余数据均真实：项目 / 会话 / 文件（ProjectFiles）、AI 对话（AiBackend）、模型（AiConfigStore）。
 // ─────────────────────────────────────────────────────────────
@@ -192,7 +192,7 @@ object MockStore {
         |- 只读：搜索目录需加入白名单
     """.trimMargin()
 
-    // ── 插件资源清单（详情弹窗「已解析资源」；pi-web ResourceList 结构） ──
+    // ── 插件资源清单（详情弹窗「已解析资源」） ──
     // pi-plugin-git：1 扩展 + 2 提示词；loaded、无 pinned
     private val GIT_PLUGIN_RESOURCES = listOf(
         PluginResource(PluginResourceKind.EXTENSION, "index.ts", "extensions/index.ts"),
@@ -245,7 +245,7 @@ object MockStore {
             resources = GREP_PLUGIN_RESOURCES),
     )
 
-    /** 技能市场搜索 mock（对应 pi-web /api/skills/search → skills.sh） */
+    /** 技能市场搜索 mock */
     val marketSkills = listOf(
         SkillItem("mcp-builder", "用 MCP 构建工具链并生成 server 骨架", enabled = false),
         SkillItem("data-analyzer", "CSV/JSON 数据分析与图表生成", enabled = false),
@@ -278,6 +278,6 @@ object MockTerminal {
         add(TerminalLine(">> Your private local terminal environment on Android <<", TerminalLineKind.SLOGAN))
     }
 
-    // 会话与命令执行链路已移除（2026-09-14）：本对象只保留品牌常量（Logo / 横幅），
+    // 本对象只保留品牌常量（Logo / 横幅），
     // 供终端页首屏（TerminalShell）与关于页共用。
 }

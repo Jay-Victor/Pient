@@ -31,14 +31,14 @@ import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
 
 /**
- * 输入栏的**命令词候选卡**（2026-09-17 用户 spec）：输入 `/` → 技能卡
+ * 输入栏的**命令词候选卡**：输入 `/` → 技能卡
  * （分段：全局技能 / 项目技能）→ 选中插 `/skill:<名字> `。
  *
  * 与 @ 引用卡同款外壳（`PientPanel` + 268.8dp 宽 + 屏高 40% 上限 + 贴 dock 上方左对齐），
  * 分段控制器**复用技能页/插件页的同一个 `PientSegmented`**（同态同色）。
  *
  * 为什么 `/` 只在**整条消息以 `/` 开头**时弹（`findPickerQueryAt` 的硬口径）：
- * pi 只在消息以 `/skill:<名字>` / `/命令` 开头时才展开/执行（源码依据与 pi-web 对照见 ChatScreen 的同名注释）。
+ * pi 只在消息以 `/skill:<名字>` / `/命令` 开头时才展开/执行。
  */
 
 /** 输入栏候选卡统一宽度（与 @ 引用卡同款：左距屏 6dp、左对齐浮层） */

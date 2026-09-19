@@ -54,14 +54,13 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * "+" 附件菜单（2026-08-28 重设计，参照 Hermes 桌面端 composer context-menu；
- * 2026-09-09 真实化）：
+ * "+" 附件菜单：
  * - 位置与模型选择器浮层一致：贴屏幕右侧（右距屏 6dp）、底部锚定到输入栏上缘、
  *   同宽 268.8dp、16dp 圆角 PientPanel，点外关闭（无 scrim）。
- * - 行式菜单（Hermes DropdownMenuItem 规格）：顶部小标签「附加」→
+ * - 行式菜单：顶部小标签「附加」→
  *   照片 / 拍照 / 文件 / URL（图标 16dp + 标题 13sp，行高 34dp）→
- *   分隔线 → 底部提示「提示：输入 @ 以内联引用文件。」（Hermes tipPre+tipPost）。
- * - 2026-09-09：照片 = 系统照片选择器（多选，PickMultipleVisualMedia）；拍照 = 相机
+ *   分隔线 → 底部提示「提示：输入 @ 以内联引用文件。」
+ * - 照片 = 系统照片选择器（多选，PickMultipleVisualMedia）；拍照 = 相机
  *   （FileProvider 暂存后落盘）；文件 = 系统文件选择器；
  *   选中的照片/文件复制到应用私有目录 filesDir/attachments/ 持久保存（Attachment.path）。
  */
@@ -69,7 +68,7 @@ import java.util.Locale
 fun AttachmentSheet(
     chatState: ChatState,
     onClose: () -> Unit,
-    onOpenUrlDialog: () -> Unit = {}, // URL 项 → 打开 URL 输入弹窗（Hermes url-dialog 同款）
+    onOpenUrlDialog: () -> Unit = {}, // URL 项 → 打开 URL 输入弹窗
     bottomOffset: Dp = 8.dp, // 弹窗底部到屏幕底的距离（与模型选择器同口径）
     modifier: Modifier = Modifier,
 ) {
@@ -136,7 +135,7 @@ fun AttachmentSheet(
             .fillMaxWidth()
             .padding(12.dp),
     ) {
-        // 顶部小标签（Hermes attachLabel：小号弱化）
+        // 顶部小标签（小号弱化）
         Text(
             L.chat.attach,
             style = MaterialTheme.typography.labelSmall,
@@ -173,7 +172,7 @@ fun AttachmentSheet(
             modifier = Modifier.padding(vertical = 8.dp),
         )
 
-        // 底部提示（Hermes tipPre + @ + tipPost）
+        // 底部提示
         Text(
             L.chat.attachTip,
             style = MaterialTheme.typography.labelSmall,
@@ -231,7 +230,7 @@ private fun queryDisplayName(context: Context, uri: Uri): String? = try {
 }
 
 /**
- * 菜单行（Hermes DropdownMenuItem 规格，与模型选择器 config-row 同款）：
+ * 菜单行（与模型选择器 config-row 同款）：
  * min-height 34dp · 图标 16dp（弱化色）+ 标题 13sp · 水平 padding 8dp。
  */
 @Composable
@@ -265,11 +264,11 @@ private fun AttachMenuItem(
 }
 
 /**
- * URL 输入弹窗（2026-08-28 新增，参照 Hermes 桌面端 url-dialog.tsx）：
+ * URL 输入弹窗：
  * 标题「附加 URL」；描述「Pient 将抓取该页面并作为本回合的上下文。」；
  * 输入框（placeholder https://example.com/post、URL 键盘）；输入非空且非
  * http(s):// 开头时提示「请包含完整 URL，例如 https://…」；
- * 确认键「附加」仅合法 URL 可用（Hermes looksLikeUrl 同规则）。
+ * 确认键「附加」仅合法 URL 可用。
  */
 @Composable
 fun UrlDialog(

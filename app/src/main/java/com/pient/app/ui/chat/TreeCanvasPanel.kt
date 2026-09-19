@@ -76,8 +76,7 @@ import com.pient.app.ui.theme.PientPanel
 import kotlin.math.min
 
 /**
- * 会话内分支画布（P12 /tree，内嵌聊天页顶栏下方区域，与终端/文件页同款承载方式；
- * 2026-09-02《Pient 分支功能设计》v0.1 §3 + 2026-09-02 用户视觉重设计要求）：
+ * 会话内分支画布（/tree，内嵌聊天页顶栏下方区域，与终端/文件页同款承载方式）：
  * - 树**从左向右发散**：根在最左，深度沿 x 轴展开，分支沿 y 轴排布（叶子顺序计数、
  *   内部节点取子树行中心）；
  * - 节点卡片左右边框带**圆点**作为连线端点（左=入点，右=出点）；
@@ -90,11 +89,11 @@ import kotlin.math.min
 @Composable
 fun TreeCanvasPanel(chatState: ChatState) {
     val tree = chatState.branchTree
-    // 打点：画布吃的是哪棵树、节点数对不对（文档口径：节点数 = 用户消息数）
+    // 打点：画布吃的是哪棵树、节点数对不对（口径：节点数 = 用户消息数）
     LaunchedEffect(tree, chatState.piTree) {
         runCatching {
             fun count(n: SessionTreeNode?): Int = if (n == null) 0 else 1 + n.children.sumOf { count(it) }
-            // 画布内容 uiautomator 取不到，这行是唯一能核「节点数 = 用户消息数」的地方（《分支功能设计》§7）
+            // 画布内容 uiautomator 取不到，这行是唯一能核「节点数 = 用户消息数」的地方
             PientLog.i("PientChat", "画布数据源：${count(tree)} 节点（pi 树=${chatState.piTree != null}）")
         }
     }
@@ -166,16 +165,16 @@ fun TreeCanvasPanel(chatState: ChatState) {
     val selectedNow by rememberUpdatedState(selectedId)
 
     // 树换了（切会话、切分支、pi 树刚到位）→ 重置适配标记，让下面的视口逻辑重新算一遍。
-    // 否则会沿用上一棵树的 pan/zoom：新树可能整棵都在屏幕外（实测：切到 12 节点的树后画布看着是空的）。
+    // 否则会沿用上一棵树的 pan/zoom：新树可能整棵都在屏幕外（切到 12 节点的树后画布看着是空的）。
     LaunchedEffect(tree) { fitted = false }
 
-    // 初始视口（《Pient 分支功能设计》§3.3）：先按**活跃路径**包围盒 fit（0.6×–1.5× clamp）；
+    // 初始视口：先按**活跃路径**包围盒 fit（0.6×–1.5× clamp）；
     // 放不下时**锚定活跃叶子**（当前所在节点贴右侧 32dp、垂直居中）—— 否则长会话两端都被裁掉、
-    // 看不到自己当前位置。（"尽量看到全树"是 §8.6 尚未拍板的项，这里不擅自改。）
+    // 看不到自己当前位置。（这里不做"尽量看到全树"的额外适配。）
     LaunchedEffect(viewport, tree) {
         if (fitted || viewport == IntSize.Zero || layout.isEmpty()) return@LaunchedEffect
         // 空活跃集兜底：pi 侧还没给出 leaf（新会话/刚切换）时可能一个 active 都没有 ——
-        // 原写法 `actives.minOf{}` 会抛 NoSuchElementException 直接崩（实测崩过）。
+        // `actives.minOf{}` 遇空集会抛 NoSuchElementException 直接崩。
         val actives = layout.filter { it.node.active }.ifEmpty { layout }
         val minX = actives.minOf { xOf(it.depth) }
         val maxX = actives.maxOf { xOf(it.depth) } + cardW
@@ -265,7 +264,7 @@ fun TreeCanvasPanel(chatState: ChatState) {
                         },
                 ) {
                     // 连线（三次贝塞尔曲线）：**当前会话内分支**（聊天页正在显示的那条）用 primary，
-                    // 其余一律中性 —— 口径（2026-09-15 用户定稿）：
+                    // 其余一律中性 —— 口径：
                     // 「聊天页显示的那一个会话内分支，在画布上从第一个节点起、每层一个节点串成一条线，用蓝色表示」
                     // 颜色在 Composable 上下文取好再传入 DrawScope（Canvas lambda 非 @Composable）
                     val primary = MaterialTheme.colorScheme.primary
@@ -322,8 +321,8 @@ fun TreeCanvasPanel(chatState: ChatState) {
 
         // ── 右下三枚悬浮操作按键（自下而上 = 切换分支/从此处分支/查看详情）──
         //
-        // **运行中（AI 正在回答）：FAB2 / FAB3 禁用**（2026-09-15 用户定）——
-        // pi 在流式中禁止导航（`agent-session.ts:3117-3119` 会抛「Wait for the current response
+        // **运行中（AI 正在回答）：FAB2 / FAB3 禁用**——
+        // pi 在流式中禁止导航（会抛「Wait for the current response
         // to finish before navigating the session tree.」），而且这一轮的位置还没定下来
         // （导航会与落位打架）。FAB1「查看详情」是纯读，照常可用。
         val running = chatState.isStreaming || chatState.currentSession?.running == true
@@ -341,7 +340,7 @@ fun TreeCanvasPanel(chatState: ChatState) {
                 icon = Icons.Outlined.CallSplit,
                 desc = L.canvas.createBranch,
                 enabled = selectedNode != null && !running,
-                // **会话内分支**（2026-09-15 定稿，《Pient 会话与上下文管理设计》§6）：
+                // **会话内分支**：
                 // 切点 = 该节点回合末尾的**锚点条目** → 回聊天页，此后发消息即在该节点下长出新分支。
                 // 会话外分支（fork 新会话）不在画布上 —— 它归长按消息菜单与节点详情卡。
                 onClick = {
@@ -371,7 +370,7 @@ fun TreeCanvasPanel(chatState: ChatState) {
                     .background(MaterialTheme.colorScheme.scrim)
                     .clickable(onClick = { detailOpen = false }),
             )
-            // 卡片内容 = 该节点回合的**全部条目**（《分支功能设计》§3.6，2026-09-15 定稿）：
+            // 卡片内容 = 该节点回合的**全部条目**：
             // 用户消息全文 → 思考（折叠栏，默认收起，与聊天页 ThinkingDisclosure 同款）→
             // 工具调用与结果（ToolRow / ToolRunGroup 同款）→ AI 回答（markdown 全文）。
             val transcript = chatState.turnTranscript(selectedNode.id)
@@ -409,7 +408,7 @@ fun TreeCanvasPanel(chatState: ChatState) {
                         )
                     }
                     if (userMsg != null) {
-                        // 引用卡（2026-09-17）：节点自身那条消息带引用时，与聊天页气泡同口径地摆在正文上方
+                        // 引用卡：节点自身那条消息带引用时，与聊天页气泡同口径地摆在正文上方
                         userMsg.quote?.let { q ->
                             QuoteCard(q, modifier = Modifier.padding(top = 12.dp))
                         }
@@ -512,7 +511,7 @@ fun TreeCanvasPanel(chatState: ChatState) {
     }
 }
 
-/** 切换到选中节点并切回消息区（FAB2/FAB3 共用，底层 = navigate_tree 封装命令原型） */
+/** 切换到选中节点并切回消息区（FAB2/FAB3 共用，底层 = navigate_tree 命令封装） */
 private fun switchTo(chatState: ChatState, nodeId: String?) {
     if (nodeId == null) return
     chatState.navigateToNode(nodeId)
@@ -529,8 +528,8 @@ private class NodeLayout(
 
 /**
  * 56dp 圆形 FAB（M3 1.4.0 FloatingActionButton 无 enabled 参数，手动实现禁用态）：
- * 2026-09-03 改：未选中节点时 = 蓝底白图案（primary + onPrimary，与文件页 FAB 同款），
- * 选中节点后 = 粉底黑图案（M3 默认 FAB 容器色，保持不变）；禁用态无阴影、点击无效果。
+ * 未选中节点时 = 蓝底白图案（primary + onPrimary，与文件页 FAB 同款），
+ * 选中节点后 = 粉底黑图案（M3 默认 FAB 容器色）；禁用态无阴影、点击无效果。
  */
 @Composable
 private fun TreeFab(
@@ -560,11 +559,11 @@ private fun TreeFab(
 /**
  * 节点卡片：左侧入点圆点（非根）/ 右侧出点圆点（有子节点）为连线端点。
  *
- * 着色口径（2026-09-15 用户定稿）：**蓝 = 聊天页正在显示的那一个会话内分支** ——
+ * 着色口径：**蓝 = 聊天页正在显示的那一个会话内分支** ——
  * 即从第一个节点起、每层一个节点串成的那条线（= 活跃路径，`node.active`）。
  * 其余分支中性。点选（纯 primary 1.5dp 描边）优先级最高，用于打开节点详情/切分支。
  * 注意：这条口径成立的前提是**一层一个节点**（每个回合一张卡），
- * 若画布吃的是"每条消息一张卡"的回退树，蓝色就会扭成一条穿过多张卡的折线（实测踩过）。
+ * 若画布吃的是"每条消息一张卡"的回退树，蓝色就会扭成一条穿过多张卡的折线。
  */
 @Composable
 private fun NodeCard(
@@ -623,7 +622,7 @@ private fun NodeCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                // 附件类型图标（2026-09-17）：卡片高度固定 72dp，图标并进首行不额外占高；
+                // 附件类型图标：卡片高度固定 72dp，图标并进首行不额外占高；
                 // 多于 3 个只显示前 3 个 + 「+N」（完整清单在节点详情卡里）
                 if (node.attachments.isNotEmpty()) {
                     Spacer(Modifier.weight(1f))

@@ -77,34 +77,29 @@ import com.pient.app.ui.theme.MonoFont
 import org.json.JSONObject
 
 /**
- * 工具调用 / 工具运行的行式渲染（2026-09-14 按 **Hermes 桌面端**重设计）。
+ * 工具调用 / 工具运行的行式渲染。
  *
- * 参考源（真源逐项对齐，勿凭印象改数值）：
- *  - `apps/desktop/src/components/assistant-ui/tool/fallback.tsx`
- *      · ToolEntry：单行 = 14px glyph + 标题 + meta + 右侧 caret；**展开才套 5px 边框壳**，
- *        头部与正文之间一条 hairline，正文内 gap 6px；
- *      · ToolRun / ToolRunHeader：≥2 个活动型调用折成**一行灰色摘要**；运行时摘要（shimmer）
- *        + 一行滚动 ticker，结束态只有摘要、点开才铺开行；
- *      · TerminalTranscript：`$ 命令` 块 + `exit N` 徽标（0 绿 / 非 0 琥珀）；
- *      · ToolPayloadDisclosure：折叠的原始 args/result（mono 0.65rem）。
- *  - `.../tool/run-summary.ts`：摘要分句顺序 edit→explore→run→delegate→other；单条带目标写目标
- *    （"Explored wiring.tsx"），否则写计数（"ran 5 commands"）；**运行中的那一类用进行时**。
- *  - `.../chat/scaffold-row.tsx` + `styles.css` 会话令牌：
- *      `--conversation-tool-font-size` 0.6875rem(11px)、`--conversation-line-height` 1.125rem(18px)、
- *      meta 0.625rem(10px)、`--tool-row-gap` 0.375rem(6px)、`--scaffold-block-gap` 4px、
- *      scaffold 文本 = 前景 64% / meta 44%、脚手架**静息透明度 0.67**、
- *      壳 `rounded-[0.3125rem]`(5px) + `--ui-stroke-tertiary`(= accent 10% + base 5%)、
- *      段内 pre `max-h-20`(80dp)、段标签 0.65rem + tracking .08em。
- *  - `i18n/zh.ts` 的 `assistant.tool.*`：状态词、逐工具标题（已读取/正在读取…）、
- *      模板 `actionCommand` / `actionTarget` / `actionQuoted`。
+ * 规格（数值勿凭印象改）：
+ *  - 单行 = 14px glyph + 标题 + meta + 右侧 caret；**展开才套 5px 边框壳**，
+ *    头部与正文之间一条 hairline，正文内 gap 6px；
+ *  - ≥2 个活动型调用折成**一行灰色摘要**；运行时摘要（shimmer）
+ *    + 一行滚动 ticker，结束态只有摘要、点开才铺开行；
+ *  - 工具卡内嵌段：`$ 命令` 块 + `exit N` 徽标（0 绿 / 非 0 琥珀）、折叠的原始 args/result（mono 0.65rem）；
+ *  - 摘要分句顺序 edit→explore→run→delegate→other；单条带目标写目标
+ *    （"已读取 wiring.tsx"），否则写计数（"跑了 5 条命令"）；**运行中的那一类用进行时**。
+ *  - 会话令牌：工具字号 0.6875rem(11px) / 行高 1.125rem(18px)、meta 0.625rem(10px)、
+ *    row gap 0.375rem(6px)、block gap 4px、scaffold 文本 = 前景 64% / meta 44%、
+ *    脚手架**静息透明度 0.67**、壳圆角 0.3125rem(5px) + 描边(= accent 10% + base 5%)、
+ *    段内 pre max-h 80dp、段标签 0.65rem + tracking .08em。
+ *  - 状态词与逐工具标题（已读取/正在读取…）走文案表；模板分「命中命令 / 目标 / 引述」三种形态。
  *
- * 触摸端的有意差异（Hermes 靠 hover 的地方）：
- *  - caret 常驻可见（静息透明度取 `--disclosure-caret-rest` 的 0.4）；
- *  - 运行中的 run 也允许点摘要铺开（Hermes 运行中不给 toggle）；
- *  - 悬停才现的复制按钮 / 行尾 × 不做（原型期无剪贴板写入件）。
+ * 触摸端的有意差异（桌面端靠 hover 的地方）：
+ *  - caret 常驻可见（静息透明度 0.4）；
+ *  - 运行中的 run 也允许点摘要铺开（桌面端运行中不给 toggle）；
+ *  - 悬停才现的复制按钮 / 行尾 × 不做（无剪贴板写入件）。
  */
 
-// ── 令牌（数值 = Hermes styles.css） ──
+// ── 令牌（字号 / 间距 / 透明度 / 圆角） ──
 private val ToolFontSize = 11.sp            // 0.6875rem
 private val ToolLineHeight = 18.sp          // 1.125rem
 private val ToolMetaSize = 10.sp            // 0.625rem
@@ -122,7 +117,7 @@ private const val CaretRestAlpha = ScaffoldCaretRestAlpha
 
 /**
  * 脚手架家族共用件（工具行、run 摘要行、思考标题行都是同一类「安静的一行」，
- * Hermes 用 `scaffold-row.tsx` 统一，避免各处自己挑灰色/字号而漂移）。
+ * 统一走同一个脚手架组件，避免各处自己挑灰色/字号而漂移）。
  */
 @Composable
 internal fun scaffoldLabelStyle(): TextStyle =
@@ -134,7 +129,7 @@ internal fun scaffoldLabelColor(): Color = MaterialTheme.colorScheme.onSurface.c
 @Composable
 internal fun scaffoldMetaColor(): Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.44f)
 
-/** Hermes `DisclosureCaret`：chevron-right，展开时旋转 90°，150ms 过渡。 */
+/** 折叠箭头：chevron-right，展开时旋转 90°，150ms 过渡。 */
 @Composable
 internal fun ScaffoldCaret(open: Boolean, size: Dp = 12.dp) {
     val rotated by animateFloatAsState(
@@ -153,7 +148,7 @@ internal fun ScaffoldCaret(open: Boolean, size: Dp = 12.dp) {
     )
 }
 
-/** Hermes 会话令牌色（`--ui-base` = 主题前景，各档按百分比混到背景上）。 */
+/** 会话令牌色（基准 = 主题前景，各档按百分比混到背景上）。 */
 private class ToolPalette(
     val scaffoldText: Color,
     val quinary: Color,
@@ -189,7 +184,7 @@ private fun toolPalette(): ToolPalette {
 
 private fun TextStyle.tool(color: Color) = copy(color = color)
 
-/** mono = true 用于正文/预格式段（Hermes 只给 TOOL_SECTION_PRE 加 font-mono）；标题行走界面字体。 */
+/** mono = true 用于正文/预格式段；标题行走界面字体。 */
 private fun toolStyle(size: TextUnit, mono: Boolean = true, weight: FontWeight? = null) =
     TextStyle(
         fontSize = size,
@@ -209,7 +204,7 @@ internal fun toolKindOf(name: String): ToolKind = when (name) {
     else -> ToolKind.OTHER
 }
 
-/** 自带卡片的工具（不并进 run 摘要；Hermes `isCardTool`）：文件写入/编辑是交付物。 */
+/** 自带卡片的工具（不并进 run 摘要）：文件写入/编辑是交付物。 */
 internal fun isCardTool(name: String): Boolean = toolKindOf(name) == ToolKind.EDIT
 
 /** 活动型工具（可折进 run 摘要）：非交付物的读/搜/命令等。 */
@@ -231,7 +226,7 @@ private fun firstArg(params: String, vararg keys: String): String {
 private fun basename(path: String): String =
     path.trimEnd('/').substringAfterLast('/').ifEmpty { path }
 
-/** 命令摘要（Hermes `summarizeShellCommand`：压空白 + 截断）。 */
+/** 命令摘要（压空白 + 截断）。 */
 internal fun summarizeCommand(raw: String, max: Int = 160): String {
     val line = raw.replace(Regex("\\s+"), " ").trim()
     return if (line.length > max) line.take(max - 1) + "…" else line
@@ -255,7 +250,7 @@ private fun baseTitle(name: String, pending: Boolean): String = when (name) {
 }
 
 /**
- * read 的行区间标签（Hermes `readFileLineLabel` / `readFileDisplayTarget`）：
+ * read 的行区间标签：
  * 优先从结果文本里的 `[Showing lines 120-200 of …]` 取真实区间，否则退回参数 offset/limit
  * （pi 的 offset 是 **1-indexed**，所以直接把参数写进 `L120-200` 不需要换算）。
  */
@@ -274,7 +269,7 @@ private fun readLineLabel(call: Msg.ToolCall, output: String?): String {
 }
 
 /**
- * 行标题：优先「动作 + 目标」（Hermes `dynamicTitle` → `actionTarget` / `actionCommand` / `actionQuoted`）。
+ * 行标题：优先「动作 + 目标」。
  *
  * 动词与语序全部取自语言包（[ChatStrings.runSummaryTarget]）：中文「已读取 wiring.tsx」、
  * 西语「Leyó wiring.tsx」、印地语「wiring.tsx पढ़ा गया」——UI 层不再出现任何中文字面量。
@@ -309,8 +304,8 @@ internal fun toolRowTitle(call: Msg.ToolCall): String {
             }
         }
         "write" -> {
-            // Hermes：文件编辑类工具（write/edit/patch）的标题就是**文件名本身**（动作由
-            // Edit 图标 + 正文承载），不拼动词——见 fallback-model `dynamicTitle` 的 isFileEditTool 分支
+            // 文件编辑类工具（write/edit/patch）的标题就是**文件名本身**（动作由
+            // Edit 图标 + 正文承载），不拼动词。
             val p = firstArg(call.params, "path", "file")
             if (p.isEmpty()) baseTitle(call.name, pending) else basename(p)
         }
@@ -346,8 +341,8 @@ internal fun toolRowTitle(call: Msg.ToolCall): String {
 }
 
 /**
- * 标题拆成（动作词, 其余）——Hermes 的 `titleAction`：进行中只给**动作词**加 shimmer
- * （`{prefix}<span class="shimmer">{action}</span>{suffix}`），目标名是静态的。
+ * 标题拆成（动作词, 其余）：进行中只给**动作词**加 shimmer
+ * （目标名静态、不参与动效）。
  */
 internal fun toolRowTitleParts(call: Msg.ToolCall): Pair<String, String> {
     val full = toolRowTitle(call)
@@ -359,7 +354,7 @@ internal fun toolRowTitleParts(call: Msg.ToolCall): Pair<String, String> {
     return verb to full.removePrefix(verb)
 }
 
-/** 结果计数标签（Hermes `formatCountLabel` = `N <名词>`）。 */
+/** 结果计数标签（`N <名词>`）。 */
 private fun countLabel(call: Msg.ToolCall, output: String): String? {
     if (call.status == ToolStatus.RUNNING || output.isBlank()) return null
     val lines = output.lines().count { it.isNotBlank() }
@@ -388,7 +383,7 @@ private fun stripExitNote(text: String): String =
 
 /**
  * 一行工具调用：头部（glyph + 标题 + meta + caret）+ 可展开正文。
- * 展开态才套边框壳（Hermes `TOOL_EXPANDED_SHELL_CLASS`），其余时候只是一行灰字。
+ * 展开态才套边框壳，其余时候只是一行灰字。
  */
 @Composable
 internal fun ToolRow(
@@ -406,7 +401,7 @@ internal fun ToolRow(
                 if (open) Modifier.border(1.dp, p.stroke, RoundedCornerShape(ToolShellRadius))
                 else Modifier,
             )
-            // Hermes：脚手架静息 0.67；展开（或命中）提到 1
+            // 脚手架静息 0.67；展开（或命中）提到 1
             .alpha(if (open) 1f else ScaffoldRestAlpha),
     ) {
         ToolRowHeader(call = call, palette = p, open = open, padded = open, onToggle = { open = !open })
@@ -423,7 +418,7 @@ internal fun ToolRow(
     }
 }
 
-/** 头部行（Hermes `DisclosureRow`）：glyph 格 14dp + 标题 + meta + 右侧 caret。 */
+/** 头部行：glyph 格 14dp + 标题 + meta + 右侧 caret。 */
 @Composable
 private fun ToolRowHeader(
     call: Msg.ToolCall,
@@ -467,7 +462,7 @@ private fun ToolRowHeader(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        // Hermes：文件编辑行在 meta 位显示 **diff 统计**（+N 绿 / −M 红，mono 0.625rem tabular），
+        // 文件编辑行在 meta 位显示 **diff 统计**（+N 绿 / −M 红，mono 0.625rem tabular），
         // 其它行显示时长 / 结果计数
         val stats = if (isCardTool(call.name)) diffStats(call.diff) else null
         if (stats != null) {
@@ -488,7 +483,7 @@ private fun ToolRowHeader(
             }
         } else {
             val meta = if (isCardTool(call.name)) countLabel(call, call.detail ?: "")
-            // Hermes：非文件编辑行 meta = 计数 + 时长（countLabel 在前，durationLabel 在后）
+            // 非文件编辑行 meta = 计数 + 时长（计数在前，时长在后）
             else listOfNotNull(countLabel(call, call.detail ?: ""), formatDuration(call.durationMs))
                 .joinToString(" · ").ifEmpty { null }
             if (meta != null) {
@@ -507,7 +502,7 @@ private fun ToolRowHeader(
     }
 }
 
-/** 状态 glyph：运行中=转圈、失败=红叹号、成功=**工具图标**（Hermes `leadingStatus`：成功是安静的）。 */
+/** 状态 glyph：运行中=转圈、失败=红叹号、成功=**工具图标**（成功是安静的）。 */
 @Composable
 private fun ToolGlyph(call: Msg.ToolCall, palette: ToolPalette) {
     Box(Modifier.size(14.dp), contentAlignment = Alignment.Center) {
@@ -552,7 +547,7 @@ private fun parseGrepHits(output: String?): List<GrepHit> {
     }
 }
 
-/** diff 的 +/- 统计（Hermes 文件卡 `+N −M`）。 */
+/** diff 的 +/- 统计（文件卡 `+N −M`）。 */
 private fun diffStats(diff: String?): Pair<Int, Int>? {
     if (diff.isNullOrBlank()) return null
     var add = 0
@@ -587,9 +582,9 @@ private fun ToolBody(call: Msg.ToolCall, output: String?, palette: ToolPalette) 
     if (call.status == ToolStatus.RUNNING) return
     val body = stripExitNote(output?.trim().orEmpty())
 
-    // 工具专属视图（适配 Pient 的 pi 工具产出形态，Hermes 的对应视图见注释）
+    // 工具专属视图（适配 pi 的工具产出形态）
     when (call.name) {
-        // edit：Hermes 的文件卡 = diff 面板（`FileDiffPanel`，max-h 12rem、行左 2px 边框、+/- 语义色）
+        // edit：文件卡 = diff 面板（限高 12rem = 192dp、行左 2px 边框、+/- 语义色）
         "edit" -> {
             if (!call.diff.isNullOrBlank()) {
                 DiffPanel(diff = call.diff, palette = palette)
@@ -597,7 +592,7 @@ private fun ToolBody(call: Msg.ToolCall, output: String?, palette: ToolPalette) 
             }
         }
         // read：pi 的输出是「行号|正文」逐行 → 行号槽 + 正文的代码块，
-        // 不再把 `1|xxx` 原样当文本贴出来（2026-09-14 重设计，适配 pi 的产出格式）
+        // 不把 `1|xxx` 原样当文本贴出来（适配 pi 的产出格式）
         "read" -> {
             val lines = parseReadLines(body)
             if (lines.isNotEmpty()) {
@@ -635,7 +630,7 @@ private fun ToolBody(call: Msg.ToolCall, output: String?, palette: ToolPalette) 
                 return
             }
         }
-        // grep：Hermes 的 SearchResultsList（命中 → 文件:行 + 摘要），不是一坨原始文本
+        // grep：命中列表（文件:行 + 摘要），不是一坨原始文本
         "grep" -> {
             val hits = parseGrepHits(body)
             if (hits.isNotEmpty()) {
@@ -767,7 +762,7 @@ private fun PathEntryList(entries: List<String>, palette: ToolPalette) {
 }
 
 /**
- * grep 命中列表（Hermes `SearchResultsList`）：每条 = `文件:行`（次亮）+ 摘要（弱化，最多 2 行）。
+ * grep 命中列表：每条 = `文件:行`（次亮）+ 摘要（弱化，最多 2 行）。
  * pi 的 grep 输出就是 `path:line:text` 逐行，正好是这套结构。
  */
 @Composable
@@ -804,7 +799,7 @@ private fun GrepHitsList(hits: List<GrepHit>, palette: ToolPalette) {
 }
 
 /**
- * diff 面板（Hermes `FileDiffPanel`：`max-h-[12rem]`(192dp) 滚动、mono 0.7rem、
+ * diff 面板（限高 192dp（12rem）滚动、mono 0.7rem、
  * 每行 `border-l-2 px-2.5 py-px`、+/- 用 emerald/rose 语义色，hunk/文件头弱化）。
  */
 @Composable
@@ -814,7 +809,7 @@ private fun DiffPanel(diff: String, palette: ToolPalette) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 8.dp, end = 8.dp, bottom = 6.dp)
-            .heightIn(max = 192.dp)   // Hermes max-h-[12rem]
+            .heightIn(max = 192.dp)   // 12rem
             .verticalScroll(rememberScrollState())
             .horizontalScroll(rememberScrollState()),
     ) {
@@ -852,7 +847,7 @@ private fun sectionLabelFor(name: String) = when (name) {
     else -> L.common.output
 }
 
-/** `$ 命令` + `exit N` 徽标 +（android_shell）通道徽标（Hermes `TerminalTranscript` 几何/配色）。 */
+/** `$ 命令` + `exit N` 徽标 +（android_shell）通道徽标（几何/配色）。 */
 @Composable
 private fun ToolCommandBlock(command: String, exitCode: Int?, channel: String?, palette: ToolPalette) {
     Row(
@@ -873,7 +868,7 @@ private fun ToolCommandBlock(command: String, exitCode: Int?, channel: String?, 
             modifier = Modifier.weight(1f),
         )
         CopyButton(text = command, label = L.chat.copyCommand)
-        // android_shell 的通道徽标（Pient 专有工具：标准 / ADB(Shizuku) / Root 三档，Hermes 无此类工具）
+        // android_shell 的通道徽标（Pient 专有工具：标准 / ADB(Shizuku) / Root 三档）
         if (channel != null) {
             Text(
                 channel,
@@ -897,7 +892,7 @@ private fun ToolCommandBlock(command: String, exitCode: Int?, channel: String?, 
     }
 }
 
-/** 段标签（0.65rem / tracking .08em）+ 限高 80dp 滚动的 mono 正文（Hermes `TOOL_SECTION_*`）。 */
+/** 段标签（0.65rem / tracking .08em）+ 限高 80dp 滚动的 mono 正文。 */
 @Composable
 private fun ToolSectionBlock(
     label: String,
@@ -932,8 +927,8 @@ private fun ToolSectionBlock(
 }
 
 /**
- * 段内复制键（Hermes `CopyButton appearance="inline"`：正文右上角的小图标键、默认很淡）。
- * 触摸端没有 hover → 常驻显示（静息 0.4 透明度，Hermes 的 `--disclosure-caret-rest` 同档）。
+ * 段内复制键（正文右上角的小图标键、默认很淡）。
+ * 触摸端没有 hover → 常驻显示（静息 0.4 透明度）。
  */
 @Composable
 private fun CopyButton(text: String, label: String) {
@@ -954,7 +949,7 @@ private fun CopyButton(text: String, label: String) {
     )
 }
 
-/** 「工具负载」折叠披露（Hermes `ToolPayloadDisclosure`：原始 args/result，默认收起）。 */
+/** 「工具负载」折叠披露（原始 args/result，默认收起）。 */
 @Composable
 private fun ToolPayloadDisclosure(call: Msg.ToolCall, result: Msg.ToolResult?, palette: ToolPalette) {
     var open by remember(call.params, call.detail) { mutableStateOf(false) }
@@ -1029,7 +1024,7 @@ private val CatCopyOf: Map<ToolKind, CatCopy>
         ),
     )
 
-/** 分句顺序固定（Hermes `CATEGORY_ORDER`）：编辑 → 读取 → 运行 → 其他。 */
+/** 分句顺序固定：编辑 → 读取 → 运行 → 其他。 */
 private val CatOrder = listOf(ToolKind.EDIT, ToolKind.EXPLORE, ToolKind.RUN, ToolKind.OTHER)
 
 private fun runTarget(call: Msg.ToolCall): String = when (toolKindOf(call.name)) {
@@ -1041,7 +1036,7 @@ private fun runTarget(call: Msg.ToolCall): String = when (toolKindOf(call.name))
 }
 
 /**
- * 一行摘要（Hermes `summarizeToolRun`）：单条带目标写目标（"已读取 wiring.tsx"），
+ * 一行摘要：单条带目标写目标（"已读取 wiring.tsx"），
  * 否则写计数（"已运行 5 条命令"）；运行中的那一类改用进行时。分句顺序与连接符归语言包（[ChatStrings.runSummaryJoin]），计数分句还要一个复数形动词（西语用陈述式第三人称、印地语要与名词性别数一致）。
  */
 internal fun summarizeToolRun(calls: List<Msg.ToolCall>, live: Boolean): String {
@@ -1055,7 +1050,7 @@ internal fun summarizeToolRun(calls: List<Msg.ToolCall>, live: Boolean): String 
         val verb = if (kind == liveKind) copy.present else copy.past
         val verbPlural = if (kind == liveKind) copy.presentPlural else copy.pastPlural
         val target = if (group.size == 1) runTarget(group[0]) else ""
-        // 一条「已结束」的命令不写命令行（Hermes：命令行只在正等着它的时候占位置）
+        // 一条「已结束」的命令不写命令行（命令行只在正等着它的时候占位置）
         if (target.isNotEmpty() && (kind == liveKind || kind != ToolKind.RUN)) L.chat.runSummaryTarget(verb, target)
         else L.chat.runSummaryClause(verb, group.size, copy.noun, verbPlural)
     }
@@ -1064,7 +1059,7 @@ internal fun summarizeToolRun(calls: List<Msg.ToolCall>, live: Boolean): String 
 
 /**
  * 一次「工具运行」= 一行摘要 +（运行中：一行 ticker；点开：完整行列表）。
- * 单条调用不走这里（它自己就是一行；Hermes `ToolRun` 在 count < 2 时直接早退）。
+ * 单条调用不走这里（它自己就是一行；count < 2 时直接早退）。
  */
 @Composable
 internal fun ToolRunGroup(
@@ -1101,7 +1096,7 @@ internal fun ToolRunGroup(
         }
 
         if (live && !expanded) {
-            // 运行中：单行窗口里只露当前那条（Hermes `ToolRunTicker` 的原地翻牌）
+            // 运行中：单行窗口里只露当前那条（原地翻牌）
             Box(Modifier.fillMaxWidth().height(ToolLineHeightDp).clipToBounds()) {
                 ToolRowHeader(
                     call = calls.last(),

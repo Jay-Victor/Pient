@@ -12,7 +12,7 @@ import java.net.Socket
 import java.security.SecureRandom
 
 /**
- * **Android shell 回桥**（2026-09-14 设计基线第 4 条 / 用户要求 5）。
+ * **Android shell 回桥**。
  *
  * 为什么需要一条回桥：AI 的主体（pi）跑在 **Ubuntu(PRoot) 的 guest 里**，
  * 而 Shizuku 的 ADB 级通道**只能在 Java 侧调用**（`IShizukuService.newProcess` 是这个 binder 的方法，

@@ -77,10 +77,10 @@ import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.launch
 
 /**
- * 首启引导页（P10，设计计划第 2 章）
+ * 首启引导页
  * 三页顺序：欢迎页 → 基础权限设置页 → 系统权限选项页，全程不可跳过权限页。
- * - 整体：玻璃卡片浮于品牌渐变背景之上（Hermes 同源）
- * - 基础权限页为真实系统授权（2026-09-02 接入，Operit 同款口径）：存储/悬浮窗/
+ * - 整体：玻璃卡片浮于品牌渐变背景之上
+ * - 基础权限页为真实系统授权：存储/悬浮窗/
  *   电池优化豁免跳系统设置页，位置走运行时权限弹窗；进入页面与从设置返回（ON_RESUME）自动重检。
  */
 @Composable
@@ -130,7 +130,7 @@ private fun WelcomePage(onNext: () -> Unit) {
             .padding(24.dp),
     ) {
         Column(Modifier.fillMaxSize()) {
-            // 上方：logo + "Pient"（2026-09-01 重做：原大号渐变字样改为 logo + 产品名；无入场动画）
+            // 上方：logo + "Pient"（无入场动画）
             Box(
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 contentAlignment = Alignment.Center,
@@ -166,7 +166,7 @@ private fun WelcomePage(onNext: () -> Unit) {
                 }
             }
 
-            // 产品介绍卡片（4 条：图标 + 标题 + 加长辅助说明，2026-09-01 文字量增加）
+            // 产品介绍卡片（4 条：图标 + 标题 + 加长辅助说明）
             PientPanel(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -243,22 +243,22 @@ private fun PermissionPage(onNext: () -> Unit, onBackToWelcome: () -> Unit) {
     var lastCheck by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    // ── 真实权限状态检查（Operit PermissionGuideViewModel.checkPermissions 同款口径）──
+    // ── 真实权限状态检查 ──
     fun checkPermissions() {
         status = SystemPermissions.status(context)
     }
 
-    // Android 10 及以下：存储运行时权限请求（Operit storagePermissionLauncher 同款）
+    // Android 10 及以下：存储运行时权限请求
     val storageLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { checkPermissions() }
 
-    // 位置运行时权限请求（Operit locationPermissionLauncher 同款：FINE + COARSE 一起请求）
+    // 位置运行时权限请求（FINE + COARSE 一起请求）
     val locationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { checkPermissions() }
 
-    // ── 系统设置页请求（Operit PermissionGuideScreen 同款：intent 直接跳设置）──
+    // ── 系统设置页请求（intent 直接跳设置）──
     fun requestStorage() {
         if (SystemPermissions.needsRuntimeStorage) {
             storageLauncher.launch(SystemPermissions.runtimeStoragePermissions)
@@ -279,7 +279,7 @@ private fun PermissionPage(onNext: () -> Unit, onBackToWelcome: () -> Unit) {
         }
     }
 
-    // 进入页面即检查；从系统设置/系统弹窗返回后 ON_RESUME 自动重检（v1 真实实现）
+    // 进入页面即检查；从系统设置/系统弹窗返回后 ON_RESUME 自动重检
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(Unit) { checkPermissions() }
     DisposableEffect(lifecycleOwner) {
@@ -340,7 +340,7 @@ private fun PermissionPage(onNext: () -> Unit, onBackToWelcome: () -> Unit) {
             }
         }
 
-        // 检查权限状态（2026-09-01 重做交互：点击 → 重检动画 → 结果摘要；不再只显示时间）
+        // 检查权限状态（点击 → 重检动画 → 结果摘要）
         // 状态行：未检查 / 检查中 / 上次检查结果
         val ready = status.readyCount
         Text(
@@ -358,7 +358,7 @@ private fun PermissionPage(onNext: () -> Unit, onBackToWelcome: () -> Unit) {
             onClick = {
                 checking = true
                 scope.launch {
-                    // 真实重检（Operit onRefresh 同款：同步读取系统当前授权状态）
+                    // 真实重检：同步读取系统当前授权状态
                     checkPermissions()
                     lastCheck = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
                         .format(java.util.Date())
@@ -547,7 +547,7 @@ private fun SystemPermissionPage(
             L.onboarding.enterPient,
             onClick = {
                 val picked = tiers[selected]
-                // 用户口径（2026-09-16）：只有配齐该档位权限才可以把它作为当前档位 ——
+                // 只有配齐该档位权限才可以把它作为当前档位 ——
                 // 未配齐时仍以标准档进入（标准档依赖的基础四项已由上一页强制），并说明缺什么、去哪配齐。
                 val st = tierState
                 val ready = if (picked == PermissionTier.STANDARD) st?.ready(picked) ?: true

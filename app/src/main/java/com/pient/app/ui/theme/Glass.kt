@@ -41,24 +41,24 @@ import io.github.fletchmckee.liquid.liquefiable
 import io.github.fletchmckee.liquid.rememberLiquidState
 
 /**
- * 玻璃材质基础设施（2026-09-12，输入框设置「输入框材质」的实现层）。
+ * 玻璃材质基础设施（输入框设置「输入框材质」的实现层）。
  *
- * 与 Mdcito 同款依赖与装配方式：
+ * 依赖与装配方式：
  * - `com.kyant.backdrop` 采样「背景捕获层」纹理 → 高斯模糊 + 振动饱和 + 边缘高光 + 投影（磨砂玻璃）；
  * - `io.github.fletchmckee.liquid` 在标记为 liquefiable 的层上做水玻璃流体折射/色散（液态玻璃）。
  *
- * ★ 装配红线（照抄 Mdcito GlassThemeProvisioning 的结论，踩过必崩）：
+ * ★ 装配红线（踩过必崩）：
  *   `content()`（真正使用玻璃的界面）必须与「背景捕获层」**同级**，不能在其内部——
  *   否则 drawBackdrop 的输出会被 layerBackdrop 再次捕获，渲染树自引用 →
  *   RenderNode::prepareTreeImpl 无限递归 → 栈溢出。
  *
  * ★ 效果依赖 RuntimeShader（AGSL），Android 13（API 33）起可用；更低版本自动降级为
- *   「投影 + 描边 + 半透明色调 + 高光」静态玻璃（与 Mdcito 降级路径一致，不会崩，只是没有真实模糊）。
+ *   「投影 + 描边 + 半透明色调 + 高光」静态玻璃（不会崩，只是没有真实模糊）。
  */
 fun isPientGlassSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
 /**
- * 玻璃采样血边（2026-09-12 修「纹理强度在边缘弱于中间」）。
+ * 玻璃采样血边（「纹理强度在边缘弱于中间」）。
  *
  * 根因：kyant backdrop 的模糊是在**面板节点自己的离屏缓冲**里做的——缓冲 = 面板尺寸 +
  * 2×模糊半径（库内部按模糊半径自动膨胀，`BlurKt` 里 `padding = radius`），模糊核在缓冲里
@@ -68,7 +68,7 @@ fun isPientGlassSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CO
  * 真实界面直接透出：观感即「边缘的纹理强度弱于中间」。测量实证（磨砂 300 = 模糊 30dp，
  * 板宽 1080px）：左/右贴边处采样缺失 ≈ 50%（泄漏带约 48px）、下缘距窗口底 67px 缺失 ≈9%
  * （泄漏很轻）、上缘在窗口中部缺失 0%（无泄漏）——缺失比例 = 模糊核落在捕获层外的比例。
- * Mdcito 的玻璃卡片四周都留白（不贴窗口边），永远踩不到这条边界，所以观感是均匀的。
+ * 四周留白的玻璃卡片（不贴窗口边）踩不到这条边界，观感是均匀的。
  *
  * 修法：把捕获层做大一圈（吃满模糊半径），外圈用「背景内容的放大版」补满——等价于系统
  * 模糊（SurfaceFlinger/RenderEffect）在图层边界做的 edge-clamp：向外延展边缘像素，只是
@@ -196,18 +196,18 @@ private fun Modifier.glassCaptureBleed(bleed: Dp): Modifier = this.layout { meas
 /**
  * 玻璃容器（输入框 / 侧边栏 / 后续卡片类玻璃面板共用）：
  * - [PanelMaterial.DEFAULT] → 走全应用统一的 [PientPanel]（纯色底 + hairline 描边，无玻璃）；
- * - [PanelMaterial.FROSTED] → kyant backdrop 背景模糊（Mdcito 磨砂玻璃卡片同款参数）；
- * - [PanelMaterial.LIQUID] → fletchmckee 水玻璃流体折射（Mdcito 液态玻璃卡片同款参数）。
+ * - [PanelMaterial.FROSTED] → kyant backdrop 背景模糊；
+ * - [PanelMaterial.LIQUID] → fletchmckee 水玻璃流体折射。
  *
- * ★ 采样范围（2026-09-12 修「输入框下像有遮罩、内容滑过不透」）：
+ * ★ 采样范围（「输入框下像有遮罩、内容滑过不透」）：
  * 玻璃的观感取决于「它采样到了什么」。只采样主题背景层时，页面底色是纯色的场合
- * 玻璃 ≈ 一块纯色板（看着就是遮罩）；Operit 的输入栏是**覆盖在聊天内容之上**的浮层，
+ * 玻璃 ≈ 一块纯色板（看着就是遮罩）；输入栏是**覆盖在聊天内容之上**的浮层，
  * 因此这里同时采样两路 backdrop：[extraBackdrop]（输入栏背后的实时内容，由调用方在
  * 内容层上 layerBackdrop 录制）+ 主题背景层（[LocalGlassBackdrop]），用
  * rememberCombinedBackdrop 合成 → 内容滑过输入框时能从玻璃里透出模糊的内容。
  *
- * [floating] 用于贴身程度相关的参数（模糊半径 / 叠加浓度），口径对齐 Operit
- * ClassicChatInputSection：模糊 悬浮 16dp / 贴底 20dp，叠加 磨砂 0.06/0.10、液态 0.04/0.08。
+ * [floating] 用于贴身程度相关的参数（模糊半径 / 叠加浓度）：
+ * 模糊 悬浮 16dp / 贴底 20dp，叠加 磨砂 0.06/0.10、液态 0.04/0.08。
  */
 @Composable
 fun PientGlassSurface(
@@ -216,9 +216,9 @@ fun PientGlassSurface(
     modifier: Modifier = Modifier,
     containerColor: Color = MaterialTheme.colorScheme.surfaceContainer,
     floating: Boolean = false,
-    /** 「简约」材质透明度 0..100（100 = 完全透明；口径对齐 Mdcito 卡片透明度 alpha = 1 - t/100） */
+    /** 「简约」材质透明度 0..100（100 = 完全透明；透明度 alpha = 1 - t/100） */
     transparency: Float = 0f,
-    /** 「磨砂玻璃」材质纹理强度 0..300（Mdcito：模糊 10 + 20×因子、叠加浓度 因子×0.30；默认 50） */
+    /** 「磨砂玻璃」材质纹理强度 0..300（模糊 10 + 20×因子、叠加浓度 因子×0.30；默认 50） */
     frostIntensity: Float = 50f,
     extraBackdrop: Backdrop? = null,
     content: @Composable BoxScope.() -> Unit,
@@ -245,7 +245,7 @@ fun PientGlassSurface(
 
     val isLightGlass = containerColor.luminance() >= 0.5f
     val glassModifier = if (material == PanelMaterial.FROSTED) {
-        // 纹理强度（Mdcito）：0..300 → 0..1；模糊 10dp + 20dp×因子、叠加浓度 0.30×因子
+        // 纹理强度：0..300 → 0..1；模糊 10dp + 20dp×因子、叠加浓度 0.30×因子
         val intensityFactor = (frostIntensity / 300f).coerceIn(0f, 1f)
         Modifier.frostedGlass(
             backdrop = backdrop,
@@ -266,8 +266,8 @@ fun PientGlassSurface(
         )
     }
 
-    // 不再额外叠暗色可读性增强层（Mdcito 卡片有、Operit 输入栏没有）——
-    // 多一层 scrim 正是用户报的「输入框下像垫了一层遮罩」，观感以真实玻璃为准。
+    // 不额外叠暗色可读性增强层 ——
+    // 多一层 scrim 正是「输入框下像垫了一层遮罩」的成因，观感以真实玻璃为准。
     Box(modifier.then(glassModifier)) {
         content()
     }

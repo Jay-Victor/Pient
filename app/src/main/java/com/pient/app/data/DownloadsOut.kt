@@ -12,16 +12,16 @@ import com.pient.app.data.i18n.L
 import java.io.File
 
 /**
- * 「导出到系统下载目录」的唯一实现（2026-09-17 从 [SessionExport] 抽出）。
+ * 「导出到系统下载目录」的唯一实现。
  *
  * 语义：写系统「下载/Pient/<fileName>」——API 29+ 走 MediaStore（免权限、系统文件管理器可见）；
  * API 26~28 公共下载目录需要 WRITE_EXTERNAL_STORAGE，不引权限 → 落应用自己的外部下载目录
  * （同样免权限，但路径在 Android/data 下）。
  *
- * 抽取原因（用户口径「同一语义一份实现」）：日志导出与会话导出是同一个语义（把一段文本
+ * 「同一语义一份实现」：日志导出与会话导出是同一个语义（把一段文本
  * 交给用户能在文件管理器里拿到的位置），两份实现必然漂移（MIME / 目录名 / 失败兜底各写一遍）。
- * 2026-09-17 第二次收口：把 MediaStore 的 uri 一起带出来（[Written]），导出后可直接分享 —— 不再需要
- * 重新在 Downloads 里找文件，也不再为 API 29+ 走 FileProvider。
+ * 把 MediaStore 的 uri 一起带出来（[Written]）：导出后可直接分享 —— 不需要
+ * 重新在 Downloads 里找文件，也不为 API 29+ 走 FileProvider。
  */
 object DownloadsOut {
 

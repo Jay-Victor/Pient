@@ -52,20 +52,20 @@ import com.pient.app.ui.theme.PientPanel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** pi-web PluginsConfig statusColor 的 amber（installed 状态） */
+/** amber（installed 状态色） */
 private val StatusAmber = Color(0xFFF59E0B)
 
 /**
- * 插件详情弹窗（2026-09-08，参考技能详情弹窗 SkillDetailDialog + pi-web PackageDetail）：
+ * 插件详情弹窗：
  * ① 插件名称
  * ② 描述（package.json description；无描述整块隐藏）
  * ③ 「查看README.md」按键（无 README 时禁用）→ 点击展开/收起 Markdown 渲染的预览窗口
- * ④ 状态（pi-web 四态：已加载 primary / 已安装 amber / 已禁用 dim / 缺失 error；包禁用时显示「已禁用」）
- * ⑤ 版本（pi-web versionSummary：已安装 x · 已配置 y；均无显示「未知」）
- * ⑥ 资源（pi-web resourceSummary：N扩展 · N技能 · N提示词 · N主题；无资源显示「没有资源」）
+ * ④ 状态（四态：已加载 primary / 已安装 amber / 已禁用 dim / 缺失 error；包禁用时显示「已禁用」）
+ * ⑤ 版本（已安装 x · 已配置 y；均无显示「未知」）
+ * ⑥ 资源（N扩展 · N技能 · N提示词 · N主题；无资源显示「没有资源」）
  * ⑦ 来源（安装源 spec）
  * ⑧ 安装路径（pi 落盘规则：npm → npm/node_modules/<name>/；git/https → git/<host>/<path>/）
- * ⑨ 已解析资源（pi-web ResourceList 分组清单 + 逐项启停开关，对应 pi config 语义）
+ * ⑨ 已解析资源（分组清单 + 逐项启停开关，对应 pi config 语义）
  * ⑩ 底部「更新」（mock 进度）「删除」+「关闭」。
  * 无右上角 ×（带关闭按钮的弹窗按全局原则不显示 ×）；点 scrim 空白处同样关闭。
  */
@@ -81,13 +81,13 @@ fun PluginDetailDialog(
     var resources by remember(item.name) { mutableStateOf(item.resources) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    // 「检查更新 → 更新」状态机（2026-09-10 用户要求）：默认「检查更新」；检查中按钮文字换成旋转圆弧；
+    // 「检查更新 → 更新」状态机：默认「检查更新」；检查中按钮文字换成旋转圆弧；
     // 有更新 → 按钮变「更新」；无更新 → 文案不变 + Toast「已是最新版本 x」
     var checking by remember(item.name) { mutableStateOf(false) }
     var updateAvailable by remember(item.name) { mutableStateOf(false) }
     val busy = checking || updating   // 任一进行中：三个按键全部禁用，避免并发
-    // 卡片最大高度 = 屏幕高 70%（与技能详情弹窗同款，2026-09-10）：资源清单/README 展开后
-    // 内容会高于屏幕，超出的部分由内容区滚动承接（原先无上限，卡片会顶到屏幕上下缘）
+    // 卡片最大高度 = 屏幕高 70%（与技能详情弹窗同款）：资源清单/README 展开后
+    // 内容会高于屏幕，超出的部分由内容区滚动承接（无上限时卡片会顶到屏幕上下缘）
     val maxCardHeight = (LocalConfiguration.current.screenHeightDp * 0.7f).dp
 
     Box(
@@ -190,7 +190,7 @@ fun PluginDetailDialog(
                         }
                     }
 
-                    // ④ 状态（pi-web statusColor；包禁用时显示「已禁用」）
+                    // ④ 状态（包禁用时显示「已禁用」）
                     Text(
                         L.plugins.status,
                         style = MaterialTheme.typography.labelSmall,
@@ -204,7 +204,7 @@ fun PluginDetailDialog(
                         modifier = Modifier.padding(top = 4.dp),
                     )
 
-                    // ⑤ 版本（pi-web versionSummary：已安装 x · 已配置 y；均无显示「未知」）
+                    // ⑤ 版本（已安装 x · 已配置 y；均无显示「未知」）
                     Text(
                         L.plugins.version,
                         style = MaterialTheme.typography.labelSmall,
@@ -218,7 +218,7 @@ fun PluginDetailDialog(
                         modifier = Modifier.padding(top = 4.dp),
                     )
 
-                    // ⑥ 资源摘要（pi-web resourceSummary：N扩展 · N技能 · N提示词 · N主题）
+                    // ⑥ 资源摘要（N扩展 · N技能 · N提示词 · N主题）
                     Text(
                         L.plugins.resources,
                         style = MaterialTheme.typography.labelSmall,
@@ -260,7 +260,7 @@ fun PluginDetailDialog(
                         modifier = Modifier.padding(top = 4.dp),
                     )
 
-                    // ⑨ 已解析资源（pi-web ResourceList 分组清单 + 逐项启停）
+                    // ⑨ 已解析资源（分组清单 + 逐项启停）
                     Text(
                         L.plugins.resolvedResources,
                         style = MaterialTheme.typography.labelSmall,
@@ -275,7 +275,7 @@ fun PluginDetailDialog(
                             modifier = Modifier.padding(top = 4.dp),
                         )
                     } else {
-                        // pi-web ResourceList 分组顺序：扩展 → 技能 → 提示词 → 主题（仅非空组）
+                        // 分组顺序：扩展 → 技能 → 提示词 → 主题（仅非空组）
                         PluginResourceKind.entries.forEach { kind ->
                             val indexed = resources.mapIndexed { i, r -> i to r }
                                 .filter { it.second.kind == kind }
@@ -359,7 +359,7 @@ fun PluginDetailDialog(
     }
 }
 
-/** pi-web ResourceList 行：名称（等宽）+ 相对路径（等宽弱化）+ 启停开关 */
+/** 资源行：名称（等宽）+ 相对路径（等宽弱化）+ 启停开关 */
 @Composable
 private fun ResourceRow(
     resource: PluginResource,
@@ -397,7 +397,7 @@ private fun ResourceRow(
     }
 }
 
-/** 状态文案（enabled=false 显示「已禁用」，与 pi-web 语义一致） */
+/** 状态文案（enabled=false 显示「已禁用」） */
 private fun statusText(item: PluginItem): String = when {
     !item.enabled -> L.plugins.disabled
     item.status == PluginStatus.LOADED -> L.plugins.loaded
@@ -406,7 +406,7 @@ private fun statusText(item: PluginItem): String = when {
     else -> L.plugins.missing
 }
 
-/** 状态颜色（pi-web statusColor：loaded=accent、installed=amber、disabled=dim、missing=red） */
+/** 状态颜色（loaded=accent、installed=amber、disabled=dim、missing=red） */
 @Composable
 private fun statusColor(item: PluginItem): Color {
     if (!item.enabled || item.status == PluginStatus.DISABLED) {
@@ -420,7 +420,7 @@ private fun statusColor(item: PluginItem): Color {
     }
 }
 
-/** 版本摘要（pi-web versionSummary：已安装 x · 已配置 y；均无 → 未知） */
+/** 版本摘要（已安装 x · 已配置 y；均无 → 未知） */
 private fun versionSummary(item: PluginItem): String {
     val parts = buildList {
         item.version?.let { add(L.plugins.installedVersion(it)) }
@@ -429,7 +429,7 @@ private fun versionSummary(item: PluginItem): String {
     return if (parts.isEmpty()) L.common.unknown else parts.joinToString(" · ")
 }
 
-/** 资源摘要（pi-web resourceSummary：N扩展 · N技能 · N提示词 · N主题；空 → 没有资源） */
+/** 资源摘要（N扩展 · N技能 · N提示词 · N主题；空 → 没有资源） */
 private fun resourceSummary(resources: List<PluginResource>): String {
     val parts = buildList {
         val ext = resources.count { it.kind == PluginResourceKind.EXTENSION }
@@ -444,7 +444,7 @@ private fun resourceSummary(resources: List<PluginResource>): String {
     return if (parts.isEmpty()) L.plugins.noResources else parts.joinToString(" · ")
 }
 
-/** 资源类型分组标题（pi-web i18n：extensions/skills/prompts/themes） */
+/** 资源类型分组标题（extensions/skills/prompts/themes） */
 private fun kindLabel(kind: PluginResourceKind): String = when (kind) {
     PluginResourceKind.EXTENSION -> L.plugins.extension
     PluginResourceKind.SKILL -> L.common.skill

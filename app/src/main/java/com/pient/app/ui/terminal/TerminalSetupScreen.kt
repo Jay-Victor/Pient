@@ -76,17 +76,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 环境配置页（**2026-09-14 按 Operit `SetupScreen` 的结构重做**）。
+ * 环境配置页。
  *
  * 页面三段（自上而下）：
  * 1. **执行环境** —— Pient 特有：命令跑在哪个环境里（Ubuntu PRoot / Ubuntu chroot）。未就绪不可选
  *    （chroot 需要设备已 Root）；改完写 `exec_env`，下一条命令即生效。
  * 2. **apt 镜像源** —— 写进 rootfs 的 deb822 `ubuntu.sources`（国内镜像同时承载 noble-security）；
  *    **路径按本机架构选**：arm64 走 `…/ubuntu-ports/`、x86_64 走 `…/ubuntu/`（写错档位 apt 整轮 404）。
- * 3. **环境内软件** —— 照 Operit：**分类卡**（标题 + 「n/m 已装」 + 全选 + 展开箭头），展开后逐包
+ * 3. **环境内软件** —— **分类卡**（标题 + 「n/m 已装」 + 全选 + 展开箭头），展开后逐包
  *    一行（勾选框 + 名称 + 已安装绿标 + 描述），右下角底部「安装所选」。
  *
- * 三条交互口径（Operit 同款 + Pient 红线）：
+ * 三条交互口径（Pient 红线）：
  * - 已安装的包**勾上且不可取消**（不会重复装）；
  * - 分类行/包行**整行可点**（不是只有勾选框）；
  * - 点「安装所选」→ **跳到终端页**，脚本在专用会话「环境配置」里跑，输出实时可见（本页不留日志区）。
@@ -95,7 +95,7 @@ import kotlinx.coroutines.withContext
 fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
     val context = LocalContext.current
 
-    // 组件状态：null = 检测中（Operit 的 InstallStatus.CHECKING 同义）
+    // 组件状态：null = 检测中
     var status by remember { mutableStateOf<Map<String, Boolean>?>(null) }
     var detectSeq by remember { mutableIntStateOf(0) }
     val selected = remember { mutableStateMapOf<String, Boolean>() }      // 待安装（已装的从不进来）
@@ -104,7 +104,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
     // pi 版本（读解出来的 package.json，不启 guest）；进页面/重新检测时重读
     var piVersion by remember { mutableStateOf(PiRuntime.piVersion(context)) }
 
-    // 更新检查状态机：**默认是「检测更新」，只有真查到新版本才变成「更新」**（用户口径 2026-09-14）
+    // 更新检查状态机：**默认是「检测更新」，只有真查到新版本才变成「更新」**
     var piUpdate by remember { mutableStateOf<PiUpdateState>(PiUpdateState.Idle) }
     val scope = rememberCoroutineScope()
 
@@ -182,7 +182,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
             return
         }
         val session = EnvProvision.installInTerminal(context, installable)
-        // 跳到终端页并选中「环境配置」会话（用户口径：安装过程要在终端里看得见）
+        // 跳到终端页并选中「环境配置」会话（安装过程要在终端里看得见）
         chatState.activePanel = Panel.TERMINAL
         chatState.terminalIndex = TerminalSessions.sessions.indexOf(session).coerceAtLeast(0)
         nav.popBackStack()
@@ -401,7 +401,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
                 }
             }
 
-            // ── 3. 环境内软件（照 Operit：分类卡 + 全选 + 展开） ──
+            // ── 3. 环境内软件（分类卡 + 全选 + 展开） ──
             item {
                 GroupTitle(
                     L.terminal.packagesTitle,
@@ -424,7 +424,7 @@ fun TerminalSetupScreen(nav: NavController, chatState: ChatState) {
             }
         }
 
-        // ── 底部：状态 + 安装所选（Operit 的底部按钮行） ──
+        // ── 底部：状态 + 安装所选 ──
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -536,7 +536,6 @@ private fun DividerThin() {
 /**
  * 徽标（小圆角标签）：分类徽标（「Pient 必须」/「pi 工具依赖」）与行内标记（必须 / 大）共用。
  * [strong] = 醒目的黄（Pient 必须项那类），否则用主色（普通提示）。
- * 口径照 Operit 在分类标题下写「(Operit 必须)」的做法，这里做成可点读的小标签。
  */
 @Composable
 private fun Badge(text: String, strong: Boolean = false) {
@@ -557,7 +556,7 @@ private fun Badge(text: String, strong: Boolean = false) {
 }
 
 /**
- * 分类卡（照 Operit `CategoryCard` 的结构）：标题 + 「n/m 已装」 + 全选 + 展开箭头；展开后逐包一行。
+ * 分类卡：标题 + 「n/m 已装」 + 全选 + 展开箭头；展开后逐包一行。
  * 整行可点 = 展开/收起（交互红线：可点区域必须整块可点）。
  */
 @Composable
@@ -574,9 +573,9 @@ private fun CategoryCard(
     val installed = list.count { status?.get(it.id) == true }
     val uninstalled = list.filter { status?.get(it.id) != true }
     /**
-     * 分类级勾选状态（2026-09-14 修）：**「已装」与「已勾选」一起算**——
-     * 原来的判定要求「有未装项」且它们全被勾，于是**整类都装完之后反而显示未勾**（用户实测报的）。
-     * 现在三态：全齐（装好的 + 已勾的 = 全部）→ 勾上；一个都没有 → 空；其它 → 半选。
+     * 分类级勾选状态：**「已装」与「已勾选」一起算**——
+     * 只要求「有未装项」且它们全被勾的话，**整类都装完之后反而显示未勾**。
+     * 三态：全齐（装好的 + 已勾的 = 全部）→ 勾上；一个都没有 → 空；其它 → 半选。
      */
     val picked = uninstalled.count { selected[it.id] == true }
     val triState = when {
@@ -596,7 +595,7 @@ private fun CategoryCard(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                // 「（Pient 必须）」：照 Operit 的做法写在分类标题下的橙色小字（不另做徽标）
+                // 「（Pient 必须）」：写在分类标题下的橙色小字（不另做徽标）
                 if (requiredGroup) {
                     Text(
                         L.terminal.pientRequired,
@@ -619,7 +618,7 @@ private fun CategoryCard(
                     TriStateCheckbox(
                             state = triState,
                     // 全部装好 = 没有可勾的：onClick 传 null（不可点），但 **enabled 保持 true** ——
-                    // 实测：disabled 的复选框在无障碍树里等于"不显示"，用户看到的就是"框里没勾"
+                    // disabled 的复选框在无障碍树里等于"不显示"，用户看到的就是"框里没勾"
                         onClick = if (status == null || uninstalled.isEmpty()) {
                             null
                         } else {
@@ -658,7 +657,7 @@ private fun CategoryCard(
         }
     }
 
-/** 单个组件行（照 Operit `PackageItem`）：勾选 + 名称（+已安装/大）+ 描述；已安装不可取消 */
+/** 单个组件行：勾选 + 名称（+已安装/大）+ 描述；已安装不可取消 */
 @Composable
 private fun ComponentRow(
     component: UbuntuComponent,
@@ -675,7 +674,7 @@ private fun ComponentRow(
             .padding(start = 4.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
     ) {
         // 一律套 48dp 槽位：onCheckedChange = null 时 Material3 **不会**再套最小触控尺寸包裹，
-        // 复选框会缩成 20dp 贴到行左边 —— 实测已装行方框在 x 58..110、未装行在 x 90..142（左移 32px），
+        // 复选框会缩成 20dp 贴到行左边（相对已装行左移 32px），
         // 就是用户看到的「勾选的和没勾的方框不对齐」。用固定槽位让两种状态同宽同位。
         if (checking) {
             Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) { ArcSpinner(size = 16.dp) }
@@ -684,7 +683,7 @@ private fun ComponentRow(
                 Checkbox(
                     checked = installed || selected,
                 // 已装 = 只读：用 **onCheckedChange = null**（不是 enabled = false）——
-                // enabled=false 会被 Material3 画成**灰色**（用户明确说「不要灰色」）；
+                // enabled=false 会被 Material3 画成**灰色**；
                 // 传 null 时控件不可点但按正常配色渲染（蓝色实心勾），与分类级那个框一致。
                     onCheckedChange = if (installed) null else { { onToggle() } },
                         enabled = !checking,

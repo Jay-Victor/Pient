@@ -20,11 +20,11 @@ import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
 
 /**
- * 系统提示词只读面板（2026-09-01，pi-web system 面板同款）：
+ * 系统提示词只读面板：
  * - 输入栏上下文指示器右侧文件图标点开；浮层家族同款规格（268.8dp 宽、16dp 圆角、
  *   右距 6dp、bottomOffset 锚定输入栏上缘、点外关闭无 scrim）。
  * - 内容 = agent.state.systemPrompt 全文只读展示：等宽字体、11sp、最多 ~280dp 高可滚动；
- *   空值显示空态斜体（pi-web system.empty 同款语义）。
+ *   空值显示空态斜体。
  */
 @Composable
 fun SystemPromptPanel(
@@ -60,7 +60,7 @@ fun SystemPromptPanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            // 全文只读展示（pi-web：等宽 + pre-wrap 语义）
+            // 全文只读展示（等宽 + pre-wrap 语义）
             if (prompt.isNotEmpty()) {
                 Text(
                     prompt,

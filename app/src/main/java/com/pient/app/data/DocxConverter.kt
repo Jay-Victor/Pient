@@ -10,15 +10,12 @@ import org.xmlpull.v1.XmlPullParser
 /**
  * docx（OOXML）→ HTML 预览文本。
  *
- * 口径与 Operit `DocumentConversionUtil.convertToHtml` 的 docx 分支一致：
- * 逐段取文本、转义 `<`/`>`、每段包 `<p>`、空段落丢弃、同一套 HTML 外壳与 CSS（Arial / margin 40px）；
- * 粗体 / 斜体按运行（run）的 `w:rPr` 判定（Operit 是按「段内任一 run 有格式则整段加粗」，此处按 run 粒度，
- * 视觉更接近原文，外壳与段结构不变）。
+ * 逐段取文本、转义 `<`/`>`、每段包 `<p>`、空段落丢弃、统一 HTML 外壳与 CSS（Arial / margin 40px）；
+ * 粗体 / 斜体按运行（run）的 `w:rPr` 判定（按 run 粒度比整段加粗更接近原文，外壳与段结构不变）。
  *
- * 与 Operit 的差异只在取字节的方式：Operit 走 Apache POI（`XWPFWordExtractor`，Android 上需 StAX/awt 兼容层），
- * 这里直接解 docx 的 `word/document.xml`（zip + XmlPullParser），零第三方依赖。
- * 表格为 Pient 增补（Operit 的 docx 分支经 POI `getParagraphs()` 取不到表格单元格，表格内容不显示）：
- * `w:tbl` → HTML `<table>`（`w:tr`/`w:tc` → `<tr><td>`，单元格内段落取文本），外壳补了表格边框样式。
+ * 取字节的方式：直接解 docx 的 `word/document.xml`（zip + XmlPullParser），零第三方依赖
+ * （Apache POI 那套在 Android 上需 StAX/awt 兼容层）。
+ * 表格：`w:tbl` → HTML `<table>`（`w:tr`/`w:tc` → `<tr><td>`，单元格内段落取文本），外壳补了表格边框样式。
  */
 object DocxConverter {
 
@@ -27,7 +24,7 @@ object DocxConverter {
     private const val HTML_HEAD =
         "<!DOCTYPE html>\n<html><head><meta charset=\"UTF-8\"><title>%s</title><style>" +
             "body { font-family: Arial, sans-serif; margin: 40px; }" +
-            // 表格为 Pient 增补（Operit 的 docx 分支经 POI 取不到表格），补边框样式保证可读
+            // 表格补边框样式保证可读
             "table { border-collapse: collapse; }" +
             "td, th { border: 1px solid #999999; padding: 4px 8px; vertical-align: top; }" +
             "</style></head><body>\n"
@@ -46,7 +43,7 @@ object DocxConverter {
     }
 
     /**
-     * docx → 纯文本（2026-09-14）。**给 agent 的 read 工具用**：用户用「+」上传的 docx 附件落在
+     * docx → 纯文本。**给 agent 的 read 工具用**：用户用「+」上传的 docx 附件落在
      * `files/attachments/`，模型需要能读到里面的字（UI 侧的富文本渲染仍走 [toHtml]）。
      * 解析路径与 [toHtml] 完全同一份（`word/document.xml` 的 `<w:p>`），只是把标签剥成纯文本。
      *
@@ -156,7 +153,7 @@ object DocxConverter {
         return out
     }
 
-    /** 段 HTML：空段落丢弃（Operit 同款），run 级 粗体/斜体 */
+    /** 段 HTML：空段落丢弃，run 级 粗体/斜体 */
     private fun paragraphHtml(runs: List<Run>): String {
         val text = runs.joinToString("") { it.text.toString() }
         if (text.isBlank()) return ""

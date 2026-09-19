@@ -51,11 +51,10 @@ import com.pient.app.ui.theme.PientPanel
 import java.io.File
 
 /**
- * 聊天页首次引导（2026-09-08 用户定：移除 mock 后初次进入无项目，2026-09-08 晚迭代为
- * 双步骤清单——两个条件任一未满足即显示引导，已完成步骤打勾提示，两者齐备才进入聊天）：
- * ① 创建项目（新建文件夹；2026-09-14 用户拍板：移除 SAF「选择本地文件夹」）；
+ * 聊天页首次引导（两个条件任一未满足即显示引导，已完成步骤打勾提示，两者齐备才进入聊天）：
+ * ① 创建项目（新建文件夹）；
  * ② 配置 AI 模型：跳转服务商与模型配置页，「测试连接」成功后标记完成；
- * ③ 配置 Ubuntu 环境（2026-09-15 加，要求 2）：pi 本体随 Pient 预置，但**跑 pi 的 Node 环境不随包**，
+ * ③ 配置 Ubuntu 环境：pi 本体随 Pient 预置，但**跑 pi 的 Node 环境不随包**，
  *    首次要在「环境配置」里装一次（node + rg/fd）；这一项以 **pi 通道就绪** 为判据 ——
  *    因为它正是「环境配好了、pi 真的起得来」的唯一可信信号（与聊天页的就绪条同源）。
  */
@@ -86,7 +85,7 @@ fun FirstRunGuide(
                 Image(
                     painter = painterResource(id = R.drawable.pient_logo),
                     contentDescription = null,
-                    // 与引导页欢迎页同比例：logo 填满圆形底（80/80，2026-09-08 用户：logo 偏小放大）
+                    // 与引导页欢迎页同比例：logo 填满圆形底（80/80）
                     modifier = Modifier.size(80.dp),
                 )
             }
@@ -124,7 +123,7 @@ fun FirstRunGuide(
             GuideActionCard(
                 icon = Icons.Outlined.Terminal,
                 title = L.chat.configureEnv,
-                // 三态文案（2026-09-15 修）：
+                // 三态文案：
                 // - 已完成 → 打勾 + 一句结论；
                 // - **上一步（AI 模型）还没配时不说"检测中/未就绪"**：那时 pi 根本没法起，
                 //   探针给的原因会是「没有可用的服务商 / 模型」—— 那是第二步的事，摆在环境这一步会串味；
@@ -208,7 +207,7 @@ private fun GuideActionCard(
 }
 
 /**
- * 创建项目弹窗（2026-09-08 新增，聊天页引导入口；与侧边栏新建项目同语义）：
+ * 创建项目弹窗（聊天页引导入口；与侧边栏新建项目同语义）：
  * 输入名称 → 应用私有目录 Projects/ 下真实创建（可选项目类型模板）
  * 目录选择器绑定现有文件夹（tree URI 持久化授权）。
  */

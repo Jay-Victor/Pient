@@ -12,9 +12,9 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
 
 /**
- * 普通材质面板（用户决策 2026-08-27：全面弃用玻璃拟态，使用正常组件材质）。
+ * 普通材质面板（正常组件材质，不用玻璃拟态）。
  *
- * 风格（设计计划 1.1"扁平容器"支柱）：
+ * 风格（"扁平容器"支柱）：
  * - 纯色面板底（surfaceContainer 令牌）+ 1dp hairline 边框（outlineVariant）
  * - 圆角统一 12/16dp 两级（M3 shapes）
  * - 不用阴影、不用模糊、无玻璃

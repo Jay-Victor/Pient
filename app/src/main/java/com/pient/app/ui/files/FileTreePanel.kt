@@ -116,7 +116,7 @@ private enum class FileSort {
 }
 
 /**
- * 右侧文件树面板（设计计划 3.5，pi-web FileExplorer 参考）：
+ * 右侧文件树面板：
  * 顶部栏 = 项目根名 + 四个图案按键（从左到右：排序 / 新建 / 刷新 / 折叠全部）；
  * 文件夹分层级折叠/展开；文件点击在预览区打开；长按操作菜单。
  * 宽 296dp，同窗口浮层。关闭：点面板外遮罩。
@@ -136,15 +136,15 @@ fun FileTreePanel(
     var detailTarget by remember { mutableStateOf<FileNode?>(null) }
     var importMenuOpen by remember { mutableStateOf(false) }
     var exportMenuOpen by remember { mutableStateOf(false) }
-    // 批量导出选择模式（2026-09-02）：树行尾勾选；存 source（树刷新后仍稳定）
+    // 批量导出选择模式：树行尾勾选；存 source（树刷新后仍稳定）
     var exportSelectMode by remember { mutableStateOf(false) }
     val exportSelectedSources = remember { mutableStateListOf<String>() }
     var searchOpen by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     val context = LocalContext.current
-    // 文件树加载/导入导出等重活一律出主线程（2026-09-12 大目录防护）
+    // 文件树加载/导入导出等重活一律出主线程（大目录防护）
     val scope = rememberCoroutineScope()
-    // 真实文件树（2026-09-02）：当前项目目录；null = 未绑定项目或目录不存在（2026-09-08 起无 mock 回退）
+    // 真实文件树：当前项目目录；null = 未绑定项目或目录不存在（无 mock 回退）
     val root = chatState.fileTreeRoot
 
     // 面板打开/项目切换时加载真实树
@@ -231,16 +231,16 @@ fun FileTreePanel(
                 .fillMaxHeight()
                 // 面板必须自身 align(CenterEnd)：重命名/删除弹窗（fillMaxSize）会把
                 // 根 Box 撑到全屏，若面板无 align（TopStart）会随根 Box 变宽而跳到
-                // 屏幕左侧（2026-09-02 用户报「弹窗后文件树侧边栏变到左侧」）。
+                // 屏幕左侧。
                 .align(Alignment.CenterEnd),
-            // 左侧 16dp 圆角、右侧贴屏缘直角（聊天页侧栏右侧圆角的镜像，2026-09-02 用户要求）
+            // 左侧 16dp 圆角、右侧贴屏缘直角（聊天页侧栏右侧圆角的镜像）
             shape = RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp),
         ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 // 注意：面板嵌在顶栏下方区域（FilesPanel 内），顶栏已含状态栏避让，
-                // 此处再 statusBarsPadding 会双重避让产生 ~24dp 顶部留白（2026-08-27 修复）
+                // 此处再 statusBarsPadding 会双重避让产生 ~24dp 顶部留白
                 .padding(bottom = 8.dp),
         ) {
         // 头部：项目根 + 图案按键（排序 / 新建 / 刷新 / 折叠全部）
@@ -471,11 +471,11 @@ fun FileTreePanel(
             }
         }
 
-        // 树（2026-09-12 大目录防护：展开分支提前扁平化成行列表，交给 LazyColumn ——
-        // 原「Column + verticalScroll + 递归 TreeRow」会把展开目录里的每一行全部组合/测量，
+        // 树（大目录防护：展开分支提前扁平化成行列表，交给 LazyColumn ——
+        // 用「Column + verticalScroll + 递归 TreeRow」会把展开目录里的每一行全部组合/测量，
         // 项目里放了几千个文件时打开面板即卡顿；LazyColumn 只组合视口内的行）
-        // contentPadding bottom 60dp：右下 FAB 不被末行压住（原 padding(bottom = 60.dp) 同口径）
-        // weight(1f) 默认 fill=true：占满剩余空间，批量导出操作条恒贴面板最底部（2026-09-02）
+        // contentPadding bottom 60dp：右下 FAB 不被末行压住
+        // weight(1f) 默认 fill=true：占满剩余空间，批量导出操作条恒贴面板最底部
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
@@ -504,7 +504,7 @@ fun FileTreePanel(
                     }
                 }
             } else if (root == null) {
-                // 未绑定项目/目录不存在（2026-09-08 起无 mock 回退）：提示而非空白
+                // 未绑定项目/目录不存在（无 mock 回退）：提示而非空白
                 // 首次扫描在后台进行时不显示「绑定项目后显示文件树」（避免误报无项目）
                 item(key = "no-root") {
                     Text(
@@ -531,7 +531,7 @@ fun FileTreePanel(
                         onMenu = { menuFor = it },
                     )
                 }
-                // 大目录被截断时的页脚提示（节点预算/单目录上限命中，2026-09-12）
+                // 大目录被截断时的页脚提示（节点预算/单目录上限命中）
                 if (chatState.fileTreeTruncated) {
                     item(key = "truncated-hint") {
                         Text(
@@ -604,7 +604,7 @@ fun FileTreePanel(
     }
 
     // 新建文件/文件夹弹窗（Popup 定位窗口左上：无平台 dim，只有内容内单层 scrim——
-    // 之前用 Dialog 会叠加平台默认遮罩使阴影更浓，2026-08-27 修复）
+    // 用 Dialog 会叠加平台默认遮罩使阴影更浓）
     if (createOpen) {
         val density = LocalDensity.current
         val config = LocalConfiguration.current
@@ -634,7 +634,7 @@ fun FileTreePanel(
                     onDismiss = { createOpen = false },
                     onCreate = { type, name ->
                         createOpen = false
-                        // 真实创建（2026-09-02）：项目根目录下新建文件/文件夹
+                        // 真实创建：项目根目录下新建文件/文件夹
                         val ok = project != null &&
                             ProjectFiles.createEntry(context, project, name.trim(), type == 0)
                         Toast.makeText(
@@ -702,7 +702,7 @@ fun FileTreePanel(
                 DropdownMenuItem(
                     text = { Text(L.files.mentionInsert) },
                     onClick = {
-                        // 项目相对路径（唯一口径 = FileNode.relPath）：修「子目录里的文件只插基名」
+                        // 项目相对路径（唯一口径 = FileNode.relPath）：否则子目录里的文件只插基名
                         val rel = node.relPath.ifBlank { node.name }
                         chatState.mentionInsertRequest = mentionTextFor(rel, node.isDir)
                         Toast.makeText(
@@ -717,10 +717,10 @@ fun FileTreePanel(
         }
     }
 
-    // 详细信息弹窗（2026-09-02 新增：位置 / 大小 / 修改时间；单「确定」按钮）
+    // 详细信息弹窗（位置 / 大小 / 修改时间；单「确定」按钮）
     detailTarget?.let { node ->
         // 目录统计要递归遍历（大目录/SAF provider 可能较慢）：IO 线程取值，读取期间显示占位
-        // （旧实现用 remember 在主线程同步算，几千文件的目录会让弹窗卡住 —— 2026-09-12）
+        // （主线程同步算会让几千文件的目录把弹窗卡住）
         var stat by remember(node) { mutableStateOf<Pair<Long, Long>?>(null) }
         LaunchedEffect(node) {
             stat = withContext(Dispatchers.IO) { ProjectFiles.nodeStat(context, project, node) }
@@ -730,7 +730,7 @@ fun FileTreePanel(
                 title = L.common.details,
                 onDismiss = { detailTarget = null },
                 onConfirm = { detailTarget = null },
-                showClose = false,   // 2026-09-02 用户：右上角 × 多余（与聊天页侧边栏同款）
+                showClose = false,   // 不带右上角 ×（与聊天页侧边栏同款）
                 showCancel = false,
             ) {
                 Column(
@@ -753,7 +753,7 @@ fun FileTreePanel(
         }
     }
 
-    // 重命名弹窗（真实操作，2026-09-02）
+    // 重命名弹窗（真实操作）
     renameTarget?.let { node ->
         var newName by remember(node.name) { mutableStateOf(node.name) }
         Box(Modifier.fillMaxSize()) {
@@ -792,7 +792,7 @@ fun FileTreePanel(
         }
     }
 
-    // 删除确认弹窗（真实操作，2026-09-02）
+    // 删除确认弹窗（真实操作）
     deleteTarget?.let { node ->
         Box(Modifier.fillMaxSize()) {
             PientDialog(
@@ -950,9 +950,9 @@ private fun CreateEntryDialog(
                     onSelect = { type = it },
                     modifier = Modifier.padding(top = 12.dp),
                 )
-                // 文件类型选择器（仅文件分段显示，2026-09-02）：右侧 v 箭头；
-                // 选择器行与展开列表同一卡片区域（2026-09-02 用户：不要分成两个卡片）；
-                // 列表自绘内嵌（嵌套 Popup 中 DropdownMenu 定位会飘到屏幕顶部，实测）
+                // 文件类型选择器（仅文件分段显示）：右侧 v 箭头；
+                // 选择器行与展开列表同一卡片区域（不分成两个卡片）；
+                // 列表自绘内嵌（嵌套 Popup 中 DropdownMenu 定位会飘到屏幕顶部）
                 if (type == 0) {
                     val typeLabel = fileTypes.firstOrNull { it.first == fileTypeExt }?.second
                         ?: L.files.typeUnspecified
@@ -1157,7 +1157,7 @@ private fun TreeRow(
     }
 
     // 展开的子树不在此处递归渲染——行列表由 buildVisibleRows 提前扁平化后交给
-    // LazyColumn（2026-09-12），本组件只负责画一行
+    // LazyColumn，本组件只负责画一行
 }
 
 /** 文件树可见行（父路径 + 深度；仅含已展开分支，供 LazyColumn 逐行渲染） */
@@ -1165,7 +1165,7 @@ private class TreeRowItem(val node: FileNode, val depth: Int, val path: String) 
     /**
      * 行唯一键 = 本行完整路径。
      * **不能拿 `path`（父路径）当 key**：同一目录下的兄弟行共享父路径，LazyColumn 会
-     * 直接抛 `IllegalArgumentException: Key ... was already used` 崩掉（2026-09-12 实测）。
+     * 直接抛 `IllegalArgumentException: Key ... was already used` 崩掉。
      */
     val fullPath: String get() = "$path/${node.name}"
 }

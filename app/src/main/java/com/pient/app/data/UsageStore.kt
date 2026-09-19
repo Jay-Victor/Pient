@@ -10,7 +10,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 /**
- * 单次回复的用量台账（2026-09-11 真实化：用量页的数据源，替换原 UsageMock 演示数据）。
+ * 单次回复的用量台账（用量页的数据源）。
  * 每条 = 一次完成的助手回复：完成时刻 + 服务商/模型 + 输入/输出/缓存 token
  * （token 口径与 pi 一致：输入**不含**缓存读取，缓存单独计）+ 服务商返回的费用。
  */
@@ -92,8 +92,8 @@ object UsageStore {
      * （按次计费 = 每次请求价；按 Token 计费 = 输入/缓存读/缓存写/输出的每百万价），
      * 币种按 pricing.currency 折成人民币。
      *
-     * **唯一实现**（2026-09-16）：[daily] 与聊天页消息卡的费用都走它 —— 此前消息卡直接显示
-     * `usage.costUsd`，DeepSeek 这类不返回费用的服务商永远显示 `$0.0`（还和用量页的 ¥ 对不上）。
+     * **唯一实现**：[daily] 与聊天页消息卡的费用都走它 —— 另走一套（消息卡直接显示
+     * `usage.costUsd`）时，DeepSeek 这类不返回费用的服务商永远显示 `$0.0`（还和用量页的 ¥ 对不上）。
      */
     fun cnyCostOf(provider: String, model: String, usage: Usage): Double {
         val p = AiConfigStore.effectivePricing(provider, model)
@@ -124,7 +124,7 @@ object UsageStore {
 
     /**
      * 日期 → 模型 → 当日用量（堆叠图数据源）。
-     * 费用口径按 Operit：先取生效定价（用户覆盖 > 内置表三级查找），
+     * 费用口径：先取生效定价（用户覆盖 > 内置表三级查找），
      * 按 Token 计费 = 输入×输入价 + 缓存读取×缓存输入价 + 缓存写入×输入价 + 输出×输出价（每百万 tokens）；
      * 按次计费 = 每次请求价（一条台账记录 = 一次请求）。USD 计价模型按汇率折算成人民币。
      * 服务商直接返回了费用（OpenAI 兼容网关如 OpenRouter 的 usage.cost，USD）时优先用它。

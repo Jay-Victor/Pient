@@ -55,15 +55,15 @@ import com.pient.app.ui.theme.LocalPientIsDark
 import kotlin.math.roundToInt
 
 /**
- * 思考程度离散滑块（2026-08-27 重设计；**2026-09-17 改档位 = pi 报的可用档位**，照 pi-web 口径）：
+ * 思考程度离散滑块（**档位 = pi 报的可用档位**）：
  * - 停位数 = 该模型实际可用档位数（`get_available_thinking_levels` 去掉 `off`）：deepseek 是 4 档、
- *   手写 `thinkingLevelMap` 砍档后可能只剩 1–2 档 —— 旧版固定五档 + 等距映射会在这些模型上
+ *   手写 `thinkingLevelMap` 砍档后可能只剩 1–2 档 —— 固定五档 + 等距映射会在这些模型上
  *   出现两个停位落到同一档（「拖了没变化」）；
  * - 档位名 = [ThinkingLevel.labelOf]（pi 有而应用枚举没有的名字原样显示，如 `max`）；
  * - 只有一档时**不画滑轨**（画了也没得选），调用方改走「单档」说明分支；
  * - 布局：标题行（思考程度 + 当前档位名称）→ 极简水平滑道（档位指示点，首末档位于两端）
- * - 轨道填充 = 主色 → 品牌紫全范围渐变（端点固定，填充越宽渐变越完整；2026-08-27 增强）
- * - 拇指：24dp 圆角方形（6dp 圆角）+ 0.5dp 边框 + 随档位渐变光晕（2026-08-27 放大 1.5x）
+ * - 轨道填充 = 主色 → 品牌紫全范围渐变（端点固定，填充越宽渐变越完整）
+ * - 拇指：24dp 圆角方形（6dp 圆角）+ 0.5dp 边框 + 随档位渐变光晕
  * - 交互：点按轨道 / 拖拽 / 方向键（←→↑↓）
  * - 动效：填充宽与色 200ms 过渡
  */
@@ -76,15 +76,15 @@ fun ThinkingLevelSlider(
     onChange: (String) -> Unit,
     modifier: Modifier = Modifier,
     /**
-     * 该服务商是否支持档位调节（2026-09-12）：`false` 时滑轨整体降透明度并**关闭拖拽/键盘交互**
+     * 该服务商是否支持档位调节：`false` 时滑轨整体降透明度并**关闭拖拽/键盘交互**
      * （档位值仍保留，重新选回支持档位的服务商即恢复）——避免「调了没有任何效果」的死控件错觉。
      */
     enabled: Boolean = true,
 ) {
     val n = levels.size
     val idx = levels.indexOf(selected).coerceAtLeast(0)
-    // 键盘/方向键入口（2026-09-17 真机补齐）：`.focusable()` 只是「可聚焦」，触屏上**没有任何东西会把
-    // 焦点交给它** —— 实测 D-pad 按到底也摸不到滑轨，方向键这条路径等于死代码。现在点一下即取焦，
+    // 键盘/方向键入口：`.focusable()` 只是「可聚焦」，触屏上**没有任何东西会把
+    // 焦点交给它** —— D-pad 按到底也摸不到滑轨，方向键这条路径等于死代码。所以点一下即取焦，
     // 并给一层极浅的描边让「焦点在滑轨上」看得见。
     val focusRequester = remember { FocusRequester() }
     var focused by remember { mutableStateOf(false) }
@@ -156,8 +156,8 @@ fun ThinkingLevelSlider(
                                 else -> false
                             }
                         }
-                        // 点按轨道直接跳到该档（2026-09-17 补：注释一直写着「点按/拖拽」，但只接了拖拽 ——
-                        // 真机上 `input tap` 落在滑轨上毫无反应。tap 与 drag 分两个 pointerInput，互不干扰）
+                        // 点按轨道直接跳到该档（只接拖拽的话 `input tap` 落在滑轨上毫无反应：
+                        // tap 与 drag 分两个 pointerInput，互不干扰）
                         .pointerInput(n) {
                             detectTapGestures { pos ->
                                 // 点按既选档、也把焦点交给滑轨：随后方向键 / 硬件键盘就能调档
@@ -174,7 +174,7 @@ fun ThinkingLevelSlider(
                 ),
         ) {
             val wPx = with(density) { maxWidth.toPx() }
-            val pad = thumbPx / 2 // 首尾偏移补偿（Codex: 填充宽 = p% + 16 - 16p/100 px）
+            val pad = thumbPx / 2 // 首尾偏移补偿（填充宽 = p% + 16 - 16p/100 px）
             val usable = wPx - pad * 2
             val fillW = (usable * p + pad).coerceAtLeast(1f)
 
@@ -252,8 +252,8 @@ private fun levelAt(x: Float, width: Float, thumbPx: Float, levels: List<String>
     val usable = width - thumbPx
     if (usable <= 0f) return levels.first()
     val p = ((x - thumbPx / 2) / usable).coerceIn(0f, 1f)
-    // **四舍五入**取最近停位（2026-09-17 真机发现：原先是 `.toInt()` 截断 → 每档的判定区间被整体左移半步，
-    // 最末一档只剩「正好点在最右端」才选得中 —— 实测点最末档的点心却落到倒数第二档 xhigh）
+    // **四舍五入**取最近停位（`.toInt()` 截断会让每档的判定区间整体左移半步，
+    // 最末一档只剩「正好点在最右端」才选得中 —— 点最末档会落到倒数第二档 xhigh）
     val idx = (p * (levels.size - 1)).roundToInt().coerceIn(0, levels.size - 1)
     return levels[idx]
 }

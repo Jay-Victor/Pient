@@ -7,7 +7,7 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * 项目会话记录持久化（2026-09-09 实现）：项目 / 会话 / 消息记录全量落盘
+ * 项目会话记录持久化：项目 / 会话 / 消息记录全量落盘
  * filesDir/pient_data/state.json，重启后恢复（load）——侧栏项目与历史会话、
  * 聊天消息记录跨重启保留。保存由 PientApp 的 snapshotFlow 防抖触发（save）。
  * 序列化用系统自带 org.json（无新依赖）。
@@ -59,8 +59,8 @@ object ChatStore {
             val messages = JSONObject()
             state.messagesBySession.forEach { (id, list) ->
                 // 有条目树的会话不再重复写扁平消息流：条目树是权威表示（加载时按 leaf 重建），
-                // 扁平流只服务于「2026-09-11 之前的老记录」的迁移路径。
-                // 大会话（几千条）能省掉近一半的序列化与文件体积（2026-09-12）。
+                // 扁平流只服务于老记录的迁移路径。
+                // 大会话（几千条）能省掉近一半的序列化与文件体积。
                 if (state.entriesBySession[id]?.isNotEmpty() == true) return@forEach
                 val arr = JSONArray()
                 list.forEach { m -> arr.put(serializeMsg(m)) }
@@ -90,7 +90,7 @@ object ChatStore {
             root.put("leaves", leaves)
 
             // pi 侧期望位置（Pient 记的活跃位置）：pi 的叶只在内存里、重启后回到文件末尾，
-            // 靠它在对账时把 pi 拉回来（《Pient 会话与上下文管理设计》§4.3）
+            // 靠它在对账时把 pi 拉回来
             val piLeaves = JSONObject()
             state.piDesiredLeaf.forEach { (id, leaf) -> if (leaf.isNotEmpty()) piLeaves.put(id, leaf) }
             root.put("piLeaves", piLeaves)
@@ -119,8 +119,8 @@ object ChatStore {
                 for (i in 0 until projects.length()) {
                     val p = projects.getJSONObject(i)
                     val uri = if (p.isNull("uri")) null else p.optString("uri")
-                    // 2026-09-14 用户拍板移除 SAF「选择本地文件夹」→ 旧的 SAF 项目（uri != null）不再可用
-                    // （没有物化副本、也没有 ContentResolver 通路）：这里直接跳过，别让它以坏状态出现在列表里。
+                    // 旧的 SAF 项目（uri != null）不可用：没有物化副本、也没有 ContentResolver 通路，
+                    // 这里直接跳过，别让它以坏状态出现在列表里。
                     if (!uri.isNullOrEmpty()) {
                         PientLog.i(
                             "Pient",
@@ -140,8 +140,8 @@ object ChatStore {
                     for (i in 0 until arr.length()) {
                         val s = arr.getJSONObject(i)
                         val sid = s.optString("id")
-                        // 自愈：同一项目里重复的会话 id（历史 bug：同一毫秒内新建/fork 会撞 id）会让会话列表
-                        // LazyColumn 的 key 重复 → `Key "s-…" was already used` 直接闪退（实测踩过）。
+                        // 自愈：同一项目里重复的会话 id（同一毫秒内新建/fork 会撞 id）会让会话列表
+                        // LazyColumn 的 key 重复 → `Key "s-…" was already used` 直接闪退。
                         // 载入时按 id 去重（保留先出现的那条），并把 state 里其余同名键留给它们各自的表。
                         if (sid.isBlank() || list.any { it.id == sid }) {
                             PientLog.w("Pient", "载入时丢弃重复/空 id 的会话记录：$sid")
@@ -164,8 +164,8 @@ object ChatStore {
             val messages = root.optJSONObject("messages")
             if (messages != null) {
                 for (key in messages.keys()) {
-                    // 替换而不是追加（2026-09-15）：载入必须**同一进程里跑两遍也幂等** ——
-                    // 旧写法 `getOrPut + +=` 会把同一份消息写两遍（实测消息/条目翻倍）。
+                    // 替换而不是追加：载入必须**同一进程里跑两遍也幂等** ——
+                    // 用 `getOrPut + +=` 会把同一份消息写两遍（消息/条目翻倍）。
                     val arr = messages.getJSONArray(key)
                     val list = androidx.compose.runtime.mutableStateListOf<Msg>()
                     for (i in 0 until arr.length()) {
@@ -179,8 +179,8 @@ object ChatStore {
             val entries = root.optJSONObject("entries")
             if (entries != null) {
                 for (key in entries.keys()) {
-                    // 替换 + **按 id 去重**（2026-09-15）：①载入幂等（同一次启动跑两遍不再翻倍）；
-                    // ②自愈已落盘的坏数据（实测每会话 entries 恰为同一份两遍：64=32×2、174=87×2）。
+                    // 替换 + **按 id 去重**：①载入幂等（同一次启动跑两遍不再翻倍）；
+                    // ②自愈已落盘的坏数据（同一份 entries 写了两遍）。
                     val arr = entries.getJSONArray(key)
                     val list = androidx.compose.runtime.mutableStateListOf<SessionEntry>()
                     val seen = HashSet<String>()
@@ -215,7 +215,7 @@ object ChatStore {
                 }
             }
             // 条目树优先：有树 → 按 leaf 重建上屏消息流（记录里的 messages 只是派生缓存）；
-            // 无树（2026-09-11 之前的老记录）→ 按扁平消息流迁移成线性链
+            // 无树（老记录）→ 按扁平消息流迁移成线性链
             for (sid in state.messagesBySession.keys + state.entriesBySession.keys) {
                 if (state.entriesBySession[sid]?.isNotEmpty() == true) {
                     // 兜底：树在但 leaf 丢了（异常记录）→ 取末条目，避免会话读成空
@@ -232,7 +232,7 @@ object ChatStore {
             state.currentSessionId = root.optString("currentSessionId").takeIf { it.isNotEmpty() }
             state.selectedModelId = root.optString("selectedModelId")
             state.thinkingEnabled = root.optBoolean("thinkingEnabled", false)
-            // 迁移（2026-09-17 起偏好存 **pi 的档位字面量**）：老文件里是应用枚举名（MINIMAL…XHIGH）
+            // 迁移：偏好存 **pi 的档位字面量** —— 老文件里是应用枚举名（MINIMAL…XHIGH）
             // → 换成对应档位名；已经是档位名（含 pi 才有的 `max`）就原样留下。
             state.thinkingLevel = runCatching {
                 val raw = root.optString("thinkingLevel", "medium").trim()

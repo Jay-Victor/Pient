@@ -105,14 +105,14 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 /**
- * 文件内容预览区（设计计划 3.5；2026-09-10 按类型分流 + 编辑，参照 Operit 工作区）：
+ * 文件内容预览区（按类型分流 + 编辑）：
  * - 视频/音频：ExoPlayer 播放（video：黑底 + FIT 播放器，音频：居中播放器条）
- * - 图片：真实 bitmap，可双指缩放/拖动/双击复位（Operit WorkspaceImagePreview 同款）
+ * - 图片：真实 bitmap，可双指缩放/拖动/双击复位
  * - Markdown：渲染模式（GFM）/ 源码编辑模式（标签栏右侧切换键）
  * - HTML：预览模式（WebView 渲染，相对资源按文件所在目录解析）/ 源码编辑模式（同款切换键）
  * - txt：等宽纯文本，**无行号**，可编辑
- * - 其他文本/代码：**行号槽随类型自动显示**（Operit CanvasCodeEditorView 规格）+ 语法着色 +
- *   底部符号工具栏（各类括号 / 引号 / 运算符 / 分隔符，2026-09-11），可编辑
+ * - 其他文本/代码：**行号槽随类型自动显示** + 语法着色 +
+ *   底部符号工具栏（各类括号 / 引号 / 运算符 / 分隔符），可编辑
  * - 文档/压缩包/安装包：二进制，走「暂不支持预览」提示（无法按文本编辑）
  */
 @Composable
@@ -158,13 +158,13 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
     when {
         // 视频 / 音频播放（ExoPlayer）
         isMedia && node.source != null -> MediaPreview(node, isVideo)
-        // 文档预览：docx 自解析；doc / xls / xlsx 走 POI（均与 Operit 同口径）→ HTML → WebView
+        // 文档预览：docx 自解析；doc / xls / xlsx 走 POI → HTML → WebView
         isDocx && node.source != null -> HtmlPreview(node) { ctx, n -> DocxConverter.toHtml(ctx, n) }
         isDoc && node.source != null -> HtmlPreview(node) { ctx, n -> DocumentConverter.docToHtml(ctx, n) }
         isSheet && node.source != null -> HtmlPreview(node) { ctx, n -> DocumentConverter.spreadsheetToHtml(ctx, n) }
         // PDF 预览（PdfRenderer 逐页位图）
         isPdf && node.source != null -> PdfPreview(node)
-        // HTML 预览（WebView 渲染源码；相对资源按所在目录解析，Operit HTML 分支口径）
+        // HTML 预览（WebView 渲染源码；相对资源按所在目录解析）
         isHtml && !chatState.sourceEditMode -> HtmlWebView(
             html = chatState.fileDrafts[key] ?: textContent,
             baseUrl = ProjectFiles.htmlBaseUrl(node),
@@ -180,21 +180,21 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
                 chatState.fileDrafts[key] ?: textContent ?: "",
                 onFileLink = { path -> onPreviewLink(context, chatState, path) },
                 modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                filePreview = true,   // 文件预览口径：pi-web .markdown-file-preview 标题字号 + 段落间距
+                filePreview = true,   // 文件预览口径：标题字号 + 段落间距
                 imageResolver = { src -> resolveMarkdownImage(chatState, node, src) },
             )
         }
-        // markdown 源码模式：可编辑 + 底部格式工具栏 + 搜索卡（2026-09-11）
+        // markdown 源码模式：可编辑 + 底部格式工具栏 + 搜索卡
         isMd -> MarkdownSourceEditor(chatState, node, chatState.fileDrafts[key] ?: textContent ?: "")
         // 代码 / 标记语言源文件（含 html 源码模式）：行号 + 语法着色 + 4 空格缩进标记 +
-        // 底部符号工具栏（Operit 工作区编辑器口径；2026-09-11 加工具栏）
+        // 底部符号工具栏
         node.ext !in PLAIN_TEXT_EXTS -> CodeSourceEditor(
             chatState = chatState,
             node = node,
             text = chatState.fileDrafts[key] ?: textContent ?: "",
             codeLanguage = CodeLanguages.forExtension(node.ext) ?: CodeLanguages.generic,
         )
-        // txt：等宽纯文本，无行号 / 无着色 / 无工具栏（用户 2026-09-10 定）
+        // txt：等宽纯文本，无行号 / 无着色 / 无工具栏
         else -> PlainTextEditor(
             text = chatState.fileDrafts[key] ?: textContent ?: "",
             onValueChange = { chatState.editDraft(node, it) },
@@ -206,7 +206,7 @@ fun FileContentView(chatState: ChatState, node: FileNode) {
 /**
  * 纯文本（txt）编辑入口：把「文本字符串 + 回调」的调用形态适配到 [EditableTextView] 的
  * TextFieldValue 受控形态（外部文本变化时同步，选区按新长度夹取）。
- * 无行号、无着色（用户定），IME 避让由编辑区自担（本类型没有底部工具栏）。
+ * 无行号、无着色，IME 避让由编辑区自担（本类型没有底部工具栏）。
  */
 @Composable
 private fun PlainTextEditor(
@@ -241,11 +241,11 @@ private fun PlainTextEditor(
 // ───────────────────────────── docx 文档预览 ─────────────────────────────
 
 /**
- * 文档预览容器：转换为预览 HTML（docx 自解析；doc / xls / xlsx 走 POI，均与 Operit 同口径）
- * → WebView 渲染。设置与 Operit `ReadOnlyHtmlWebView` 逐项一致（javaScript/domStorage/
+ * 文档预览容器：转换为预览 HTML（docx 自解析；doc / xls / xlsx 走 POI）
+ * → WebView 渲染。WebView 设置（javaScript/domStorage/
  * wideViewport/overview/builtInZoomControls 开、displayZoomControls 关、allowFileAccess 开），
- * 基准 URL 亦取 Operit 同款 `https://workspace-preview.local/`（本地 loadData，不联网）；
- * 失败文案取 Operit 口径「无法打开文件: X」。
+ * 基准 URL 取 `https://workspace-preview.local/`（本地 loadData，不联网）；
+ * 失败文案「无法打开文件: X」。
  */
 @Composable
 private fun HtmlPreview(node: FileNode, load: suspend (android.content.Context, FileNode) -> String?) {
@@ -270,10 +270,10 @@ private fun HtmlPreview(node: FileNode, load: suspend (android.content.Context, 
 /**
  * HTML 渲染容器（文档预览与 HTML 文件预览共用）。html = null 表示内容还没读回来。
  *
- * 防「黑屏一瞬」（2026-09-10）：WebView 显式白底 + onPageFinished 前用不透明主题底色盖住 +
+ * 防「黑屏一瞬」：WebView 显式白底 + onPageFinished 前用不透明主题底色盖住 +
  * 内容只在 html/baseUrl 变化时 load 一次（不加 clipToBounds：会给 interop 视图多套一层全屏图层）。
  *
- * 防「首次打开一直转圈」（2026-09-10 用户报，见 commit）：
+ * 防「首次打开一直转圈」：
  * - 内容未就绪时不建 WebView（先转圈）——否则会先以空内容建视图，随后内容到达触发重组，
  *   `remember(html)` 换成新的状态实例，而 factory 里创建的 WebViewClient 仍写旧实例
  *   → onPageFinished 置的 loaded 永远读不到 → 一直转圈；切走再切回（重建视图）才对。
@@ -292,14 +292,13 @@ private fun HtmlWebView(html: String?, baseUrl: String, modifier: Modifier = Mod
         AndroidView(
             factory = { ctx ->
                 WebView(ctx).apply {
-                    // 硬件层（Operit WebViewHandler 同款）：WebView 自成一纹理合成，
+                    // 硬件层：WebView 自成一纹理合成，
                     // 滚动/缩放时不必回落到父级图层重绘
                     setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-                    // ★ 触摸拦截器（逐字对齐 Operit WorkspaceReadOnlyDocumentPreview
-                    //   .installDocumentPreviewTouchInterceptor）：手指一落到预览上就禁止父链拦截，
+                    // ★ 触摸拦截器：手指一落到预览上就禁止父链拦截，
                     //   抬手/取消再放开 —— 保证整段手势（捏合缩放、双指平移）完整归 WebView。
                     //   没有它时外层手势（抽屉拖动等）可在捏合中途抢走/打断指针流，
-                    //   表现为缩放忽快忽慢、跳变（用户报「无法像 Operit 那样丝滑」）。
+                    //   表现为缩放忽快忽慢、跳变。
                     setOnTouchListener { view, event ->
                         when (event.actionMasked) {
                             android.view.MotionEvent.ACTION_DOWN ->
@@ -339,8 +338,8 @@ private fun HtmlWebView(html: String?, baseUrl: String, modifier: Modifier = Mod
                 view.destroy()
             },
             // ★ 不要加 clipToBounds()：它等于 graphicsLayer(clip = true)，会给 interop 视图再套一层
-            //   全尺寸离屏图层（每帧多一次全屏合成，滚动/缩放实测掉帧）；WebView 自身在边界内绘制，
-            //   外层 Box 已有主题底色兜底（Operit 的 ReadOnlyHtmlWebView 也没有裁剪修饰符）
+            //   全尺寸离屏图层（每帧多一次全屏合成，滚动/缩放掉帧）；WebView 自身在边界内绘制，
+            //   外层 Box 已有主题底色兜底
             modifier = Modifier.fillMaxSize(),
         )
         if (!loadedState.value) {
@@ -354,13 +353,13 @@ private fun HtmlWebView(html: String?, baseUrl: String, modifier: Modifier = Mod
     }
 }
 
-/** Operit ReadOnlyHtmlWebView 同款基准 URL（文档预览用；HTML 文件预览用文件所在目录） */
+/** 文档预览基准 URL（文档预览用；HTML 文件预览用文件所在目录） */
 private const val HTML_BASE_URL = "https://workspace-preview.local/"
 
 // ───────────────────────────── PDF 预览 ─────────────────────────────
 
 /**
- * PDF 预览：`PdfRenderer` 逐页渲成位图（Operit `WorkspacePdfPreview` 同款——灰底 #E5E7EB 上
+ * PDF 预览：`PdfRenderer` 逐页渲成位图（灰底 #E5E7EB 上
  * 12dp 间距、16dp 内边距的页面卡片，页面 2 倍分辨率、白底、RENDER_MODE_FOR_DISPLAY）。
  */
 @Composable
@@ -416,7 +415,7 @@ private fun PdfPage(node: FileNode, pageIndex: Int) {
 // ───────────────────────────── 视频 / 音频播放 ─────────────────────────────
 
 /**
- * 媒体播放（Operit WorkspaceManager 的音视频分支同构）：
+ * 媒体播放：
  * - 视频：黑底 + 播放器 fillMaxWidth + heightIn(180dp..420dp) + RESIZE_MODE_FIT
  * - 音频：居中播放器条（fillMaxWidth），无黑底
  * - autoPlay = false（由用户点播放键起播），离开组合即释放播放器
@@ -472,14 +471,13 @@ private fun MediaPreview(node: FileNode, isVideo: Boolean) {
 
 // ───────────────────────────── 图片预览（缩放/拖动） ─────────────────────────────
 
-/** Operit WorkspaceImagePreview 同款缩放区间与双击倍率 */
+/** 图片预览缩放区间与双击倍率 */
 private const val IMAGE_MIN_SCALE = 1f
 private const val IMAGE_DOUBLE_TAP_SCALE = 2.5f
 private const val IMAGE_MAX_SCALE = 5f
 
 /**
  * 图片预览（黑底 + Fit 居中）：双指缩放 1f～5f、拖动平移（按视口夹取边界）、双击在 2.5f/1f 间切换。
- * 数值与判定公式逐项对齐 Operit WorkspaceImagePreview（clampImageOffset / doubleTapOffset）。
  */
 @Composable
 private fun ZoomableImage(bitmap: Bitmap?, name: String) {
@@ -571,28 +569,28 @@ private fun doubleTapOffset(tapOffset: Offset, viewportSize: IntSize, scale: Flo
 private val CodeFontSize = 12.sp
 private val CodeLineHeight = 20.sp
 
-// 媒体扩展名的**定义**已上移到 data/FileKinds.kt（上下文裁剪层要共用同一份判定）：
+// 媒体扩展名的**定义**在 data/FileKinds.kt（上下文裁剪层要共用同一份判定）：
 // 这里保留 PREVIEW_* 名字给本页与 FilesPanel / MentionFileCard 的既有调用点，值来自单一出处。
 
-/** 真实解码预览的图片扩展名（Operit workspaceMimeTypeForPath 的 image 分支口径） */
+/** 真实解码预览的图片扩展名 */
 internal val PREVIEW_IMAGE_EXTS = MEDIA_IMAGE_EXTS
 
-/** 视频扩展名（Operit workspaceMimeTypeForPath 的 video 分支） */
+/** 视频扩展名 */
 internal val PREVIEW_VIDEO_EXTS = MEDIA_VIDEO_EXTS
 
-/** 音频扩展名（Operit workspaceMimeTypeForPath 的 audio 分支） */
+/** 音频扩展名 */
 internal val PREVIEW_AUDIO_EXTS = MEDIA_AUDIO_EXTS
 
-/** 无行号的纯文本（用户 2026-09-10 定：txt 侧边不加行号） */
+/** 无行号的纯文本（txt 侧边不加行号） */
 private val PLAIN_TEXT_EXTS = setOf("txt", "text")
 
-/** 表格文档（Operit isSpreadsheetDocument 口径；xls/xlsx 走 POI WorkbookFactory） */
+/** 表格文档（xls/xlsx 走 POI WorkbookFactory） */
 private val SHEET_EXTS = setOf("xls", "xlsx")
 
 /**
  * 文本编辑区（所有非媒体/非图片文本文件的唯一入口）：等宽正文 + 可选行号槽，输入即改缓冲。
- * 行号槽逐项对齐 Operit CanvasCodeEditorView（drawEditor / gutterWidth / drawLineNumber）：
- * - 槽底色 = surfaceContainer（Operit gutterBackground：相对代码底微偏离）、铺满视口高度、无分隔线
+ * 行号槽：
+ * - 槽底色 = surfaceContainer（相对代码底微偏离）、铺满视口高度、无分隔线
  * - 槽宽 = max(行号文字宽 + 前后内边距, 24dp)；内边距按位数取 1→5dp / 2→6dp / 3→7dp / 其余 8dp
  * - 行号字号 = 正文字号 × 0.82、右对齐（右缘距槽右缘 = 尾内边距）、颜色 onSurfaceVariant
  * - 正文左缘紧贴槽右缘（间距 = 槽尾内边距）、上下留白 10dp（无行号时 8dp）、正文右侧留白 12dp
@@ -636,7 +634,7 @@ internal fun EditableTextView(
     var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val scroll = rememberScrollState()
 
-    // 语法着色（Operit 二套调色板随主题切换）与缩进标记几何
+    // 语法着色（深浅二套调色板随主题切换）与缩进标记几何
     val isDark = LocalPientIsDark.current
     val palette = remember(isDark) { codePalette(isDark) }
     val baseTransformation = remember(codeLanguage, palette) {
@@ -648,19 +646,19 @@ internal fun EditableTextView(
         else SearchHighlightTransformation(baseTransformation, searchMatches, currentMatchIndex)
     }
     val charWidthPx = remember(codeStyle, density) { monoCharWidthPx(measurer, codeStyle) }
-    // 缩进标记色 = blend(背景, 槽边框, 0.68)（Operit indentGuidePaint；Pient 槽无边框 → outlineVariant）
+    // 缩进标记色 = blend(背景, 槽边框, 0.68)（槽无边框 → outlineVariant）
     val guideColor = lerp(
         MaterialTheme.colorScheme.background,
         MaterialTheme.colorScheme.outlineVariant,
         0.68f,
     )
     // 文件预览页设置（行为设置）：带行号的文件长行不折行 —— 每行向右延展、横向滚动，
-    // 行号槽固定不随之滚动（Operit 编辑器同款：行号固定在槽内、正文横向滚动）
+    // 行号槽固定不随之滚动（行号固定在槽内、正文横向滚动）
     val noWrap = showLineNumbers && SettingsStore.filePreviewNoWrap
     val hScroll = rememberScrollState()
     LaunchedEffect(contentKey) { hScroll.scrollTo(0) }
 
-    // 搜索跳转：命中偏移 → 该命中所在排版行的顶端 → 滚动到可见（Mdcito 由编辑器自身滚动；此处手动定位）
+    // 搜索跳转：命中偏移 → 该命中所在排版行的顶端 → 滚动到可见（编辑器自身不滚动，这里手动定位）
     val verticalPadPx = with(density) { (if (showLineNumbers) 10.dp else 8.dp).toPx() }
     LaunchedEffect(scrollRequest, textLayout) {
         val offset = scrollRequest ?: return@LaunchedEffect
@@ -755,7 +753,7 @@ internal fun EditableTextView(
 
 /**
  * 行号绘制：遍历文本排版的视觉行，仅逻辑行首（行首前一字符为换行 / 首行）给号；
- * 行号右对齐于槽内（布局宽 = 槽宽 − 前后内边距），基线对齐该行正文（Operit drawLineNumber 同款定位）。
+ * 行号右对齐于槽内（布局宽 = 槽宽 − 前后内边距），基线对齐该行正文。
  */
 private fun DrawScope.drawEditorLineNumbers(
     layout: TextLayoutResult,
@@ -841,7 +839,7 @@ private class SearchHighlightTransformation(
 
 // ───────────────────────────── 占位 / 容器 ─────────────────────────────
 
-/** 带页面留白的滚动容器（Markdown 渲染共用；文件预览取 pi-web 的 24px 32px 内边距） */
+/** 带页面留白的滚动容器（Markdown 渲染共用；文件预览用 24px 32px 内边距） */
 @Composable
 private fun PaddedScroll(
     horizontal: Dp = 14.dp,
@@ -906,7 +904,7 @@ private fun findParentNode(node: FileNode, target: FileNode): FileNode? {
     return null
 }
 
-/** 本地文件链接 → 在当前项目文件树中定位并打开（2026-09-02：真实树；无树直接忽略） */
+/** 本地文件链接 → 在当前项目文件树中定位并打开（无树直接忽略） */
 private fun onLocalFileLink(chatState: ChatState, path: String) {
     val name = path.substringAfterLast('/')
     val tree = chatState.fileTreeRoot ?: return
@@ -924,7 +922,7 @@ private fun findNode(node: FileNode, name: String): FileNode? {
     return null
 }
 
-/** mock 图片占位（保留旧原型演示路径） */
+/** mock 图片占位 */
 @Composable
 private fun ImagePlaceholder(node: FileNode) {
     Box(

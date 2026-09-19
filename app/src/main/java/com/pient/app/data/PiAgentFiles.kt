@@ -7,7 +7,7 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * **pi 原生配置文件**的读写（2026-09-14 用户拍板：`~/.pi/agent/` 下的三份文件是配置页的唯一真相源）。
+ * **pi 原生配置文件**的读写（`~/.pi/agent/` 下的三份文件是配置页的唯一真相源）。
  *
  * 落点：`<rootfs>/root/.pi/agent/{models.json, auth.json, settings.json}` ——
  * 因为 pi 就跑在那棵 Ubuntu 里，它的 `HOME=/root`（见 `runtime/terminal/pient-shell.sh`）。
@@ -22,7 +22,7 @@ import java.io.File
  *
  * **Pient 自己的数据**（模型定价覆盖、汇率、媒体直发开关、上下文媒体裁剪回合数、配置完成标记）
  * 不属于 pi 的概念，仍留在 `files/pient_data/ai_config.json`（`AiConfigStore` 负责），
- * 所以那个文件不会被删，只是不再是「服务商与模型」的真相源。
+ * 所以那个文件不会被删，只是「服务商与模型」的真相源不在这里。
  */
 object PiAgentFiles {
 
@@ -41,9 +41,9 @@ object PiAgentFiles {
         File(PiRuntime.rootfsDir(context), guestPath.trimStart('/'))
 
     /**
-     * 删除 pi 侧的会话记录（2026-09-16）：Pient 删会话时同步清掉那份 jsonl。
+     * 删除 pi 侧的会话记录：Pient 删会话时同步清掉那份 jsonl。
      *
-     * 不清的后果（用户点名要修的缺口）：agent 目录里越堆越多孤儿会话文件 —— 一旦会话记录被
+     * 不清的后果：agent 目录里越堆越多孤儿会话文件 —— 一旦会话记录被
      * 重建映射（或画布/fork 重新绑定），旧文件里的上下文又被拉回来，等于「删了没删干净」。
      * 返回是否真的删掉了一个文件（文件本就不存在时返回 false，不算失败）。
      */
@@ -65,8 +65,8 @@ object PiAgentFiles {
      */
     fun writeModels(context: Context, configs: Collection<ProviderConfig>): Boolean = runCatching {
         // 旧文件：用来**保留应用不管理的模型字段**（`thinkingLevelMap` / `cost` / pi 将来新增的键）。
-        // 旧实现整条重建 —— 用户手写的 `thinkingLevelMap`（砍档、加 xhigh/max）撞上应用启动那次落盘
-        // 就被静默抹掉（2026-09-17 真机实测：夹具里的映射开机后消失）。
+        // 整条重建会静默抹掉用户手写的 `thinkingLevelMap`（砍档、加 xhigh/max）——
+        // 撞上应用启动那次落盘就没了。
         val oldProviders = readJson(modelsFile(context))?.optJSONObject("providers")
         val root = JSONObject()
         val providers = JSONObject()
@@ -80,7 +80,7 @@ object PiAgentFiles {
             if (c.providerId == "radius") pj.put("oauth", "radius")
             // 服务商级 compat：**目录里 pi 自己给了逐模型 thinkingFormat 时不写** ——
             // provider 级 compat 在 pi 的 mergeCompat 里排在模型的后面（会盖掉逐模型的正确写法）。
-            // 实测：moonshotai 的 k3 在目录里是 openai 写法（K3 官方明确「不应传 thinking 参数」），
+            // moonshotai 的 k3 在目录里是 openai 写法（K3 官方明确「不应传 thinking 参数」），
             // 应用的服务商级 deepseek 写法会把它带偏。
             val mine = c.reasoningFormat.name.lowercase()
             val piFmts = catalogModels(context)[c.providerId]?.values?.mapNotNull { it.thinkingFormat }?.distinct().orEmpty()
@@ -89,7 +89,7 @@ object PiAgentFiles {
                     pj.put("compat", JSONObject(compat))
                 }
             }
-            // 分流（2026-09-17）：pi 内置目录里**有**这个 id → 写 `modelOverrides[id]`（逐字段覆盖，
+            // 分流：pi 内置目录里**有**这个 id → 写 `modelOverrides[id]`（逐字段覆盖，
             // 目录里的 `thinkingLevelMap`/`cost`/`name`/`api`/`baseUrl` 全部保住）；目录里没有
             // （用户自建模型）→ 仍写整条 `models[]`。原因见 [catalogModels]。
             val models = JSONArray()
@@ -167,7 +167,7 @@ object PiAgentFiles {
             )
         }
         root.put("defaultTools", JSONArray(PI_DEFAULT_TOOLS))
-        // 项目信任（2026-09-15）：pi 的**项目级资源**（`.pi/skills`、`.pi/settings.json` 的 packages、
+        // 项目信任：pi 的**项目级资源**（`.pi/skills`、`.pi/settings.json` 的 packages、
         // `.pi/extensions`）默认要先经用户交互确认「信任这个项目」才会加载；RPC 模式下没有人能回答
         // 那个提问 → 项目级技能/插件**静默不生效**（表现为"装到项目了但 AI 看不到"）。
         // Pient 的项目都是应用自己创建/绑定的（不存在别人仓库那种风险），所以把这条口径固定成
@@ -202,7 +202,7 @@ object PiAgentFiles {
                     // 窗口 / 识图 / 采样在 pi 里都是 **per-model** 的（`models[].contextWindow` 等）：
                     // 逐条读进 modelSettings；卡面上那三个字段是「新加入列表的模型的默认值」，
                     // pi 文件里没有这个概念 —— 由 ai_config.json 里存着的那份填（见 loadExtras）。
-                    // 旧实现取 `models[0]` 当整家的值：多模型时页面只看得到第一个、改一次全覆盖。
+                    // 只取 `models[0]` 当整家的值：多模型时页面只看得到第一个、改一次全覆盖。
                     modelSettings = modelSettingsOf(pj.optJSONArray("models")) +
                         modelSettingsOf(pj.optJSONObject("modelOverrides")),
                     reasoningFormat = reasoningFormatOf(pj.optJSONObject("compat")),
@@ -275,7 +275,7 @@ object PiAgentFiles {
      *
      * 为什么不能一律写条目：`applyModelsJson` 对同 id 的条目是**整体替换**，而 `modelFromJson` 里
      * `thinkingLevelMap: definition.thinkingLevelMap` / `cost ?? {0,0,0,0}` / `contextWindow ?? 128000`
-     * **都不回落到目录**（2026-09-17 对着 pi 0.85.1 源码 + 设备 rootfs 里 39 个目录 JSON 核对）——
+     * **都不回落到目录**——
      * 应用写过的 `deepseek-v4-pro` 就这样从目录里的 3 档（off/high/max）被抹成 5 档。
      *
      * 读不到目录（pi 没装 / 布局变了）→ 空表 = 退回「整条写」的老行为，不会写坏文件。
@@ -306,7 +306,7 @@ object PiAgentFiles {
             }
         }
         // ② **联网刷新后的目录（`models-store.json`，pi 真正用的就是它）** 覆盖随包那份。
-        //    2026-09-17 实测踩坑：V4.1 Flash（id `deepseek-flash`）**只存在于刷新目录**，
+        //    V4.1 Flash（id `deepseek-flash`）**只存在于刷新目录**，
         //    随包那份没有 ⇒ 只读随包会把用户的模型误判成「自建模型」，连它的档位表一起丢掉
         //    （表现：本该 3 停位的模型画出默认的 4 停位）。
         var storeCount = 0
@@ -342,10 +342,10 @@ object PiAgentFiles {
 
     /**
      * **离线算该模型的档位表**（不依赖 pi 通道）—— 与 pi 的 `getSupportedThinkingLevels`
-     * （models.ts:915）逐字同规则：`!reasoning → ["off"]`；否则按 `thinkingLevelMap` 过滤
+     * 逐字同规则：`!reasoning → ["off"]`；否则按 `thinkingLevelMap` 过滤
      * （值为 null = 砍掉；`xhigh`/`max` 只有显式给了才有），再叠上 [CATALOG_FIXES] 勘误。
      *
-     * 为什么要它：面板原来只认 pi 对「通道**当前**跑的模型」的回答，pi 没答（没通道 / 刚切完模型、
+     * 为什么要它：只认 pi 对「通道**当前**跑的模型」的回答时，pi 没答（没通道 / 刚切完模型、
      * 通道还没重启）就退回一张万能 4 档回退表 —— 于是「明明 3 档的模型画出 4 档」、切模型也不重画。
      * 目录里有这个模型 → 直接用目录事实；没有（自建模型）→ 用应用自己写的 `reasoning`（三态里没显式
      * 设过就跟写盘同一口径：按模型名推断写法，推断得出 = 支持）。
@@ -481,7 +481,7 @@ object PiAgentFiles {
     }
 
     /**
-     * **pi 内置目录的勘误表**（2026-09-17 对着各家官方文档逐条核对后加）。
+     * **pi 内置目录的勘误表**。
      *
      * pi 的档位表在 `providers/data/ 下的 *.json` 的 `thinkingLevelMap` 里，是应用唯一的事实源。
      * 核对下来总体质量很高（k3 / glm-5.3 / gpt-5.5 / kimi-k2.7-code 等逐条对上），但有几处确凿的错：
@@ -546,13 +546,13 @@ object PiAgentFiles {
         if (alias.isNotEmpty()) m.put("name", alias)
         s.ctxLenK.trim().toIntOrNull()?.takeIf { it > 0 }?.let { m.put("contextWindow", it * 1000) }
         s.maxOutK.trim().toIntOrNull()?.takeIf { it > 0 }?.let { m.put("maxTokens", it * 1000) }
-        // 识图：**勾上**写 `["text","image"]`、**取消就整个键不写**（照 pi-web ModelsConfig 的 imageInput：`v ? ["text","image"] : undefined`）。
+        // 识图：**勾上**写 `["text","image"]`、**取消就整个键不写**。
         // 为什么不写 `["text"]`：models.json 的条目会**整条替换**同 id 的内置目录条目 —— 写死 text 会把内置目录里
         // 「这个模型能读图」的事实盖掉，pi 的 read 工具随后就不再返回图片内容了。取消后不写 = 由 pi 自己按目录判。
         if (s.image) m.put("input", JSONArray().put("text").put("image"))
         // 思考：pi 用 `model.reasoning` 标记「支持扩展思考」，**不写 = 不支持**（`provider-composer` 的
-        // `modelFromJson` 是 `definition.reasoning ?? false`，并不会回落到内置目录的既定事实）—— 旧实现
-        // 把 AUTO 当「留给 pi 自己判」是错的：pi 没得判，模型会一直停在「不支持思考」。现在：
+        // `modelFromJson` 是 `definition.reasoning ?? false`，并不会回落到内置目录的既定事实）——
+        // 把 AUTO 当「留给 pi 自己判」是错的：pi 没得判，模型会一直停在「不支持思考」。
         // - 页面选了**具体写法**（非 NONE / AUTO）→ 写 true（写法在 provider 级 compat，见 writeModels）；
         // - **AUTO** → 按模型名现推 [AiBackend.inferReasoningFormat]（与界面「自动识别 → 当前生效：X」
         //   同一份规则）：推得出 → 写 true + **模型级** compat.thinkingFormat（provider 级那条是 AUTO 时没有的）；
@@ -562,7 +562,7 @@ object PiAgentFiles {
         } else {
             c.reasoningFormat
         }
-        // 逐模型三态：显式 开/关 优先，null 才走写法推断（= 2026-09-17 之前的旧行为）。
+        // 逐模型三态：显式 开/关 优先，null 才走写法推断。
         // 「不支持」**要显式写出 false**：pi 侧 false 与不写等价（`definition.reasoning ?? false`），
         // 但不写会被回读成「未设置」→ 下次又跟着写法推断跑（用户的选择被静默丢掉）。
         val reasoningOn = s.reasoning ?: (fmt != ReasoningFormat.NONE)
@@ -579,7 +579,7 @@ object PiAgentFiles {
         } else if (s.reasoning == false) {
             m.put("reasoning", false)
         }
-        // 采样：逐模型的值，**留空 = 不传该参数**（照 pi-web：值 undefined 就不写键）
+        // 采样：逐模型的值，**留空 = 不传该参数**
         val sampling = JSONObject()
         s.temperature.trim().toDoubleOrNull()?.let { sampling.put("temperature", it) }
         s.topK.trim().toIntOrNull()?.let { sampling.put("top_k", it) }
@@ -590,11 +590,10 @@ object PiAgentFiles {
 
     /** 思考写法 → pi 的 `compat.thinkingFormat`（拿不准的返回 null = 不写这个键）
      *
-     *  `OPENAI → "openai"`（2026-09-17 修）：pi 的 models.json schema 里 thinkingFormat 的合法字面量
-     *  是 `openai`；旧的 `reasoning_effort` 只在 pi 文档里出现过、代码枚举里没有。实测（用随包 pi
-     *  的 `dist/core/model-config.js` + typebox 1.3.7 跑真校验）它**碰巧也能过**——compat 是三选一
-     *  union 且不禁止额外键，怪值落进「OpenAI 风格」那末支，效果与 `openai` 相同；但那是运气，
-     *  改用规范字面量。
+     *  `OPENAI → "openai"`：pi 的 models.json schema 里 thinkingFormat 的合法字面量
+     *  是 `openai`；`reasoning_effort` 只在 pi 文档里出现过、代码枚举里没有。它**碰巧也能过**
+     *  校验——compat 是三选一 union 且不禁止额外键，怪值落进「OpenAI 风格」那末支，效果与
+     *  `openai` 相同；但那是运气，必须写规范字面量。
      */
     private fun reasoningCompat(format: ReasoningFormat): Map<String, Any>? = when (format) {
         ReasoningFormat.OPENAI -> mapOf("thinkingFormat" to "openai")
@@ -614,7 +613,7 @@ object PiAgentFiles {
     private fun reasoningFormatOf(compat: JSONObject?): ReasoningFormat {
         val wire = compat?.optString("thinkingFormat", "").orEmpty()
         return when (wire) {
-            // 旧版 Pient 写过 `reasoning_effort`（读侧继续认，避免老配置被降级成 AUTO）
+            // 兼容 `reasoning_effort`（读侧继续认，避免老配置被降级成 AUTO）
             "openai", "reasoning_effort" -> ReasoningFormat.OPENAI
             "deepseek" -> ReasoningFormat.DEEPSEEK
             "zai" -> ReasoningFormat.ZAI
@@ -650,11 +649,11 @@ object PiAgentFiles {
     }
 
     /**
-     * 模型条目里的 tokens → 页面输入框口径（**0/缺省 = 空串**，2026-09-17 改）。
+     * 模型条目里的 tokens → 页面输入框口径（**0/缺省 = 空串**）。
      *
-     * 改理由：旧版回退 "200"/"64" 会让「页面上没填过」的模型被**默默写成 200K 上下文 /
+     * 为什么不留默认值：回退 "200"/"64" 会让「页面上没填过」的模型被**默默写成 200K 上下文 /
      * 64K 输出**（保存一次即落盘），而真实窗口小的模型会被 pi 当成 200K —— 压缩触发过晚、
-     * 有服务端上下文超限的风险。现在的口径：**空 = 不写该键**，由 pi 用它自己的默认
+     * 有服务端上下文超限的风险。口径：**空 = 不写该键**，由 pi 用它自己的默认
      * （models.json 未写时 pi 取 contextWindow 128000 / maxTokens 16384）。
      */
     private fun kTokens(value: Int): String = if (value > 0) (value / 1000).toString() else ""
@@ -663,7 +662,7 @@ object PiAgentFiles {
      * `models[]` → 逐模型参数（[ModelSetting]）。
      *
      * 关键口径：**没写的键一律存成空串 / false**（= 回写时不写该键）—— 「文件里没写」与「页面上留空」
-     * 因此完全等价，回写不会凭空给模型补上默认值（旧的 `?: 1.0` / `?: 0` 兜底就会补）。
+     * 因此完全等价，回写不会凭空给模型补上默认值（`?: 1.0` / `?: 0` 那样的兜底就会补）。
      */
     private fun modelSettingsOf(models: JSONArray?): Map<String, ModelSetting> {
         if (models == null) return emptyMap()

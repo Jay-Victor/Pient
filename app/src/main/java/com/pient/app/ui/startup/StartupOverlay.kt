@@ -64,32 +64,30 @@ import kotlinx.coroutines.delay
 import kotlin.random.Random
 
 /**
- * 开屏加载页（2026-09-12）。
+ * 开屏加载页。
  *
- * 背景：冷启动时系统启动画面（starting window）会一直挂到应用画出第一帧，而此前
- * 首屏数据（state.json / AI 配置 / 价格表 / 用量台账）是在**组合期同步读盘**的，
- * 主线程被占住 → 实测启动画面停留 3.6s；且 `android:windowBackground` 写死深色
+ * 背景：冷启动时系统启动画面（starting window）会一直挂到应用画出第一帧；首屏数据
+ * （state.json / AI 配置 / 价格表 / 用量台账）一旦在**组合期同步读盘**，
+ * 主线程被占住 → 启动画面停留 3.6s；且 `android:windowBackground` 写死深色
  * #0D1117，亮色主题用户看到的就是一记「黑频」。
  *
  * 页面构成（自上而下）：品牌 logo → 品牌加载动画 → 解码文字。
  *
- * 参考实现（Hermes 桌面端源码，`%LOCALAPPDATA%\hermes\hermes-agent\apps\desktop\src`）：
- * - 覆盖层形态 / 主题底色 / 退出编排：`components/gateway-connecting-overlay.tsx`
+ * - 覆盖层形态 / 主题底色 / 退出编排：
  *   （全屏底色 + 居中动画元素；退出 = 内容淡出下移 → 覆盖层淡出）
- * - 加载动画的**机制**：`components/ui/loader.tsx` 的 `Loader` ——
+ * - 加载动画的**机制** ——
  *   常显底纹路径（opacity 0.1）+ 一束沿路径拖尾的渐隐粒子
  *   （`fade = (1-tailOffset)^0.56`、半径 0.9→3.6 ×strokeScale、透明度 0.04→1.0、
- *   描边 round 连接、粒子数 78、尾长 0.32、一圈 5400ms；PageLoader 口径 strokeScale=0.72、size-10）
- * - 解码文字：`components/ui/decode-text.tsx`（45ms 一拍、每拍解半个字符、全解后停 16 拍再循环、
- *   字符集 `/\\|-_=+<>~:*`、前 prefix 个字符不解码、光标方块 1s 硬闪）
- *   品牌字标用法同 `components/pane-shell/tree/renderer/tree-group.tsx`
- *   （`<DecodeText text="HERMES" cursor prefix={1} />`），此处同款写作 "PIENT"。
+ *   描边 round 连接、粒子数 78、尾长 0.32、一圈 5400ms；strokeScale=0.72、size-10）
+ * - 解码文字：45ms 一拍、每拍解半个字符、全解后停 16 拍再循环、
+ *   字符集 `/\\|-_=+<>~:*`、前 prefix 个字符不解码、光标方块 1s 硬闪。
+ *   品牌字标写作 "PIENT"（cursor + prefix=1）。
  *
- * ★ 动画曲线＝**从产品 logo 里量出来的 π 边框**（2026-09-12 重做，替换 Hermes 的通用玫瑰曲线）：
- *   玫瑰曲线是 Hermes 自己的图形语汇；本产品的 π 就在 `pient_logo.png` 里（logo = 蓝圆盘 +
+ * ★ 动画曲线＝**从产品 logo 里量出来的 π 边框**：
+ *   本产品的 π 就在 `pient_logo.png` 里（logo = 蓝圆盘 +
  *   负形挖出的「海豚 + π」复合标志）。π 的**三条笔画互不相连**（横杠 / 左腿 / 右腿，两处窄缝），
  *   所以「边框」= 三条各自闭合的曲线；用「膨胀合并成一块再描外轮廓」得到的单条曲线必然要
- *   用直线跨过窄缝、并把笔锋磨圆（旧版 100 点轮廓即如此），无法贴合，故改为逐块精确提取：
+ *   用直线跨过窄缝、并把笔锋磨圆，无法贴合，故改为逐块精确提取：
  *   ① 取 alpha=127.5 等值线（双线性插值场 8× 上采样后 Moore 追踪，亚像素精度）；
  *   ② 按 8 邻接连通域分出三块笔画，各自 Ramer–Douglas–Peucker(ε=0.20px) 简化——
  *      不做膨胀、不做平滑，最大偏差 0.19px@512（= 显示尺寸 0.04dp）；
@@ -97,29 +95,28 @@ import kotlin.random.Random
  *      使跨环跳变最小（6.0 / 11.9 / 9.8 视口单位）；
  *   ④ 等比居中归一化到 0..100 视口（占 8..92，与原单轮廓同尺寸、同位置）。
  *   三条曲线**各跑各的彗尾**（互不影响）：每条彗尾的拖尾只落在自己的曲线上，不跨曲线、
- *   不画跨接直线；粒子数按周长占比分摊源码的 78 粒（≈26 / 27 / 25），点距与原单彗尾版一致。
+ *   不画跨接直线；粒子数按周长占比分摊 78 粒（≈26 / 27 / 25），点距与原单彗尾版一致。
  *
- * 与桌面端的有意差异（数值已在注释里标注）：
- * - **不旋转**：Hermes 的曲线整组 28s 转一圈，但 π 是有方向的字形，旋转会破坏可读性。
- * - **不做形状脉冲**：Hermes 的 detailScale 让参数曲线呼吸变形，轮廓是固定字形，不需要。
- * - 退出编排缩短为「内容淡出 300ms → 覆盖层淡出 300ms」并去掉 300ms 停留：
- *   桌面端启动以秒计，移动端首屏数据常在数百毫秒内就绪，照搬 1.18s 会像卡住。
+ * - **不旋转**：π 是有方向的字形，旋转会破坏可读性。
+ * - **不做形状脉冲**：轮廓是固定字形，不需要。
+ * - 退出编排：内容淡出 300ms → 覆盖层淡出 300ms，不留停留 ——
+ *   移动端首屏数据常在数百毫秒内就绪，编排过长会像卡住。
  * - 底色用 `@color/pient_splash_bg`（与系统启动画面**同一个 day/night 资源**），
  *   使「系统启动画面 → 本加载页」无缝衔接；数据就绪后再淡出到应用主题界面。
  */
 
-/** 品牌 π 加载动画参数（机制数值沿用 Hermes `Loader`） */
+/** 品牌 π 加载动画参数 */
 private object BrandPi {
-    /** 每条曲线彗尾的粒子数（源码值 78；三条曲线各自一条彗尾，按周长占比分摊到各环） */
+    /** 每条曲线彗尾的粒子数（三条曲线各自一条彗尾，按周长占比分摊到各环） */
     const val PARTICLES = 78
-    /** 底纹描边宽度（0..100 视口单位；Hermes 为 4.5） */
+    /** 底纹描边宽度（0..100 视口单位） */
     const val STROKE_WIDTH = 4.5f
-    /** PageLoader 口径描边缩放 */
+    /** 描边缩放 */
     const val STROKE_SCALE = 0.72f
     const val PATH_OPACITY = 0.1f
-    /** 拖尾长度（占三环总长的比例；Hermes rose-curve 为 0.32） */
+    /** 拖尾长度（占三环总长的比例） */
     const val TRAIL_SPAN = 0.32f
-    /** 粒子半径区间（0..100 视口单位；Hermes 为 0.9→3.6） */
+    /** 粒子半径区间（0..100 视口单位） */
     const val RADIUS_MIN = 0.9f
     const val RADIUS_SPAN = 2.7f
     /** 彗尾绕轮廓一圈 */
@@ -335,7 +332,7 @@ private object BrandPiGeometry {
     /** 每环的等弧长采样点，[x0,y0,x1,y1,…]（环闭合：末点的下一段即回首点） */
     val luts: Array<FloatArray>
 
-    /** 每环分到的粒子数（按周长占比分摊源码的 78 粒，使点距与单彗尾版一致） */
+    /** 每环分到的粒子数（按周长占比分摊 78 粒，使点距与单彗尾版一致） */
     val particles: IntArray
 
     /** 底纹路径：三条笔画边框，各自闭合 */
@@ -409,18 +406,18 @@ private object BrandPiGeometry {
     }
 }
 
-/** 源码 normalizeProgress：把进度收进 [0,1) */
+/** 把进度收进 [0,1) */
 private fun normalize(progress: Float): Float = ((progress % 1f) + 1f) % 1f
 
 /**
  * 品牌 π 加载动画：常显的 π 边框底纹（横杠 / 左腿 / 右腿各一条闭合环）
  * + **三条曲线各自一条独立彗尾**（拖尾只落在自己的曲线上，不跨曲线）——
- *   机制与数值取自 Hermes `Loader`，曲线换成从 logo 精确提取的 π 边框。
+ *   曲线是从 logo 精确提取的 π 边框。
  */
 @Composable
 fun BrandPiLoader(modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.primary) {
     val animatorsEnabled = remember { ValueAnimator.areAnimatorsEnabled() }
-    // 相位随机偏移（源码 `phaseOffset = Math.random()`）；关动画时停在轮廓中段的一帧
+    // 相位随机偏移；关动画时停在轮廓中段的一帧
     val phaseOffset = remember { Random.nextFloat() }
     var timeMs by remember { mutableLongStateOf(if (animatorsEnabled) 0L else 2700L) }
 
@@ -471,14 +468,14 @@ fun BrandPiLoader(modifier: Modifier = Modifier, color: Color = MaterialTheme.co
     }
 }
 
-/** 解码文字参数（components/ui/decode-text.tsx）。 */
+/** 解码文字参数（节奏与字符集）。 */
 private const val TICK_MS = 45L
 private const val HOLD_TICKS = 16
 private const val SCRAMBLE_CHARS = "/\\|-_=+<>~:*"
 
-/** 退出编排（移动端缩短版；括号内为 Hermes 桌面端原值）。 */
-private const val CONTENT_OUT_MS = 300      // 桌面端 360
-private const val OVERLAY_OUT_MS = 300      // 桌面端 520 + 300ms 停留
+/** 退出编排时长（移动端口径，不留停留）。 */
+private const val CONTENT_OUT_MS = 300      // 内容淡出
+private const val OVERLAY_OUT_MS = 300      // 覆盖层淡出
 
 private enum class StartupPhase { LIVE, CONTENT_OUT, OVERLAY_OUT, GONE }
 
@@ -518,7 +515,7 @@ fun StartupOverlay(visible: Boolean, modifier: Modifier = Modifier) {
         animationSpec = tween(CONTENT_OUT_MS, easing = LinearEasing),
         label = "startup-content-alpha",
     )
-    // 桌面端：translate-y-2（8px）下移淡出
+    // 下移淡出（8px）
     val contentShift by animateDpAsState(
         targetValue = if (leaving) 8.dp else 0.dp,
         animationSpec = tween(CONTENT_OUT_MS, easing = LinearEasing),
@@ -598,7 +595,7 @@ private fun DecodeText(
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        // 桌面端 pl-[0.4em]：补掉末尾字距造成的视觉偏移
+        // pl-[0.4em]：补掉末尾字距造成的视觉偏移
         modifier = modifier.padding(start = DECODE_PREFIX_PADDING),
     ) {
         Text(
@@ -651,7 +648,7 @@ private fun scrambled(tail: String, resolvedCount: Int): String = buildString {
     }
 }
 
-/** 0.64rem / tracking 0.4em（桌面端 text-[0.64rem] tracking-[0.4em]）；pl 为同一字距的 dp 版 */
+/** 0.64rem / tracking 0.4em（text-[0.64rem] tracking-[0.4em]）；pl 为同一字距的 dp 版 */
 private val DECODE_FONT_SP = (0.64f * 16f).sp
 private val DECODE_TRACKING_SP = (0.64f * 16f * 0.4f).sp
 private val DECODE_PREFIX_PADDING = (0.64f * 16f * 0.4f).dp

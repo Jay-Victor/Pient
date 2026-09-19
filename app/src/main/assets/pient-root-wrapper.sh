@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # Pient 终端层：Root 档的 root 侧启动器（由宿主以 `su -c "sh <此脚本> …"` 调用，运行在 root 身份）。
 #
-# 与 PRoot 路径的区别（照 Operit：默认 PRoot，条件具备（Root）时用 chroot）：
+# 与 PRoot 路径的区别（默认 PRoot，条件具备（Root）时用 chroot）：
 #   - chroot 是**真 root**：guest 里的 uid 0 就是真的 0，可改系统、可 apt 装服务、可绑特权端口；
 #     且零模拟开销（PRoot 要 ptrace 拦截每个系统调用）。
 #   - 代价：需要 /dev /proc /sys 与工作区的挂载（root 才能 mount），挂载点会留在设备上。
@@ -17,8 +17,8 @@ R=$P/rootfs
 [ -x "$R/bin/bash" ] || { echo "[pient] rootfs 未就绪：$R" >&2; exit 127; }
 
 # 工作区 = 当前项目目录（应用写进 $P/workspace；没设过就退回随包工作区 app/）——
-# **与 PRoot 分支同一口径**：早先这里写死 bind $P/app，导致 chroot 模式下 guest 的
-# /workspace 永远是随包目录、看不到用户当前项目（2026-09-15 修）。
+# **与 PRoot 分支同一口径**：写死 bind $P/app 会让 chroot 模式下 guest 的
+# /workspace 永远是随包目录、看不到用户当前项目。
 W=$(cat "$P/workspace" 2>/dev/null)
 [ -n "$W" ] && [ -d "$W" ] || W=$P/app
 mkdir -p "$R/workspace"

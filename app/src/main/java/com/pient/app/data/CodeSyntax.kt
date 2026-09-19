@@ -1,18 +1,18 @@
 package com.pient.app.data
 
 /**
- * 代码语法着色 —— 移植 Operit 工作区编辑器（`ui/.../workspace/editor`）：
- * - 扫描算法：`EditorSyntaxHighlighter.parseFullText`（逐字符：注释 → 字符串 → 数字 → 标识符 → 运算符）
- * - 语言定义：Operit `language/` 下各 `*Support.kt`（关键字 / 内置类型 / 内置函数 / 内置变量 / 注释标记 / 字符串分隔符）
- *   与 `LanguageDetector`（扩展名 → 语言）
- * - 颜色：本层只产出「种类」，具体色值在 UI 层按 Operit `theme/EditorTheme.kt` 的
+ * 代码语法着色：
+ * - 扫描算法：逐字符（注释 → 字符串 → 数字 → 标识符 → 运算符）
+ * - 语言定义：关键字 / 内置类型 / 内置函数 / 内置变量 / 注释标记 / 字符串分隔符，
+ *   以及扩展名 → 语言的映射
+ * - 颜色：本层只产出「种类」，具体色值在 UI 层按
  *   LightTheme / DarkTheme 调色板取用（见 ui/files/CodeHighlight.kt）
  */
 
-/** 着色种类（对应 Operit LanguageSupport 的颜色常量；OPERATOR/DEFAULT 都落到正文色，故不单列） */
+/** 着色种类（OPERATOR/DEFAULT 都落到正文色，故不单列） */
 enum class CodeToken { KEYWORD, TYPE, VARIABLE, FUNCTION, STRING, NUMBER, COMMENT, HEADING, LINK }
 
-/** 一段同色区间 [start, end)（粗体/斜体/删除线 = 标记语言的强调样式，Operit 编辑器不用） */
+/** 一段同色区间 [start, end)（粗体/斜体/删除线 = 标记语言的强调样式，代码语言用不到） */
 data class CodeSpan(
     val start: Int,
     val end: Int,
@@ -22,7 +22,7 @@ data class CodeSpan(
     val strike: Boolean = false,
 )
 
-/** 语言定义（Operit LanguageSupport + BaseLanguageSupport 默认值） */
+/** 语言定义 */
 class CodeLanguage(
     val name: String,
     val extensions: Set<String>,
@@ -30,7 +30,7 @@ class CodeLanguage(
     val types: Set<String> = emptySet(),
     val functions: Set<String> = emptySet(),
     val variables: Set<String> = emptySet(),
-    /** 注释起始标记（Operit 规则：`//` 或单字符标记 → 行注释；其余 → 到多行结束标记） */
+    /** 注释起始标记（`//` 或单字符标记 → 行注释；其余 → 到多行结束标记） */
     val commentStarts: List<String> = listOf("//", "/*"),
     val multiCommentEnd: String? = "*/",
     val stringDelimiters: Set<Char> = setOf('"', '\''),
@@ -40,10 +40,10 @@ class CodeLanguage(
 )
 
 object CodeLanguages {
-    /** 通用回退（Operit BaseLanguageSupport：`//` 与块注释、引号字符串、转义） */
+    /** 通用回退（`//` 与块注释、引号字符串、转义） */
     val generic = CodeLanguage(name = "text", extensions = emptySet())
 
-    /** Kotlin（关键字/类型/函数集逐字来自 Operit KotlinSupport） */
+    /** Kotlin */
     val kotlin = CodeLanguage(
         name = "kotlin",
         extensions = setOf("kt", "kts"),
@@ -71,7 +71,7 @@ object CodeLanguages {
         ),
     )
 
-    /** JavaScript（逐字来自 Operit JavaScriptSupport） */
+    /** JavaScript */
     val javascript = CodeLanguage(
         name = "javascript",
         extensions = setOf("js", "mjs", "cjs"),
@@ -100,7 +100,7 @@ object CodeLanguages {
         ),
     )
 
-    /** TypeScript（Operit 只注册到 JS；TS 按其 LanguageDetector 的 ts/tsx 补充类型语法） */
+    /** TypeScript（在 JS 词表上补 ts/tsx 的类型语法） */
     val typescript = CodeLanguage(
         name = "typescript",
         extensions = setOf("ts", "tsx"),
@@ -118,7 +118,7 @@ object CodeLanguages {
         functions = javascript.functions,
     )
 
-    /** Python（Operit 未注册 python 支持、`Detector` 有 py；此处按其算法补 Python 词表） */
+    /** Python（py / pyw 扩展名） */
     val python = CodeLanguage(
         name = "python",
         extensions = setOf("py", "pyw"),
@@ -144,7 +144,7 @@ object CodeLanguages {
         multiCommentEnd = null,
     )
 
-    /** Java（Operit 未注册；`Detector` 有 java） */
+    /** Java */
     val java = CodeLanguage(
         name = "java",
         extensions = setOf("java"),
@@ -166,7 +166,7 @@ object CodeLanguages {
         functions = setOf("println", "print", "printf", "format", "valueOf", "parseInt", "parseDouble"),
     )
 
-    /** HTML（TAGS/ATTRIBUTES、注释 `<!-- -->` 逐字来自 Operit HtmlSupport） */
+    /** HTML（TAGS/ATTRIBUTES、注释 `<!-- -->`） */
     val html = CodeLanguage(
         name = "html",
         extensions = setOf("html", "htm", "xhtml"),
@@ -210,7 +210,7 @@ object CodeLanguages {
         stringDelimiters = setOf('"'),
     )
 
-    /** CSS（块注释、字符串；Operit Detector 的 css/scss/sass/less） */
+    /** CSS（块注释、字符串；css/scss/sass/less） */
     val css = CodeLanguage(
         name = "css",
         extensions = setOf("css", "scss", "sass", "less"),
@@ -266,7 +266,7 @@ object CodeLanguages {
     /** 扩展名 → 语言（无匹配返回 null，调用方决定是否回退 generic） */
     fun forExtension(ext: String): CodeLanguage? = byExtension[ext.lowercase()]
 
-    /** 按 4 空格缩进的制表位（Operit `CanvasCodeEditorView.TAB_SPACES`） */
+    /** 按 4 空格缩进的制表位 */
     const val TAB_SPACES = 4
 
     /** 超过此长度不做着色（扫描是 O(n)，避免大文件在输入时卡顿；行号与缩进标记不受影响） */
@@ -274,7 +274,7 @@ object CodeLanguages {
 }
 
 /**
- * 逐字符扫描（Operit `EditorSyntaxHighlighter.parseFullText` 同款顺序与归类）：
+ * 逐字符扫描（顺序与归类）：
  * 注释 → 字符串 → 数字 → 标识符（关键字/内置类型/内置变量/内置函数/后跟 `(` → 函数/首字母大写 → 类型/其余 → 变量）。
  * 运算符与空白归正文色，不产出区间。Markdown 走 [scanMarkdown] 专用扫描器。
  */
@@ -408,7 +408,7 @@ fun leadingIndentCells(line: String): Int {
 // ───────────────────────────── Markdown 源码着色 ─────────────────────────────
 
 /**
- * Markdown 源码多色扫描（Pient 增补；Operit 编辑器无 markdown 语言）：
+ * Markdown 源码多色扫描：
  * 标题 → HEADING(+粗体，含 `#` 标记)；列表/任务标记 → NUMBER；引用标记 `>`、分隔线、围栏标记 → COMMENT；
  * 行内代码与围栏代码体 → STRING（围栏有语言时按该语言着色）；链接文字 → FUNCTION、链接地址 → LINK；
  * 强调标记 → VARIABLE（粗体/斜体内容分别加粗/倾斜，删除线内容 → COMMENT + 删除线）；frontmatter 键 → FUNCTION、值 → STRING。
@@ -558,7 +558,7 @@ private fun scanMdLine(line: String, lineStart: Int, spans: MutableList<CodeSpan
 
 /**
  * 行内扫描 —— 必须带 [to] 上界：强调/删除线的内容递归只扫自己那一段，
- * 否则递归会一路扫到行尾并重复产出区间（2026-09-10 实测：整段被重复着色）。
+ * 否则递归会一路扫到行尾并重复产出区间（整段会被重复着色）。
  */
 private fun scanMdInline(
     line: String,

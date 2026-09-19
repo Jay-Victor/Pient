@@ -19,9 +19,9 @@ import org.scilab.forge.jlatexmath.TypedAtom
 import ru.noties.jlatexmath.JLatexMathDrawable
 
 /**
- * LaTeX 公式渲染（Android 蓝本 = Operit `ui/common/displays/LatexCache.kt` + `JLatexMathCompatibility.kt`）：
+ * LaTeX 公式渲染：
  * jlatexmath-android（`ru.noties:jlatexmath-android:0.2.0`）把公式画成 Drawable → 这里再落到 ARGB 位图，
- * 交给 Compose 按位图显示（Pient 全原生渲染，不走 WebView/KaTeX —— pi-web 的 KaTeX 只在 Web 端可用）。
+ * 交给 Compose 按位图显示（全原生渲染，不走 WebView/KaTeX —— KaTeX 只在 Web 端可用）。
  *
  * 渲染入口按 (公式, 字号 px, 文字色) 做 LRU 缓存：同一段落里重复出现的公式、以及重组/滚动引起的重复调用
  * 都不会重新解析；失败结果同样入缓存（避免每次重组都重试一段渲染不出来的公式）。
@@ -33,7 +33,7 @@ internal object LatexRenderer {
     /** 超长公式不渲染（防呆；渲染失败会退化为源码文本显示） */
     private const val MaxFormulaChars = 1000
 
-    /** 位图缓存上限（KB 计，约 4MB —— 与 Operit LatexCache 的 1/8 可用内存同量级） */
+    /** 位图缓存上限（KB 计，约 4MB） */
     private const val MaxCacheKb = 4096
 
     private class Entry(val image: LatexImage?)
@@ -75,10 +75,10 @@ internal object LatexRenderer {
     }
 }
 
-// ───────────────────────────── jlatexmath 缺失命令的兼容宏（Operit 同款）─────────────────────────────
+// ───────────────────────────── jlatexmath 缺失命令的兼容宏 ─────────────────────────────
 
 /**
- * jlatexmath 相对 KaTeX 缺几条命令，模型输出里却常见 —— 按 Operit 的做法注册兼容宏：
+ * jlatexmath 相对 KaTeX 缺几条命令，模型输出里却常见 —— 注册兼容宏：
  * `\color{…}{…}` 的单参数多参数两种写法、`\oiint` / `\oiiint` 闭合重积分、以及对应的 Unicode 字符映射。
  * 注册只做一次（命令表是全局静态表，重复注册会抛异常）。
  */

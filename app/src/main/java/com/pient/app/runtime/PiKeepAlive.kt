@@ -19,7 +19,7 @@ import com.pient.app.R
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * 通知卡片展开区的**明细行**（2026-09-16 用户要求：模型 / 思考等级 / 运行会话数 / 工具调用数）。
+ * 通知卡片展开区的**明细行**（模型 / 思考等级 / 运行会话数 / 工具调用数）。
  * 每一项都允许缺省（null / 0 = 不知道或没有），渲染时缺项不显示那一行。
  * 数据源注册见 [PiKeepAlive.detailProvider]。
  */
@@ -35,7 +35,7 @@ data class KeepAliveDetail(
 )
 
 /**
- * **前台服务保活**（2026-09-16，开发计划 M5）。
+ * **前台服务保活**。
  *
  * 为什么需要：pi 是**应用子进程**（App↔pi 走 stdin/stdout 管道），终端会话同样是应用子进程。
  * 应用退到后台 / 熄屏后，Android 会把这套进程一起清掉 —— 进行中的 AI 回合、终端里跑的
@@ -82,7 +82,7 @@ object PiKeepAlive {
     private var sentResident = false
 
     /**
-     * 通知卡片的**明细数据源**（2026-09-16 用户要求：模型 / 思考等级 / 运行会话数 / 工具调用数）：
+     * 通知卡片的**明细数据源**（模型 / 思考等级 / 运行会话数 / 工具调用数）：
      * 由 `ChatState` 构造时注册 —— runtime 层不反向依赖 data 层，谁有数据谁提供，缺项不显示那一行。
      */
     var detailProvider: (() -> KeepAliveDetail?)? = null
@@ -128,7 +128,7 @@ object PiKeepAlive {
         sentWhen = 0L
         sentResident = false
         runCatching {
-            // **不能用 stopService()**（2026-09-16 真机崩溃实测）：
+            // **不能用 stopService()**：
             // acquire 的 `startForegroundService()` 还挂着、服务还没跑进 onStartCommand 时被 stopService 撤单，
             // Android 判定「startForegroundService() 没有随后调用 startForeground()」→
             // `RemoteServiceException: ForegroundServiceDidNotStartInTimeException` **直接杀掉应用**。
@@ -160,7 +160,7 @@ object PiKeepAlive {
     fun isRunning(): Boolean = running
 
     /**
-     * **保活被系统停掉时如实告知**（2026-09-16）：不假装还在保活。
+     * **保活被系统停掉时如实告知**：不假装还在保活。
      * 应用在前台 → Toast（用户正看着屏幕）；已退后台 → 发一条可点开的说明通知。
      */
     fun notifyInterrupted(context: Context?) {
@@ -279,7 +279,7 @@ object PiKeepAlive {
      * （应用有前台服务 = 系统眼里的前台应用），且不会撞上「startForegroundService 没随后
      * startForeground」的杀进程契约。
      *
-     * **计时**（2026-09-16 用户要求「Pient 右侧的时间」）：`EXTRA_WHEN` = 当前活动开始的时刻，
+     * **计时**：`EXTRA_WHEN` = 当前活动开始的时刻，
      * 通知卡片上由系统渲染成相对时间（「1 分钟前」）；活动文案不变（只是明细刷新）就不动它，
      * 计时因此是「这条活动跑了多久」，不会被明细刷新重置。
      */
@@ -294,7 +294,7 @@ object PiKeepAlive {
             .putExtra(PiKeepAliveService.EXTRA_WHEN, whenMs)
             // 常驻档标记：服务据此选前台服务类型（specialUse / dataSync）
             .putExtra(PiKeepAliveService.EXTRA_RESIDENT, resident)
-            // 通知点开回哪个页（2026-09-16）：终端会话 → 终端页；聊天回合 → 打开应用即可
+            // 通知点开回哪个页：终端会话 → 终端页；聊天回合 → 打开应用即可
             .putExtra(PiKeepAliveService.EXTRA_PANEL, currentPanel())
         if (!startNew) {
             ctx.startService(intent)
@@ -334,7 +334,7 @@ class PiKeepAliveService : Service() {
          *
          * 为什么不是 stopService()：`startForegroundService()` 之后必须由服务自己调用
          * `startForeground()`，否则系统抛 `ForegroundServiceDidNotStartInTimeException` 杀进程
-         * （2026-09-16 真机崩溃实测：一轮在 ~100ms 内结束就会撞上）。走一条普通 startService 送
+         * （一轮在 ~100ms 内结束就会撞上）。走一条普通 startService 送
          * 「停」指令 = 服务一定先拿到 onStartCommand 走完契约，再自己停。
          */
         const val ACTION_STOP = "com.pient.app.action.KEEPALIVE_STOP"
@@ -356,7 +356,7 @@ class PiKeepAliveService : Service() {
         val big = intent?.getStringExtra(EXTRA_BIG).orEmpty()
         val whenMs = intent?.getLongExtra(EXTRA_WHEN, 0L) ?: 0L
         val resident = intent?.getBooleanExtra(EXTRA_RESIDENT, false) ?: false
-        // 点通知回到对应页面（2026-09-16）：终端会话 → 终端页；其余 → 只是把应用调到前台
+        // 点通知回到对应页面：终端会话 → 终端页；其余 → 只是把应用调到前台
         val panel = intent?.getStringExtra(EXTRA_PANEL).orEmpty()
         val open = Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -366,7 +366,7 @@ class PiKeepAliveService : Service() {
             .setSmallIcon(R.drawable.pient_logo)
             .setContentTitle("Pient")
             .setContentText(text)
-            // 计时（2026-09-16 用户要求）：标题右侧的相对时间 = 这条活动开始了多久（系统自己走字）
+            // 计时：标题右侧的相对时间 = 这条活动开始了多久（系统自己走字）
             .setShowWhen(true)
             .setWhen(if (whenMs > 0L) whenMs else System.currentTimeMillis())
             .setContentIntent(
@@ -404,16 +404,14 @@ class PiKeepAliveService : Service() {
     }
 
     /**
-     * 前台服务类型：**API 34+ 一律 `specialUse`**（2026-09-16 真机实测后的收口）。
+     * 前台服务类型：**API 34+ 一律 `specialUse`**。
      *
-     * 为什么不用 `dataSync`（按需档原来用它）：Android 15 起 dataSync 前台服务在后台
-     * **累计 6 小时 / 24 小时**就被系统收尾，且**到点那一下在真机上必崩** —— 即使实现了
+     * 为什么不用 `dataSync`：Android 15 起 dataSync 前台服务在后台
+     * **累计 6 小时 / 24 小时**就被系统收尾，且**到点那一下必崩** —— 即使实现了
      * `onTimeout` 并当场 `stopForeground` + `stopSelf()`，系统仍抛
-     * `RemoteServiceException$ForegroundServiceDidNotStopInTimeException` 杀掉应用
-     * （两次实测：旧写法 `stopSelf(startId)` 一次、改无条件 `stopSelf()` 后又一次，都是回调后
-     * 十几毫秒就被杀）。官方文档给的第一条建议就是「改用替代 API 而不是 dataSync」——我们这个
-     * 用途（保住用户自己要跑的 pi 回合 / 终端会话）本来就属于「不匹配现有类型」的长期运行场景，
-     * 与 Operit 的 `AIForegroundService`（`dataSync|microphone|specialUse`）同一口径。
+     * `RemoteServiceException$ForegroundServiceDidNotStopInTimeException` 杀掉应用。
+     * 官方文档给的第一条建议就是「改用替代 API 而不是 dataSync」——我们这个
+     * 用途（保住用户自己要跑的 pi 回合 / 终端会话）本来就属于「不匹配现有类型」的长期运行场景。
      * `specialUse` 没有时限，于是那条崩溃路径从根上消失；[onTimeout] 只作兜底留着。
      */
     private fun foregroundType(resident: Boolean): Int =
@@ -433,11 +431,10 @@ class PiKeepAliveService : Service() {
     override fun onTimeout(startId: Int, fgsType: Int) {
         PientLog.w(TAG, "前台服务到点（type=$fgsType，系统时限）：按系统要求自停")
         runCatching { @Suppress("DEPRECATION") stopForeground(true) }
-        // **必须无条件 stopSelf()**（2026-09-16 真机崩溃实测）：这里不能用 stopSelf(startId) ——
+        // **必须无条件 stopSelf()**：这里不能用 stopSelf(startId) ——
         // 服务被多次启动过（acquire / 刷新 / 换 key）时这个 startId 不是最后一次启动请求，
         // stopSelf(startId) 是**空操作**，服务停不下来，系统随即抛
-        // `RemoteServiceException$ForegroundServiceDidNotStopInTimeException` **崩掉应用**
-        // （修复前实测：onTimeout 日志与 1002 说明通知都出来了，17ms 后 FATAL EXCEPTION 杀进程）。
+        // `RemoteServiceException$ForegroundServiceDidNotStopInTimeException` **崩掉应用**。
         stopSelf()
         // 如实告知「保活到此为止」（前台 = Toast，后台 = 通知；见 PiKeepAlive.notifyInterrupted）
         PiKeepAlive.notifyInterrupted(this)

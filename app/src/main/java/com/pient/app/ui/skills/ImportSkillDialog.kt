@@ -42,13 +42,12 @@ import android.net.Uri
 import android.provider.OpenableColumns
 
 /**
- * 导入技能弹窗（设计计划第 4 章，Operit SkillConfigScreen 参考）：
+ * 导入技能弹窗：
  * ZIP 导入 / 手动输入两页签；手动 = 名称（frontmatter name：1–64 字符
  * 小写/数字/连字符，非法即校验提示）+ 简介（description ≤1024 必填）+
  * 技能内容（生成 SKILL.md）。导入目标跟随分段（全局/项目）。
  *
- * **2026-09-16 两个页签都是真实现**：ZIP 页签走 SAF 文件选择器 + `PiSkills.importZip` 真解压；
- * 原来的「原型」痕迹（假文件名 `my-skill.zip`、`delay(900)` 假进度、假描述、假附件列表）已删。
+ * 两个页签都是真实现：ZIP 页签走 SAF 文件选择器 + `PiSkills.importZip` 真解压。
  */
 @Composable
 fun ImportSkillDialog(
@@ -116,7 +115,7 @@ fun ImportSkillDialog(
                             .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(10.dp))
                             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
                             .clickable {
-                                // 真 SAF 选择器（原来这里是 `zipPicked = "my-skill.zip"` 的假动作）
+                                // SAF 文件选择器
                                 zipPicker.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
                             }
                             .padding(12.dp),

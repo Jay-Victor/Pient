@@ -12,11 +12,11 @@ import org.apache.poi.ss.usermodel.DataFormatter
 import org.apache.poi.ss.usermodel.WorkbookFactory
 
 /**
- * 老格式与表格文档 → 预览 HTML（口径逐项对齐 Operit `DocumentConversionUtil`）：
- * - `.doc`（Word 97-2003 二进制）：`HWPFDocument` + `WordExtractor` 取全文 → 逐段 `<p>`（Operit convertToHtml 的 doc 分支）
- * - `.xls` / `.xlsx`：`WorkbookFactory` + `DataFormatter`（含公式求值）→ 多表切换的 HTML（Operit convertSpreadsheetToHtml）
+ * 老格式与表格文档 → 预览 HTML：
+ * - `.doc`（Word 97-2003 二进制）：`HWPFDocument` + `WordExtractor` 取全文 → 逐段 `<p>`
+ * - `.xls` / `.xlsx`：`WorkbookFactory` + `DataFormatter`（含公式求值）→ 多表切换的 HTML
  *
- * 依赖 Apache POI（Operit 同款 5.2.3 三件套）。POI 的 OOXML 路径（docx/xlsx）需要 StAX，
+ * 依赖 Apache POI（5.2.3 三件套）。POI 的 OOXML 路径（docx/xlsx）需要 StAX，
  * Pient 的 docx 预览另走 `DocxConverter`（自解析，零依赖）；此处仅 .xls / .xlsx 走 POI。
  */
 object DocumentConverter {
@@ -53,7 +53,7 @@ object DocumentConverter {
         </script>
     """
 
-    /** .doc → HTML（Operit doc 分支：全文按行拆段，空行丢弃） */
+    /** .doc → HTML（全文按行拆段，空行丢弃） */
     fun docToHtml(context: Context, node: FileNode): String? {
         val text = try {
             openStream(context, node)?.use { input ->
@@ -72,7 +72,7 @@ object DocumentConverter {
         return HTML_HEAD.format(escape(node.name.substringBeforeLast('.'))) + body + "</body></html>"
     }
 
-    /** .xls / .xlsx → HTML（Operit convertSpreadsheetToHtml：多表 tab 切换 + 列表头 + DataFormatter 取值） */
+    /** .xls / .xlsx → HTML（多表 tab 切换 + 列表头 + DataFormatter 取值） */
     fun spreadsheetToHtml(context: Context, node: FileNode): String? {
         return try {
             openStream(context, node)?.use { input ->
@@ -148,7 +148,7 @@ object DocumentConverter {
         }
     }
 
-    // ── PDF（Operit WorkspacePdfPreview 同款：PdfRenderer 逐页位图） ──
+    // ── PDF（PdfRenderer 逐页位图） ──
 
     /** PDF 页数；无法打开 / 空文档返回 0 */
     fun pdfPageCount(context: Context, node: FileNode): Int = try {
@@ -191,7 +191,7 @@ object DocumentConverter {
         }
     }
 
-    /** 列名 A、B…Z、AA…（Operit columnName 同款） */
+    /** 列名 A、B…Z、AA… */
     private fun columnName(index: Int): String {
         var current = index
         val result = StringBuilder()

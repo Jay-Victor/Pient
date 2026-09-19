@@ -39,7 +39,7 @@ private const val TAG_CHAT = "PientChat"
 
 /**
  * 系统提示词回流文件（pi 侧写在 `~/.pi/agent/` 下，见 [ChatState.refreshSystemPrompt]）。
- * 面板显示的就是 pi 真实下发的那一份 —— App 侧不再自己持有提示词。
+ * 面板显示的就是 pi 真实下发的那一份 —— App 侧不自己持有提示词。
  */
 private const val SYS_PROMPT_FILE = ".pient-sysprompt.txt"
 
@@ -49,24 +49,23 @@ private const val SYS_PROMPT_FILE = ".pient-sysprompt.txt"
  * 引用与**附件清单（含文件名）**挂回来。
  *
  * 为什么附件清单也要写：pi 的 `image` 内容块只有 `data/mimeType`（协议里没有文件名），
- * 直发时正文里那行「[附件] 名称 · 路径」又按 Operit「移除链接」口径被去掉 —— 于是
+ * 直发时正文里那行「[附件] 名称 · 路径」又被去掉 —— 于是
  * **pi 侧完全没有名字**，只有本地镜像知道。标记把名字固化进会话文件（跨重建/重装/换端都在）。
  */
 private const val PI_META_TYPE = "pient_meta"
 
-/** 旧版标记（只带引用，2026-09-17 上半场）；读侧仍认，写侧已不用 */
+/** 旧版标记（只带引用）；读侧仍认，写侧已不用 */
 private const val PI_QUOTE_TYPE = "pient_quote"
 
 /** 顶栏右下方区域内容（消息区 / 文件内容预览区 / 终端页 / 分支画布 四态切换） */
 enum class Panel { MESSAGES, FILES, TERMINAL, TREE }
 
 /**
- * 长会话上屏窗口（2026-09-12）：**按内容高度计价**，不按条数。
+ * 长会话上屏窗口：**按内容高度计价**，不按条数。
  *
- * 条数计价的问题（用户真机实测发现）：同一个「40 条」在模拟器的短消息里约两三屏，
+ * 条数计价的问题：同一个「40 条」在模拟器的短消息里约两三屏，
  * 在真机的长回答里十几屏 —— 两端的「手感」完全不同（真机上要滚十几屏才够到
- * 「显示更早的消息」，而且首帧错位时的跳动幅度也大一倍）。参照 Hermes 桌面端
- * 按渲染成本计价（RENDER_BUDGET=600 单位 ≈ 10-20 个 turn）的做法，这里按**估算高度**
+ * 「显示更早的消息」，而且首帧错位时的跳动幅度也大一倍）。这里按**估算高度**
  * 折算屏数：首屏 ≈ [WINDOW_SCREENS] 屏内容，每次翻页再放 ≈ [WINDOW_PAGE_SCREENS] 屏。
  */
 private const val WINDOW_SCREENS = 2.0f          // 进入会话时上屏的内容 ≈ 2 屏
@@ -82,17 +81,8 @@ private const val WINDOW_TAIL_SCREENS = 0.5f
 /**
  * 单条消息的**渲染高度估算**（dp）——只在选择窗口大小时用，不影响渲染。
  *
- * 系数为**实测最小二乘拟合**（2026-09-12，AVD 420dpi / 1080px 宽 / 正文 14sp，
- * 样本 = 五种形态的助手回答 + 短用户消息，逐条比对 LazyColumn 实测高度）：
- *
- * | 形态 | 字符数 | 估算 | 实测 |
- * |---|---|---|---|
- * | 纯中文散文 | 194 | 137 | 173 |
- * | 散文 + 代码块 | 263 | 166 | 270 |
- * | 散文 + 行内公式 | 154 | 120 | 163 |
- * | 散文 + 块级公式 | 134 | 112 | 137 |
- * | 散文 + 表格 | 162 | 124 | 217 |
- * | 用户短消息 | 15 | 53 | 34 |
+ * 系数为**最小二乘拟合**（AVD 420dpi / 1080px 宽 / 正文 14sp，
+ * 样本 = 五种形态的助手回答 + 短用户消息）：
  *
  * 拟合：助手 ≈ 31 + 0.89×字符（取 30 + 0.9×）；用户 ≈ 28 + 0.5×字符。
  * 精度约 ±20%（表格/长代码块偏低估），对「折算屏数」而言足够。
@@ -103,7 +93,7 @@ fun estimatedMessageHeightDp(msg: Msg): Float = when (msg) {
             if (msg.attachments.isEmpty()) 0f else 30f + 26f * msg.attachments.size +
             if (msg.quote != null) 30f else 0f
     is Msg.Assistant -> 30f + 0.9f * msg.markdown.length
-    // 思考块：折叠头行 38dp + 展开正文（0.9×字符）。估算按展开态取——Hermes 口径下
+    // 思考块：折叠头行 38dp + 展开正文（0.9×字符）。估算按展开态取——
     // 流式思考默认展开、结束也保持展开，展开是它最常见的形态；收起态略高估不影响窗口判定。
     is Msg.Thinking -> 38f + 0.9f * msg.text.length
     is Msg.ToolCall -> 56f
@@ -113,24 +103,24 @@ fun estimatedMessageHeightDp(msg: Msg): Float = when (msg) {
 
 /**
  * 聊天主页应用状态（跨导航保活：提升到 NavHost 外层）。
- * UI 原型阶段：状态以内存承载；接入 Pi 运行时后由 SessionManager /
+ * 状态以内存承载，由 SessionManager /
  * get_state / get_available_models 等官方机制驱动。
  */
 class ChatState {
 
     private companion object {
-        /** 日志 tag（上下文压缩等取证日志，便于 logcat 一条命令过滤） */
+        /** 日志 tag（上下文压缩等诊断日志，便于 logcat 一条命令过滤） */
         const val TAG = "Pient"
     }
 
     /**
-     * 本轮工具调用数（2026-09-16）：只服务前台保活通知卡片上的「工具调用：N」。
+     * 本轮工具调用数：只服务前台保活通知卡片上的「工具调用：N」。
      * 回合开始归零（[markRunning]），每来一条 `tool_execution_start` 加一。
      */
     var toolCallsThisTurn by mutableStateOf(0)
 
     init {
-        // 通知卡片明细（2026-09-16）：runtime 层不反向依赖 data 层，这里把数据源注册进去 ——
+        // 通知卡片明细：runtime 层不反向依赖 data 层，这里把数据源注册进去 ——
         // 模型名 / 思考等级 / 终端会话数（不含「AI 执行」镜像）/ 本轮工具调用数。
         PiKeepAlive.detailProvider = {
             KeepAliveDetail(
@@ -145,8 +135,8 @@ class ChatState {
     }
 
     // ── 会话 ──────────────────────────────────────────────
-    // 2026-09-08：移除全部 mock 项目/会话/消息——初次进入无项目（聊天页显示引导），
-    // 项目由用户经「创建项目（绑定文件夹）」真实创建。
+    // 初次进入无项目（聊天页显示引导），
+    // 项目由用户经「创建项目（绑定文件夹）」创建。
     var currentProject by mutableStateOf<String?>(null)
     var currentSessionId by mutableStateOf<String?>(null)
 
@@ -160,7 +150,7 @@ class ChatState {
     val sessions = mutableStateMapOf<String, SnapshotStateList<Session>>()
     val messagesBySession = mutableStateMapOf<String, SnapshotStateList<Msg>>()
 
-    // ── 会话条目树（pi session-format v3 同构，2026-09-11：会话内分支的真实承载）──
+    // ── 会话条目树（pi session-format v3 同构：会话内分支的承载）──
     // entriesBySession = 会话**全部**条目（含被放弃的分支），id/parentId 链接成树；
     // leafBySession = 当前所在位置（活跃分支末尾条目 id）；messagesBySession
     // 只保存 root→leaf 派生出的上屏消息流（重建见 rebuildMessagesFromLeaf）。
@@ -206,7 +196,7 @@ class ChatState {
 
     /**
      * 老记录迁移（无条目树的历史会话）：按消息流建线性链，leaf = 末条目。
-     * 2026-09-11 之前 state.json 只有扁平消息流，迁移后才能参与 /tree 分支切换。
+     * 只有扁平消息流的 state.json，迁移后才能参与 /tree 分支切换。
      */
     fun migrateEntriesIfNeeded(sid: String) {
         if (entriesBySession[sid]?.isNotEmpty() == true) return
@@ -224,8 +214,8 @@ class ChatState {
     }
 
     /**
-     * 添加项目（2026-09-02 实现真实功能）：
-     * 输入名称 → `filesDir/Projects/<name>` 真实目录（2026-09-14 起唯一形态；SAF「选择本地文件夹」已按用户要求移除）。
+     * 添加项目：
+     * 输入名称 → `filesDir/Projects/<name>` 真实目录（唯一形态）。
      * 重名返回 false（不重复添加）。成功后切换为当前项目。
      */
     fun addProject(name: String, path: String, uri: String? = null): Boolean {
@@ -278,7 +268,7 @@ class ChatState {
         onSessionChanged()   // 换项目＝换会话：环归位并按新会话的 pi 文件读回
         syncWorkspace(name)  // 工作区指针：guest 的 /workspace 跟着换项目（AI 与终端都落在里面）
         // 项目切换：清空文件预览标签与树展开状态（标签/展开路径属于原项目的文件树，
-        // 2026-09-02 修复：切项目后标签栏仍显示上一项目文件）
+        // 否则切项目后标签栏仍显示上一项目文件）
         openTabs.clear()
         activeTabIndex = 0
         expandedDirs.clear()
@@ -289,10 +279,9 @@ class ChatState {
      *
      * guest 的 `/workspace` 是包装脚本按 `$P/workspace` 指针文件**现读**挂上的 bind 挂载
      * （PRoot 档 `pient-shell.sh:26-27,56-57`；chroot 档 `pient-root-wrapper.sh:30`）。
-     * 这个指针此前只有「项目改名」会写，切换 / 新建 / 启动恢复 / 删除回退都没写 —— 指针缺失时
-     * 包装脚本退回 `$P/app`，AI 实际落在**自己的运行目录**里（2026-09-16 真机实测：guest `ls /workspace`
+     * 指针缺失时包装脚本退回 `$P/app`，AI 实际落在**自己的运行目录**里（guest `ls /workspace`
      * 列出的是 pi 运行时那几个文件，而不是项目目录里的 `.pient-project.json`）。
-     * `PiSkills` 的项目技能根（`<workspaceDir>/.pi/skills`）也吃这条，所以它一并被修好。
+     * `PiSkills` 的项目技能根（`<workspaceDir>/.pi/skills`）也吃这条。
      *
      * 指针变了要重启 pi 通道：proot 的绑定挂载是**进程级**的，已在跑的 pi 仍看着旧目录，而它每次
      * spawn 的 `bash` 工具都重读指针 → 两者会看到不同目录。pi 正忙时不打断它，记一个 pending，
@@ -313,7 +302,7 @@ class ChatState {
      * 启动就绪后（`AppCtx` 已注入）把当前项目的目录写给 guest。
      *
      * 为什么单独留一个入口：读盘（[ChatStore.load] → [normalizeAfterLoad]）跑在 `AppCtx.set` **之前**，
-     * 那时 `AppCtx.get()` 还是 null → 那条调用会静默跳过（2026-09-16 实测：装包后启动，指针文件没被写）。
+     * 那时 `AppCtx.get()` 还是 null → 那条调用会静默跳过。
      */
     fun syncWorkspaceToCurrentProject() = syncWorkspace(currentProject)
 
@@ -347,7 +336,7 @@ class ChatState {
     fun selectSession(id: String) {
         currentSessionId = id
         activePanel = Panel.MESSAGES
-        liveThinkingIndex = -1   // 换会话：上一次的流式思考块不再享受展开（Hermes 历史态收起）
+        liveThinkingIndex = -1   // 换会话：上一次的流式思考块不再享受展开（改走历史态 = 收起）
         onSessionChanged()       // 环跟手切到该会话的用量（先归位，真值随后按它的 pi 文件读回）
     }
 
@@ -368,7 +357,7 @@ class ChatState {
 
     /**
      * 会话活动打点（发消息时调用）：更新最后活动时间与侧栏时间标签；
-     * 首条用户消息自动命名会话（前 20 字，pi-web 同语义——会话记录友好）。
+     * 首条用户消息自动命名会话（前 20 字——会话记录友好）。
      */
     private fun touchSession(firstUserText: String?) {
         val proj = currentProject ?: return
@@ -386,9 +375,9 @@ class ChatState {
     }
 
     /**
-     * 会话 id：`s-<epochMs>`（《分支功能设计》§4.2 口径），**同毫秒冲突时加 `-2/-3…` 后缀**。
+     * 会话 id：`s-<epochMs>`，**同毫秒冲突时加 `-2/-3…` 后缀**。
      * 为什么必须防撞：会话列表是 LazyColumn，key 重复会直接抛
-     * `Key "s-…" was already used` 闪退（实测踩过：同一毫秒内建了两个会话）。
+     * `Key "s-…" was already used` 闪退。
      */
     private fun newSessionId(): String {
         val used = sessions.values.flatten().map { it.id }.toHashSet()
@@ -413,7 +402,7 @@ class ChatState {
 
     fun deleteSession(id: String) {
         val proj = currentProject ?: return
-        // pi 侧那份会话记录也要清（2026-09-16）：先取出来，再删本地记录
+        // pi 侧那份会话记录也要清：先取出来，再删本地记录
         val piFile = sessions[proj]?.firstOrNull { it.id == id }?.piSessionFile
         sessions[proj]?.removeAll { it.id == id }
         messagesBySession.remove(id)
@@ -428,7 +417,7 @@ class ChatState {
             piTree = null
             piTreeSessionId = null
         }
-        // 删除最后一个会话后自动新建（2026-09-09 用户定：侧边栏会话列表恒有会话）
+        // 删除最后一个会话后自动新建（侧边栏会话列表恒有会话）
         if (sessionsFor(proj).isEmpty()) newSession()
         discardPiSession(piFile)
     }
@@ -455,7 +444,7 @@ class ChatState {
     }
 
     /**
-     * 清理 pi 侧那份会话记录（2026-09-16）。
+     * 清理 pi 侧那份会话记录。
      *
      * 两件事：① 如果删的正是 pi **当前打开**的那个文件，先让 pi 换到新会话 —— 否则它还会
      * 往这个已删文件追加，下一次「按 sessionFile 映射」又把旧上下文拉回来；② 删文件本体。
@@ -483,20 +472,20 @@ class ChatState {
     fun messagesIn(id: String): List<Msg> = messagesBySession[id].orEmpty()
 
     /**
-     * 导出用的消息序列（2026-09-16）：**优先上屏流，空则回退条目树**。
+     * 导出用的消息序列：**优先上屏流，空则回退条目树**。
      *
      * 为什么必须回退：有条目树的会话**不写扁平消息流**（`ChatStore` 那条「不再重复存」的优化），
      * 所以「没在本次运行里打开过的会话」`messagesBySession` 是空的 —— 直接用它导出会得到
-     * 一个只有标题的空文档（真机实测：36 条条目的会话导出后只有 715 字节）。
+     * 一个只有标题的空文档。
      */
     fun messagesForExport(id: String): List<Msg> =
         messagesIn(id).ifEmpty { entriesBySession[id].orEmpty().map { it.msg } }
 
     /**
-     * 终端镜像：工具开始那一行（2026-09-16）。
+     * 终端镜像：工具开始那一行。
      *
      * bash 写成 `$ <原始命令>`（与用户在终端里敲的一模一样）；文件类工具写路径；其它退回落 JSON 摘要。
-     * 目的是「在终端页里看得见 AI 在 Ubuntu 里干了什么」（对照 Operit 的工具走 TerminalManager）。
+     * 目的是「在终端页里看得见 AI 在 Ubuntu 里干了什么」。
      */
     private fun mirrorStartLine(name: String, args: JSONObject?): String {
         val detail = when (name) {
@@ -529,7 +518,7 @@ class ChatState {
     }
 
     /**
-     * 会话**内容检索**（2026-09-16，此前只搜标题）：标题之外再搜消息正文与条目文本，
+     * 会话**内容检索**：标题之外再搜消息正文与条目文本，
      * 返回 会话 id → 命中片段（抽屉行做副标题用）。
      *
      * 只在用户输入搜索词时调用（IO 线程由调用方保证），命中即停（一条会话只报第一处）。
@@ -566,7 +555,7 @@ class ChatState {
     /**
      * 供 UI 调用的**非挂起**入口：刷新挂在 ChatState 自己的 scope 上 ——
      * 面板关掉/重组导致组合域取消时，这次刷新不会半途夭折
-     * （2026-09-16 实测日志：`命令发送失败：The coroutine scope left the composition`）。
+     * （不这样会报 `命令发送失败：The coroutine scope left the composition`）。
      */
     fun requestContextUsage() {
         bgScope.launch { runCatching { refreshContextUsage() } }
@@ -575,8 +564,7 @@ class ChatState {
     /**
      * **当前会话变了**（新建 / 切换 / 删除 / 分支 / 换项目）：上下文用量**先归位、再取真值**。
      *
-     * 环上的数字只属于「当前会话」—— 任何一个换会话入口不收口，环都会沿用上一个会话的数字
-     * （2026-09-16 用户实报：新建会话后环仍显示上一个会话的用量，且「刷新」也救不回来）。
+     * 环上的数字只属于「当前会话」—— 任何一个换会话入口不收口，环都会沿用上一个会话的数字。
      * 归位保证「绝不显示别的会话的数字」；真值交给 [refreshContextUsage]（新会话还没有 pi 文件时
      * 它自己判未知，不会误读进程里停着的那个旧会话）。
      */
@@ -588,18 +576,17 @@ class ChatState {
     }
 
     /**
-     * 上下文用量（**pi 真值**；2026-09-16 取代两个原型常量）。
+     * 上下文用量（**pi 真值**）。
      *
      * 来源 = pi 官方 `get_session_stats` 的 `contextUsage { tokens, contextWindow, percent }`
-     * （pi 侧 `agent-session.ts:getContextUsage`：按**最后一次压缩之后**的助手 usage 反推，
-     * 所以压缩后还没再对话时它会给 null —— 此时卡上照 pi-web 口径显示 `?`，不编数字）。
-     * pi 不提供分类明细（pi-web 也只显示聚合百分比），故分类明细收成一行「对话」。
+     * （pi 侧 `getContextUsage`：按**最后一次压缩之后**的助手 usage 反推，
+     * 所以压缩后还没再对话时它会给 null —— 此时卡上显示 `?`，不编数字）。
+     * pi 不提供分类明细，故分类明细收成一行「对话」。
      */
     suspend fun refreshContextUsage() {
         // **当前会话还没有 pi 侧文件 = 无可读的用量**（Pient 对 pi 会话文件是懒建的：首条消息、
         // 开画布才建）。这时**绝不能去问 pi** —— pi 进程里停着的是上一个会话，`get_session_stats`
-        // 回的是**它的**真值，等于把别的会话的用量当成当前会话的（2026-09-16 用户实报：新建会话后
-        // 环沿用上一个会话的数字，且"刷新"也救不回来）。本守卫必须先于任何 RPC。
+        // 回的是**它的**真值，等于把别的会话的用量当成当前会话的。本守卫必须先于任何 RPC。
         val file = sessionRecord(currentSessionId ?: "")?.piSessionFile
         if (file.isNullOrBlank()) {
             contextUsageKnown = false
@@ -609,7 +596,7 @@ class ChatState {
         }
         // **先真问一次**，拿不到才起通道 —— 不能用 `PiRpc.usable()` 当「进程活着」的判据：
         // 它的实现是 `process?.isAlive || (rootfsReady && piReady)`，只要运行时部署齐全就返回 true
-        // （2026-09-16 实测踩到：新装包、还没发过消息时 usable()=true 但进程没起 → 卡片只有 `? / —`，
+        // （新装包、还没发过消息时 usable()=true 但进程没起 → 卡片只有 `? / —`，
         // 而直连 pi 问 get_session_stats 明明回了 tokens/contextWindow/percent）。
         var data = PiRpc.getSessionStats()
         if (data == null) {
@@ -645,7 +632,7 @@ class ChatState {
         }
     }
 
-    // 时间分组折叠状态（2026-09-09：Hermes 侧栏日历桶折叠同款——组头保留、
+    // 时间分组折叠状态（组头保留、
     // 组内会话隐藏；键 = 日历桶 key，缺省展开；跨抽屉开关/导航保活，重启重置）
     val collapsedTimeGroups = mutableStateSetOf<String>()
 
@@ -653,7 +640,7 @@ class ChatState {
         if (key in collapsedTimeGroups) collapsedTimeGroups.remove(key) else collapsedTimeGroups.add(key)
     }
 
-    // 时间分组渐进揭示（2026-09-09 用户要求）：三点按键每点揭示 5 个会话；
+    // 时间分组渐进揭示：三点按键每点揭示 5 个会话；
     // 组完全揭示后下一更老分组解锁为新的折叠渐进组。揭示即自动展开该组。
     val timeGroupRevealed = mutableStateMapOf<String, Int>()
 
@@ -664,7 +651,7 @@ class ChatState {
     }
 
     /**
-     * 一次性展开全部时间分组（批量模式进入时调用，2026-09-10 用户要求）：
+     * 一次性展开全部时间分组（批量模式进入时调用）：
      * 清掉手动折叠 + 把每组的渐进揭示数拉满（揭示数缺省 0 = 渐进折叠，所以必须逐组写满，
      * 不能 clear 掉 map）。批量勾选时不应有会话被折叠或渐进隐藏挡在列表外。
      */
@@ -676,7 +663,7 @@ class ChatState {
     /**
      * 重命名项目。返回 null = 成功；非空 = 失败原因（调用方直接 Toast 原文）。
      *
-     * **本地项目要连磁盘目录一起改名**（2026-09-16 修 bug）：旧实现只改记录里的 name/path ——
+     * **本地项目要连磁盘目录一起改名**：只改记录里的 name/path ——
      * 目录不动 → 改名后 path 指向一个不存在的目录（文件树变空、Ubuntu workspace 静默回退到随包目录），
      * 而原目录会以「已解绑项目」的身份在本页冒出来（它的名字对不上任何项目的 path）。
      * SAF 项目（content:// tree URI）无法按文件名重建 URI，保持「只改显示名、path 不变」。
@@ -736,12 +723,12 @@ class ChatState {
         }
     }
 
-    // ── 真实对话发送（2026-09-09 实现 AI 接入，替换 mock 流式回复）──
+    // ── 真实对话发送 ──
     var isStreaming by mutableStateOf(false)
     var streamDraft by mutableStateOf("")
     /**
      * 流式思考文本（思考模式开启、且服务商回推理增量时非空）。
-     * Hermes 口径：流式期间思考块**默认展开**并实时预览（见 ChatMessages 的思考折叠块）。
+     * 流式期间思考块**默认展开**并实时预览（见 ChatMessages 的思考折叠块）。
      * 与 streamDraft 一样只存内存、不进持久化快照（避免每个增量触发一次写盘）。
      */
     var streamThinking by mutableStateOf("")
@@ -751,8 +738,8 @@ class ChatState {
 
     /**
      * 本次运行内**流式思考块**所在的消息下标（-1 = 无）。
-     * Hermes 口径的「live preview 保持展开」：流式期间默认展开的思考块在回答落地、换成
-     * 真实条目后不得突然折叠（那正是 Hermes 注释里要避免的 settle 跳动）；判据只存内存，
+     * 「live preview 保持展开」：流式期间默认展开的思考块在回答落地、换成
+     * 真实条目后不得突然折叠（否则会出现 settle 跳动）；判据只存内存，
      * 换会话/换分支/重启后归 -1 → 历史思考块一律收起，用户可手动展开。
      */
     var liveThinkingIndex by mutableStateOf(-1)
@@ -761,7 +748,7 @@ class ChatState {
     /**
      * 起一轮对话。**跑在 ChatState 自己的 scope 上 —— 不是聊天页的 UI scope**。
      *
-     * 2026-09-16 真机实测的修复：发送原来是 `rememberCoroutineScope().launch { streamReply(...) }`，
+     * 用 `rememberCoroutineScope().launch { streamReply(...) }` 发送的话，
      * 一旦离开聊天页（返回退出 / 页面被销毁），那个 scope 被取消 → 本轮在应用侧"静默结束"，
      * 但**没有任何代码通知 pi**（全仓唯一会发 `PiRpc.abort()` 的是 [abort]）→ pi 继续跑那一轮、
      * 界面却显示空闲 → 下一条消息被 pi 拒（"Agent is already processing"，用户看到一条英文报错）。
@@ -769,9 +756,9 @@ class ChatState {
      */
     fun startTurn(text: String, quote: Quote? = null) {
         // ── 扩展命令（`/pient-reload`、插件贡献的 `/xxx`）：**没有回合**，即发即走 ──
-        // pi 对扩展命令是「立即执行、不产生任何 agent 事件」（`agent-session.ts` 的 prompt() 先走
+        // pi 对扩展命令是「立即执行、不产生任何 agent 事件」（`prompt()` 先走
         // `_tryExecuteExtensionCommand`，handled 即 return）。当普通回合发出去的话，App 会把它标成
-        // 「运行中」并且**永远等不到结束事件** → 界面卡在运行中（真机实测踩过）。
+        // 「运行中」并且**永远等不到结束事件** → 界面卡在运行中。
         // 这里直接发一条 prompt：不进消息流、不建回合、不写 pi 会话（pi 侧也不落条目）；
         // 结果用一句 Toast 说明（App 目前不消费扩展的 ui.notify，见 ctx.ui 桥那项待办）。
         if (quote == null && PiCommands.isExtensionCommand(text)) {
@@ -807,8 +794,8 @@ class ChatState {
 
 
     /**
-     * pi 运行时就绪态（2026-09-15 用户拍板 B：**pi 是唯一产品路径**）。
-     * 未就绪 = 聊天页明确阻断 + 给「环境配置」修复入口，**不再静默改走直连内核**。
+     * pi 运行时就绪态（**pi 是唯一产品路径**）。
+     * 未就绪 = 聊天页明确阻断 + 给「环境配置」修复入口，**不静默改走直连内核**。
      */
     enum class PiReadiness { Unknown, Ready, Unready }
 
@@ -829,7 +816,7 @@ class ChatState {
      */
     var draftRestore by mutableStateOf<String?>(null)
 
-    // ── 输入栏：润色提示词（2026-09-16，用户 spec）────────────────────────
+    // ── 输入栏：润色提示词────────────────────────
     // 交互：点润色键 → 输入框只读、键转圈 → 结果回填输入框、键变回退键 →
     // 再点变回原文、键变回润色键；**一旦用户在润色结果上动过手，回退态即作废**
     // （回退键变回润色键）。润色本身走 pi 的单次模式（见 [com.pient.app.runtime.PiPolish]）。
@@ -896,21 +883,20 @@ class ChatState {
 
     /**
      * 直连内核只作**开发诊断通道**（debug 包）：release 包里 pi 起不来就是起不来，
-     * 不允许悄悄换一条没有工具能力的路（用户 2026-09-15 拍板 B）。
+     * 不允许悄悄换一条没有工具能力的路。
      */
     /**
      * pi 通道的**目标**（providerId, modelId）：统一口径 = 输入栏**选中的模型**（拿不到才退到该服务商列表首个）。
      *
-     * 2026-09-15 修：`runChat`（用「本次有效模型」）与 `bindPiSession`（用「服务商列表首个」）各算各的 ——
-     * 服务商配了多个模型时两边不一致，于是**每一轮都会把健康的通道重启一次**（实测 churn：
-     * `通道重启：状态不是 Running（当前 Running(mock, mock-model)）；新 key=mock/mock-model`），
+     * `runChat`（用「本次有效模型」）与 `bindPiSession`（用「服务商列表首个」）各算各的 ——
+     * 服务商配了多个模型时两边不一致，于是**每一轮都会把健康的通道重启一次**，
      * 中途重启还可能把正在跑的那一轮打断（消息只落本地镜像）。现在三处（发送 / 绑定 / 就绪探测）用同一个来源。
      */
     private fun piChannelTarget(): Pair<String, String>? {
         val m = selectedModel ?: return null
         val cfg = AiConfigStore.configs[m.provider] ?: return null
         // 送 pi 的必须是**模型 id**：列表条目可能是 `id=别名`（别名只是 Pient 侧写进 `models[].name` 的
-        // 展示/匹配写法），整条 `id=别名` 送过去 pi 的 `--model` 认不出来（2026-09-17 真机实测发现）。
+        // 展示/匹配写法），整条 `id=别名` 送过去 pi 的 `--model` 认不出来。
         val model = m.name.substringBefore('=').trim()
             .takeIf { it.isNotBlank() }
             ?: cfg.models.firstOrNull()?.substringBefore('=')?.trim()
@@ -941,7 +927,7 @@ class ChatState {
             return PiReadiness.Unready to L.runtime.noProviderOrModelHint
         }
         if (!PiRuntime.rootfsReady(ctx)) {
-            // 原因文案与「环境配置」页共用一处（rootfsIssue）：避免两处说法不一致（2026-09-15）
+            // 原因文案与「环境配置」页共用一处（rootfsIssue）：避免两处说法不一致
             return PiReadiness.Unready to PiRuntime.rootfsIssue(ctx)
         }
         if (!PiRuntime.piReady(ctx)) {
@@ -951,7 +937,7 @@ class ChatState {
             val tail = PiRpc.stderrText().lines().lastOrNull { it.isNotBlank() }.orEmpty()
             return PiReadiness.Unready to (L.runtime.piChannelStartFailed + if (tail.isBlank()) "" else "：$tail")
         }
-        // 起得来 ≠ 活着：进程秒退（rootfs 不可执行 / proot 报错）时 start() 仍返回 true（2026-09-15 实测）
+        // 起得来 ≠ 活着：进程秒退（rootfs 不可执行 / proot 报错）时 start() 仍返回 true
         if (!PiRpc.aliveAfterStartup()) {
             val tail = PiRpc.stderrText().lines().lastOrNull { it.isNotBlank() }.orEmpty()
             PiRpc.stop()
@@ -975,17 +961,17 @@ class ChatState {
      * 请求失败以 error 助手消息呈现（不进上下文）。
      */
     suspend fun streamReply(userText: String, quote: Quote? = null) {
-        // ── pi 唯一产品路径的门控（2026-09-15 拍板 B）─────────────────────────────
+        // ── pi 唯一产品路径的门控 ─────────────────────────────
         // 已知未就绪 → 明确阻断：不发送、不落任何条目、草稿留在输入栏（ChatScreen 给提示）
         if (piReadiness == PiReadiness.Unready) {
             blockedNote = L.runtime.piNotReadyNotSent
             PientLog.w(TAG_CHAT, "发送被阻断：pi 未就绪（$piUnreadyReason）")
             return
         }
-        // **pi 侧还在跑就别硬发**（2026-09-16 真机实测）：pi 对「流式中且未指定 streamingBehavior」的
-        // prompt 会**直接拒绝**（docs/rpc.md:56-65；抛错点 core/agent-session.ts:1213），硬发的代价 =
-        // 一条废用户消息 + 一句用户看不懂的英文报错。可能撞上的窗口：上一轮在别处被留下（旧版 UI scope
-        // 取消的遗留）、刚中止还没收尾、画布/终端那边正在跑。这里不落任何条目，把文本还给输入栏。
+        // **pi 侧还在跑就别硬发**：pi 对「流式中且未指定 streamingBehavior」的
+        // prompt 会**直接拒绝**（docs/rpc.md:56-65），硬发的代价 =
+        // 一条废用户消息 + 一句用户看不懂的英文报错。可能撞上的窗口：上一轮在别处被留下、
+        // 刚中止还没收尾、画布/终端那边正在跑。这里不落任何条目，把文本还给输入栏。
         // 工作区换过但当时 pi 正忙：趁现在（它空闲）把通道重启到新目录，再发本轮
         if (workspaceRestartPending) applyPendingWorkspaceRestart()
         if (PiRpc.isStreamingNow() == true) {
@@ -998,8 +984,7 @@ class ChatState {
         streamDraft = ""
         streamThinking = ""
         streamThinkingStartedAt = 0L
-        // 2026-09-15 收口：App 侧不再拼历史、不再自己压缩（`buildApiHistory` / `maybeAutoCompact`
-        // 与 `data/Compaction.kt` 一并删除）；这里只组装**本条用户回合**的文本，交给 pi 的 prompt。
+        // App 侧不拼历史、不自己压缩；这里只组装**本条用户回合**的文本，交给 pi 的 prompt。
         // 当前这条用户消息（附件随文本进请求用；attachments 列表马上会被清空，先取快照）
         val currentMsg = Msg.User(userText, attachments.toList(), quote)
         appendEntry(currentMsg)
@@ -1030,10 +1015,10 @@ class ChatState {
 
         // 引用消息：正文以 markdown 块引用注入（Quote.toPrompt；UI 仍只显示用户正文）
         // 本轮用户回合的请求文本：附件以「名称 · 路径」附在正文后（本条是最新回合，媒体恒保留）；
-        // 这段文本就是交给 pi 的那条用户消息 —— 上下文由 pi 维护，App 不再拼历史。
-        // 附件直发（2026-09-14 照 Operit 的三个媒体开关）：开启的类别把文件本体转成内容部件随请求发出，
-        // 已直发的附件不再重复列路径（Operit 的「移除链接」）；关闭的类别**不拦消息**，
-        // 只追加一行 Operit 原文占位（「图片内容已省略，当前模型不支持图片处理」）。
+        // 这段文本就是交给 pi 的那条用户消息 —— 上下文由 pi 维护，App 不拼历史。
+        // 附件直发（三个媒体开关）：开启的类别把文件本体转成内容部件随请求发出，
+        // 已直发的附件不再重复列路径；关闭的类别**不拦消息**，
+        // 只追加一行占位（「图片内容已省略，当前模型不支持图片处理」）。
         val appCtx = AppCtx.get()
         val inline = if (appCtx != null) {
             MediaInline.parts(appCtx, currentMsg.attachments, cfg, effectiveModel)
@@ -1064,7 +1049,7 @@ class ChatState {
             appendEntry(Msg.Assistant(outcome.text, outcome.usage, effectiveModel))
             // 用量台账（用量页数据源）：完成即记一笔（usage 为空 = 服务商未返回用量，不记）
             UsageStore.record(cfg.providerId, effectiveModel, outcome.usage)
-            // 消息通知（2026-09-16 行为设置）：应用不在前台时，给这条回复发一条系统通知
+            // 消息通知（行为设置）：应用不在前台时，给这条回复发一条系统通知
             ReplyNotify.notifyReply(AppCtx.get(), currentSession?.title, outcome.text)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e // abort：保留 abort() 对 draft 的处理
@@ -1085,10 +1070,10 @@ class ChatState {
     }
 
     /**
-     * 单次对话请求（**pi 通道 = 唯一路径**，2026-09-15 收口）：
+     * 单次对话请求（**pi 通道 = 唯一路径**）：
      * 只把用户回合的文本 + 本次要直发的媒体部件交给 pi 的 `prompt`，pi 在同一进程里累积上下文；
      * 流式增量与 usage 由 [runChatViaPi] 接回 UI。pi 起不来一律**阻断**——
-     * 不再有直连内核回退（见《会话与上下文管理设计》§7.1，§8.3 作废）。
+     * 没有直连内核回退。
      */
     private suspend fun runChat(
         cfg: ProviderConfig,
@@ -1105,7 +1090,7 @@ class ChatState {
         if (target != null && PiRpc.usable() && PiRpc.start(target.first, target.second)) {
             bindPiSession()          // 会话映射：懒建 / 切到本会话对应的 pi 会话文件（失败不阻断本轮）
             // **发送前把思考档位推给 pi 并等它落地**：通道可能刚重启（pi 的档位回到默认 medium），
-            // 不 await 的话本轮会跑在旧档位上（异步推送与 prompt 赛跑，2026-09-17 实测）。
+            // 不 await 的话本轮会跑在旧档位上（异步推送与 prompt 赛跑）。
             syncThinkingToPiNow()
             if (piReadiness != PiReadiness.Ready) {
                 piReadiness = PiReadiness.Ready
@@ -1113,8 +1098,8 @@ class ChatState {
             }
             return runChatViaPi(cfg, userTurnText, media, onDelta, onThinking, quote, attachments)
         }
-        // ── pi 起不来：**不换路**（2026-09-15 拍板 B + 收口）────────────────────────
-        // 直连没有任何工具能力，落回去会让用户以为自己在用 agent；§8.3 作废后本地也不存在
+        // ── pi 起不来：**不换路** ────────────────────────
+        // 直连没有任何工具能力，落回去会让用户以为自己在用 agent；本地也不存在
         // 「只在本地的新消息」这种状态 —— 所以只有一条路：如实报错，让用户去修环境。
         PientLog.w(TAG_CHAT, "pi 通道不可用，本轮没走 pi：${PiRpc.stderrText().takeLast(300)}")
         piReadiness = PiReadiness.Unready
@@ -1123,13 +1108,13 @@ class ChatState {
     }
 
 
-    // ─────────────── 会话映射与分支（2026-09-14）───────────────
+    // ─────────────── 会话映射与分支 ───────────────
     //
     // 口径（对照 pi 的会话模型）：
     //   Pient 会话            ↔  pi 的一个 session 文件（`~/.pi/agent/sessions/*.jsonl`）
     //   Pient 会话内分支      ↔  **同一个文件里的树导航**（移动活跃叶；pi 的 /tree，走扩展命令 /pient-nav）
     //   Pient 会话外分支      ↔  **新文件**（pi 的 /fork = 从某条用户消息分叉；/clone = 复制活跃分支）
-    // 内容真相源仍是 pi 的文件；Pient 侧的条目树只做展示镜像（逐步退役）。
+    // 内容真相源是 pi 的文件；Pient 侧的条目树只做展示镜像。
 
     /** 当前会话（或指定会话）的记录 */
     fun sessionRecord(id: String = currentSessionId.orEmpty()): Session? =
@@ -1143,22 +1128,22 @@ class ChatState {
     var piLeafId by mutableStateOf<String?>(null)
         private set
 
-    /** pi 树的归属会话（2026-09-15）：切会话后旧树立即作废（否则画布会显示上一个会话的树） */
+    /** pi 树的归属会话：切会话后旧树立即作废（否则画布会显示上一个会话的树） */
     var piTreeSessionId by mutableStateOf<String?>(null)
         private set
 
     /**
      * 画布节点（用户条目 id）→ **锚点条目 id**（该节点回合末尾的**非用户**条目）。
-     * 这是「会话内分支」的导航目标（《Pient 会话与上下文管理设计》§4.2）：必须交锚点，
-     * **不能**交用户消息条目本身 —— 后者会触发 pi「叶退到父 + 文本回填编辑器」的原生语义
-     * （`agent-session.ts:3236-3251`），位置会退到该节点**之前**。
+     * 这是「会话内分支」的导航目标：必须交锚点，
+     * **不能**交用户消息条目本身 —— 后者会触发 pi「叶退到父 + 文本回填编辑器」的原生语义，
+     * 位置会退到该节点**之前**。
      * 表里没有的节点 = 尚无回答（无锚点）→ 按 pi 原生语义处理（退回该消息之前 + 回填输入栏）。
      */
     var piAnchorOf by mutableStateOf<Map<String, String>>(emptyMap())
         private set
 
     /**
-     * **期望位置**（pi 条目 id）：对账基准（《会话与上下文管理设计》§4.3）。
+     * **期望位置**（pi 条目 id）：对账基准。
      * pi 的活跃叶只在内存里、重启/切会话后回到文件末尾，所以位置由 Pient 记并在每次绑定时拉回来。
      */
     val piDesiredLeaf = mutableStateMapOf<String, String>()
@@ -1192,7 +1177,7 @@ class ChatState {
                 }
             } else {
                 // **同一个会话文件不要重载**：switch_session 会按文件末尾重新定位活跃叶，
-                // 把用户刚在画布上切好的分支位置冲掉（实测：切到 #2 后发消息，上下文又回到全量 4 条来回）。
+                // 把用户刚在画布上切好的分支位置冲掉。
                 // 只有 pi 当前打开的不是这个文件时才切。
                 val current = PiRpc.getSessionStats()?.optString("sessionFile").orEmpty()
                 if (current != file) PiRpc.switchSession(file)
@@ -1207,10 +1192,10 @@ class ChatState {
             }
             refreshPiTree()
             syncMessagesFromPi()
-            // 位置对账（T1/T2/T3）：通道重启、切会话后 pi 的叶会回到文件末尾 —— 拉回 Pient 记的位置
+            // 位置对账：通道重启、切会话后 pi 的叶会回到文件末尾 —— 拉回 Pient 记的位置
             reconcilePiLeaf(id)
         }.onFailure { PientLog.w(TAG_CHAT, "绑 pi 会话失败：${it.message}") }
-        // 思考档位同步（2026-09-17）：通道就绪 / 换会话后把界面的开关与档位推给 pi（不等 = no-op）
+        // 思考档位同步：通道就绪 / 换会话后把界面的开关与档位推给 pi（不等 = no-op）
         syncThinkingToPi()
     }
 
@@ -1240,7 +1225,7 @@ class ChatState {
     }
 
     /**
-     * 规范化叶（§4.3）：叶指向 label / branch_summary / session_info 等**元数据条目**时（重载后常见），
+     * 规范化叶：叶指向 label / branch_summary / session_info 等**元数据条目**时（重载后常见），
      * 沿父链回退到最近的 message 条目再比较 —— 否则每次绑定都会白跑一次导航。
      */
     private fun normalizedPiLeaf(): String? {
@@ -1255,7 +1240,7 @@ class ChatState {
     }
 
     /**
-     * **位置对账**（幂等；《会话与上下文管理设计》§4.3 T1/T2/T3）：pi 的叶只在内存、
+     * **位置对账**（幂等）：pi 的叶只在内存、
      * 重启/切会话后回到文件末尾 —— 发送前把 pi 拉回 Pient 记的期望位置；一致时一个 RPC 都不发。
      */
     private suspend fun reconcilePiLeaf(sid: String) {
@@ -1275,21 +1260,20 @@ class ChatState {
     }
 
     /**
-     * **用 pi 的当前上下文重建消息流**（2026-09-14）：切会话 / 切分支之后调用。
+     * **用 pi 的当前上下文重建消息流**：切会话 / 切分支之后调用。
      *
      * 为什么需要：pi 的会话文件才是真相源 —— 用户在画布上切了分支，pi 的上下文已经换了，
      * 界面必须跟着换（否则会「pi 在 A 分支、界面还停在 B 分支」）。rpc 的 `get_messages`
      * 返回的就是**当前活跃路径**上的消息。
      *
-     * 本切片只做**文本消息**的镜像（工具卡/附件等内容部件的还原是下一步），
-     * 因此只在 pi 侧发生结构性变化（切会话/切分支）时调用，**不在每轮结束后调用** ——
+     * 只在 pi 侧发生结构性变化（切会话/切分支）时调用，**不在每轮结束后调用** ——
      * 免得把流式过程中本地渲染的工具卡冲掉。
      */
     suspend fun syncMessagesFromPi() {
         val id = currentSessionId ?: return
         val rec = sessionRecord(id) ?: return
         if (rec.piSessionFile.isNullOrBlank() || !PiRpc.usable()) return
-        // ── **本轮在飞 / 有未落盘的用户消息时不要重建**（2026-09-15 实测 bug）──────────────
+        // ── **本轮在飞 / 有未落盘的用户消息时不要重建** ──────────────
         // `streamReply` 先 `appendEntry(用户消息)` 上屏，紧接着 `runChat` 里 `bindPiSession()` 会走到这里；
         // 而 pi 是在更后面的 `prompt` 里才记录这条消息 —— 此刻 clear+addAll 会把它冲掉，
         // 表现为「画布创建分支后回聊天页，第一条消息不显示在聊天页（但回答照收、画布节点也在）」。
@@ -1302,11 +1286,11 @@ class ChatState {
         for (i in 0 until arr.length()) {
             val m = arr.optJSONObject(i) ?: continue
             // 还原口径 = **按内容块顺序**（thinking / text / toolCall 各自在原位置），与画布「节点详情」
-            // 用的 pushPiMessage 同一实现（2026-09-16）：旧写法固定「正文 → 再工具行」且整块丢掉思考，
+            // 用的 pushPiMessage 同一实现：固定「正文 → 再工具行」、整块丢掉思考的话，
             // 每轮回读后聊天页的顺序就和节点详情卡对不上。
             pushPiMessage(m, rebuilt)
         }
-        // 引用卡 / 附件还原（2026-09-17）：pi 侧那条用户消息的文本里含着引用块与附件清单，
+        // 引用卡 / 附件还原：pi 侧那条用户消息的文本里含着引用块与附件清单，
         // 这里按文本对位还原成结构（正文干净、引用回 quote、附件回 attachments）。
         // 不还原的话「开画布 / 切分支 / fork / 中止 / 压缩」之后气泡里会直接冒出 "> …" 与
         // "[附件] 名称 · 路径" 字面行，引用卡与附件 chip 也再也回不来。
@@ -1332,11 +1316,11 @@ class ChatState {
         list.addAll(rebuilt)
         if (pending != null && pending.text.isNotBlank() && !known) {
             list += pending
-            // 只记「条数 + 长度」，不记正文（2026-09-17 用户拍板的隐私口径：日志里不留用户内容）
+            // 只记「条数 + 长度」，不记正文（隐私口径：日志里不留用户内容）
             PientLog.i(TAG_CHAT, "重建后补回未被 pi 记录的用户消息：1 条（${pending.text.length} 字）")
         }
-        // 位置**不进本地条目树**（2026-09-15）：pi 的条目 id 与本地镜像 id 不同源，写进来会让
-        // leafPath 落空、会话在界面上变空白（实测踩过）。pi 侧位置由 [piDesiredLeaf] 单独记。
+        // 位置**不进本地条目树**：pi 的条目 id 与本地镜像 id 不同源，写进来会让
+        // leafPath 落空、会话在界面上变空白。pi 侧位置由 [piDesiredLeaf] 单独记。
         PientLog.i(TAG_CHAT, "消息流已按 pi 上下文重建：${rebuilt.size} 条")
     }
 
@@ -1364,7 +1348,7 @@ class ChatState {
             order += id
             val pid = e.optString("parentId").takeIf { it.isNotBlank() && it != "null" }
             parentOf[id] = pid
-            // childrenOf 以前只声明没填（这棵树的解析全靠 parentOf 反查），按子树取回合内容时才发现 —— 实测踩过
+            // childrenOf 必须在此填（这棵树的解析全靠 parentOf 反查，按子树取回合内容时要用它）
             if (pid != null) childrenOf.getOrPut(pid) { mutableListOf() } += id
             val kids = node.optJSONArray("children") ?: JSONArray()
             for (i in 0 until kids.length()) kids.optJSONObject(i)?.let { walk(it) }
@@ -1379,10 +1363,10 @@ class ChatState {
             cur = parentOf[cur]
         }
 
-        // 《Pient 分支功能设计》§2.1/§7：**节点 = 一条用户消息**，该回合的 AI 回答/思考/工具条目
+        // **节点 = 一条用户消息**，该回合的 AI 回答/思考/工具条目
         // 压缩进节点（不各自建卡）。pi 条目里 role 有 user/assistant/toolResult，且**工具结果也是
         // role=user 的条目**（内容块是 toolResult）—— 所以三重判定：message 条目 + role=user +
-        // 有文本块且无 toolResult 块，避免助手/工具结果被当成节点（实测踩过：画布 28 个节点）。
+        // 有文本块且无 toolResult 块，避免助手/工具结果被当成节点。
         fun isUserTurn(id: String): Boolean = isPiUserNode(entryById[id])
         val userIds = order.filter { isUserTurn(it) }
         /** 用户条目的还原形态（正文剥离引用块 / 附件清单，引用与附件进各自字段）；无可还原项返回 null */
@@ -1394,15 +1378,15 @@ class ChatState {
         fun textOf(id: String): String {
             val raw = piText(entryById[id]?.optJSONObject("message"))
             if (!isUserTurn(id)) return raw
-            // 画布节点预览显示**用户原话**（引用与附件分别由详情卡 / 卡片图标呈现，2026-09-17）；
+            // 画布节点预览显示**用户原话**（引用与附件分别由详情卡 / 卡片图标呈现）；
             // `piUserMsg` 对纯文本消息返回 null（没东西可还原），所以这里还要自己过一遍
             // `/skill:<名字>` 的显示还原 —— 否则卡片标签是 pi 的展开全文（见 SkillExpansion）
             return userMsgOf(id)?.text ?: SkillExpansion.display(raw)
         }
         val idxOf = HashMap<String, Int>().apply { userIds.forEachIndexed { i, u -> put(u, i) } }
         // 每个用户消息的 exchange = **它自己这一回合**里的助手文本：从它往下走，遇到下一个用户消息就停。
-        // 早先按拍平顺序（order）切段，分叉后会串味（另一条支的助手文本被算给上一个用户消息、
-        // 新支末尾的用户消息拿到空段显示「（暂无回答）」）—— 实测踩过。
+        // 按拍平顺序（order）切段会串味 —— 另一条支的助手文本被算给上一个用户消息、
+        // 新支末尾的用户消息拿到空段显示「（暂无回答）」。
         fun assistantTextsInTurn(rootId: String): List<Msg> {
             val out = ArrayList<Msg>()
             val queue = ArrayDeque<String>()
@@ -1427,7 +1411,7 @@ class ChatState {
             }
             return null
         }
-        // 锚点（§4.2）：节点 → 该回合**末尾的非用户条目**。回合内容 = 紧跟其后的 message 条目
+        // 锚点：节点 → 该回合**末尾的非用户条目**。回合内容 = 紧跟其后的 message 条目
         // （助手回答 / 工具结果），遇下一条用户消息停；元数据条目（label / branch_summary /
         // session_info / compaction / model_change / thinking_level_change）不算回合内容、也不算分叉。
         fun isTurnContent(id: String): Boolean =
@@ -1445,7 +1429,7 @@ class ChatState {
         fun build(id: String): SessionTreeNode {
             // ⚠️ 必须再加 `idxOf.containsKey(it)`：光判「最近用户祖先 = id」的话，**所有助手/工具条目**
             // 都会挂成子节点（它们的最近用户祖先也是这个 id）→ 画布节点数从 11 变 28、蓝色扭成折线。
-            // 文档 §7：节点数 = 用户消息数（回合内容压缩进节点，走 exchange）。
+            // 节点数 = 用户消息数（回合内容压缩进节点，走 exchange）。
             val kids = order.filter { idxOf.containsKey(it) && nearestUserAncestor(it) == id }
             return SessionTreeNode(
                 id = id,
@@ -1459,7 +1443,7 @@ class ChatState {
         val topNodes = userIds.filter { nearestUserAncestor(it) == null }
         val built = topNodes.map { build(it) }.toMutableList()
         // 兜底：pi 侧还没给 leaf（或 leaf 不在任何用户节点路径上）时，把最后一个顶层节点标成"当前"，
-        // 保证画布至少有一个 active（否则画布的初始视口适配会抛 NoSuchElementException，实测崩过）
+        // 保证画布至少有一个 active（否则画布的初始视口适配会抛 NoSuchElementException）
         if (built.isNotEmpty() && built.none { it.active }) {
             built[built.lastIndex] = built.last().copy(active = true)
         }
@@ -1475,10 +1459,10 @@ class ChatState {
     }
 
     /**
-     * pi 条目是不是「画布节点」= 一条**用户消息**（《Pient 分支功能设计》§2.1 / §7）。
+     * pi 条目是不是「画布节点」= 一条**用户消息**。
      * 三重判定：`type=message` + `role=user` + 有文本块且**无 toolResult 块** ——
      * pi 的工具结果条目内容块是 `toolResult`（老版本 role 也可能是 user），不这样判会把
-     * 助手/工具条目也当成节点（实测踩过：画布 28 个节点）。详情卡的回合边界用同一条判据。
+     * 助手/工具条目也当成节点。详情卡的回合边界用同一条判据。
      */
     private fun isPiUserNode(e: JSONObject?): Boolean {
         if (e == null || e.optString("type") != "message") return false
@@ -1515,11 +1499,11 @@ class ChatState {
     }
 
     /**
-     * **会话外分支：从某条上屏消息创建新会话（pi 原生实现，2026-09-17）**。
+     * **会话外分支：从某条上屏消息创建新会话（pi 原生实现）**。
      *
-     * 口径 = 《Pient 分支功能设计》§4.2「含 fork 点」：新会话包含这条消息**及其回答**。
-     * pi 自己的 `fork(entryId)` 是「这条消息**之前**」语义（`agent-session-runtime.ts:262-287`，
-     * position 默认 before、且要求目标是用户消息），做不到含 fork 点 —— 所以走两步原生命令：
+     * 口径 = 「含 fork 点」：新会话包含这条消息**及其回答**。
+     * pi 自己的 `fork(entryId)` 是「这条消息**之前**」语义（position 默认 before、且要求目标是用户消息），
+     * 做不到含 fork 点 —— 所以走两步原生命令：
      * ① `/pient-nav <锚点>` 把活跃叶移到该消息**回合末尾**（锚点 = 该回合最后一个非用户条目；
      *    尚无回答的节点由扩展补一条锚点标记）；② pi 官方 `clone`（= `fork(leafId, { position: "at" })`）
      * 以当前叶为准 fork 出新会话文件。**两条都是 pi 原生能力，应用侧不拼任何上下文。**
@@ -1544,7 +1528,7 @@ class ChatState {
         // 目标用户消息 = 本条（用户消息）或往前最近的一条（AI 回答走它所属的回合）
         val userIdx = if (msgs[messageIndex] is Msg.User) messageIndex
         else (messageIndex downTo 0).firstOrNull { msgs[it] is Msg.User } ?: -1
-        val title = L.runtime.branchTitlePrefix + forkTitle(msgs, messageIndex)  // 「（分支）」前缀：与源会话区分（用户 2026-09-17 定）
+        val title = L.runtime.branchTitlePrefix + forkTitle(msgs, messageIndex)  // 「（分支）」前缀：与源会话区分
         bgScope.launch {
             try {
                 refreshPiTree()                                  // 目标在新鲜的树上解析（锚点表一并刷新）
@@ -1624,10 +1608,10 @@ class ChatState {
         return x == y || x.contains(y) || y.contains(x)
     }
 
-    // ── 用户消息元数据标记（pi `custom` 条目，2026-09-17）────────────────────────
+    // ── 用户消息元数据标记（pi `custom` 条目）────────────────────────
     // 引用卡与附件清单不能只活在本地镜像里：pi 的会话文件里只留得下**文本**，而
     //   · 引用 = 正文开头的 "> …" 块引用（结构由 pient_meta 标记兜底）；
-    //   · 附件 = 正文尾部的 "[附件] 名称 · 路径" 清单 —— **直发时这行按「移除链接」口径被去掉**，
+    //   · 附件 = 正文尾部的 "[附件] 名称 · 路径" 清单 —— **直发时这行会被去掉**，
     //     而 `image` 内容块只有 data/mimeType（协议里没有文件名字段）→ pi 侧完全没有名字。
     // 所以发送前把「引用 + 附件清单（含文件名/类型/路径）」作为一条 `pient_meta` custom 条目
     // 写进会话（`session-format.md` 明写不进 LLM 上下文、不进画布），读侧按「user 条目的
@@ -1675,7 +1659,7 @@ class ChatState {
      *
      * `entries` / `parents` 默认取实例上那份（`refreshPiTree` 后的全局状态）；**画布建树时必须显式传
      * `piParseTree` 自己的局部表** —— 那一刻实例字段还是上一棵树（首次刷新时是空的），
-     * 用它会让画布节点预览退回 "> …" 原文（2026-09-17 实测踩过）。
+     * 用它会让画布节点预览退回 "> …" 原文。
      */
     private fun piMetaOf(
         entryId: String,
@@ -1795,14 +1779,14 @@ class ChatState {
 
 
     /**
-     * **走 pi 通道跑一轮**（2026-09-14）：只送最后一条用户消息 —— pi 在同一条 RPC 会话里
-     * 自己累积上下文（含工具结果），这也是官方客户端（pi-web / SDK）的口径。
+     * **走 pi 通道跑一轮**：只送最后一条用户消息 —— pi 在同一条 RPC 会话里
+     * 自己累积上下文（含工具结果），这也是官方客户端（SDK）的口径。
      *
      * 流式：`message_update.assistantMessageEvent` 的 `text_delta` / `thinking_delta`；
      * usage：事件顶层的累积值（provider 不上报时为 0，回合结束以 `message_end` 为准不动）；
      * 回合结束判据：**`agent_settled`**（pi 口径：重试、压缩重试、排队续写都settled了才算完）。
      *
-     * 条目按 pi 的内容块顺序**按阶段落库**（2026-09-16）：pi 的一次模型调用 = `{thinking, text, toolCall[]}`，
+     * 条目按 pi 的内容块顺序**按阶段落库**：pi 的一次模型调用 = `{thinking, text, toolCall[]}`，
      * 工具调用与回合收尾前各 flush 一次（[flushThinking] / [flushText]），最后一段正文 = 本回合最终回答。
      */
     private suspend fun runChatViaPi(
@@ -1837,11 +1821,11 @@ class ChatState {
         val toolCallAt = HashMap<String, Int>()   // toolCallId → ToolCall 消息下标
         val toolResAt = HashMap<String, Int>()    // toolCallId → ToolResult 消息下标
         /**
-         * 把**当前阶段**的思考落成一条 [Msg.Thinking]（2026-09-16 起按阶段落库）。
+         * 把**当前阶段**的思考落成一条 [Msg.Thinking]。
          *
          * 为什么按阶段：一次模型调用 = 一段思考 + 它随后的工具调用（pi 的条目顺序也正是
-         * `assistant{thinking,toolCall}` → `toolResult` → `assistant{thinking,…}`）。旧实现把整轮思考
-         * 攒到回合末尾才落库，条目顺序就变成「工具行… → 思考 → 回答」；节点详情卡按 pi 的顺序渲染，
+         * `assistant{thinking,toolCall}` → `toolResult` → `assistant{thinking,…}`）。把整轮思考
+         * 攒到回合末尾才落库的话，条目顺序就变成「工具行… → 思考 → 回答」；节点详情卡按 pi 的顺序渲染，
          * 聊天页又把它并进回答卡 → 两处观感都对不上真实流程。
          */
         fun flushThinking() {
@@ -1861,13 +1845,13 @@ class ChatState {
         }
 
         /**
-         * 把**当前助手消息**的正文落成一条 [Msg.Assistant]（2026-09-16 起与思考同样按阶段落库）。
+         * 把**当前助手消息**的正文落成一条 [Msg.Assistant]。
          *
          * 为什么按阶段：pi 的一条 assistant 消息 = `{thinking, text, toolCall[]}` —— 正文排在它自己的
-         * 工具调用**之前**。旧实现把整轮（一个回合可能跨 4~5 次模型调用）的正文累加进同一个
+         * 工具调用**之前**。把整轮（一个回合可能跨 4~5 次模型调用）的正文累加进同一个
          * StringBuilder、直到回合末尾才落库 → 聊天页里那唯一一条回答把几段正文**粘成一坨**（连分隔符
          * 都没有）摆到回合末尾，观感就是"工具前的旁白被搬到了工具下面"；画布「节点详情」按 pi 的内容块
-         * 顺序渲染，两处自然对不上（用户实报：正文要跟它那次工具调用在一起，与节点详情同序）。
+         * 顺序渲染，两处自然对不上。
          *
          * 落库位置沿用 [appendEntry]：一轮的正文一律按顺序追加到末尾。
          * 无正文不落条目（pi 里也只有真产出正文的消息才有 text 块）；不带模型标签与 usage —— 那两样
@@ -1920,7 +1904,7 @@ class ChatState {
                             Msg.ToolCall(
                                 name = name,
                                 // **存原样的 args JSON**：ToolRows 用 JSONObject(params) 解析出
-                                // command/path/pattern 来渲染标题（实测踩过：塞纯命令串 → 标题只剩「已运行命令」）
+                                // command/path/pattern 来渲染标题（塞纯命令串 → 标题只剩「已运行命令」）
                                 params = ev.optJSONObject("args")?.toString().orEmpty(),
                                 status = ToolStatus.RUNNING,
                                 startedAtMs = System.currentTimeMillis(),
@@ -1928,11 +1912,11 @@ class ChatState {
                         )
                         toolResAt[callId] = msgs.size
                         appendEntry(Msg.ToolResult(toolName = name, preview = ""))
-                        // 通知卡片明细（2026-09-16）：工具调用数 +1，顺手刷一次卡片
+                        // 通知卡片明细：工具调用数 +1，顺手刷一次卡片
                         toolCallsThisTurn += 1
                         PiKeepAlive.detailChanged(AppCtx.get())
                         PientLog.i(TAG_CHAT, "pi 工具开始：$name")
-                        // 终端镜像（2026-09-16）：与 Operit 的观感对齐 —— AI 在 Ubuntu 里跑什么，终端页看得见
+                        // 终端镜像：AI 在 Ubuntu 里跑什么，终端页看得见
                         AppCtx.get()?.let {
                             com.pient.app.runtime.TerminalSessions.mirror(it, mirrorStartLine(name, ev.optJSONObject("args")))
                         }
@@ -1985,7 +1969,7 @@ class ChatState {
             }
         }
         // 引用与附件清单先写进 pi 会话（`pient_meta` custom 条目，parent = 当前叶 → 紧随其后的
-        // 用户消息成为它的子条目）：按 pi 重建上屏流时靠它把引用卡与**附件名**挂回去（2026-09-17）。
+        // 用户消息成为它的子条目）：按 pi 重建上屏流时靠它把引用卡与**附件名**挂回去。
         // 失败只记一行日志 —— 正文里那份 "> …" 注入本来就是模型侧的兜底，标记只服务 UI 还原。
         if (quote != null || attachments.isNotEmpty()) writeMsgMeta(quote, attachments)
         val res = PiRpc.prompt(promptText, piImages)
@@ -1999,7 +1983,7 @@ class ChatState {
         // 最后一段**正文**不在这里落库 —— 它就是本回合的最终回答，由调用方带 usage/模型标签落。
         flushThinking()
         // 通道中途断开（channel_closed）且本轮没拿到任何文本 → 如实报错，
-        // 别落一条空回答让用户以为"AI 回了但看不到内容"（2026-09-15 实测：pi 秒退时就这样）
+        // 别落一条空回答让用户以为"AI 回了但看不到内容"（pi 秒退时就这样）
         if (!PiRpc.processAlive() && text.isBlank() && think.isBlank()) {
             val tail = PiRpc.stderrText().lines().lastOrNull { it.isNotBlank() }.orEmpty()
             throw AiException(L.runtime.piChannelDisconnected + if (tail.isBlank()) "" else "：$tail")
@@ -2016,7 +2000,7 @@ class ChatState {
         // 最终回答 = 最后一条助手消息的正文（pi 同口径）；此前各阶段的正文已各自落成条目
         val out = textPhase.toString().trim()
         if (out.isNotEmpty()) onDelta(out)
-        // 期望位置跟随后端（§4.3）：本轮追加后 pi 的叶就是新的"当前所在"（不跟则下次绑定会拉回旧位置）
+        // 期望位置跟随后端：本轮追加后 pi 的叶就是新的"当前所在"（不跟则下次绑定会拉回旧位置）
         runCatching { refreshPiTree(follow = true) }
             .onFailure { PientLog.w(TAG_CHAT, "回合结束刷新 pi 树失败：${it.message}") }
         ChatOutcome(out, usage?.takeIf { it.inTokens + it.outTokens > 0 }, think.toString())
@@ -2081,7 +2065,7 @@ class ChatState {
         contextPercent = (used * 100f / (limitK * 1000f)).coerceIn(0f, 100f)
     }
 
-    // ─────────── 上下文压缩（**pi 原生**；2026-09-15 收口：App 侧实现已删） ───────────
+    // ─────────── 上下文压缩（**pi 原生**） ───────────
 
     /**
      * 手动压缩上下文（= 桌面端的 `/compact`；移动端等价入口 = 上下文用量卡里那个动作）。
@@ -2089,8 +2073,8 @@ class ChatState {
      * 为什么需要它：**Android 上没有命令行入口**，而 pi 的手动压缩是 `/compact` 命令 ——
      * 移动端的等价入口就是这个动作。
      *
-     * 2026-09-15 收口：压缩**整体归 pi**（官方 RPC `compact`）—— App 不判触发、不切片、不生成
-     * 摘要（旧的内核自实现 `data/Compaction.kt` 已删；自动压缩由 pi 按 settings.json 的
+     * 压缩**整体归 pi**（官方 RPC `compact`）—— App 不判触发、不切片、不生成
+     * 摘要（自动压缩由 pi 按 settings.json 的
      * `compaction` 自己判，配置页那三个旋钮即写进那里）。pi 完成后会重建 `agent.state.messages`，
      * 所以这里随后刷新画布与上屏流。
      * 返回 null = 成功；非空 = 如实回报的原因。
@@ -2122,11 +2106,10 @@ class ChatState {
     }
 
     /**
-     * **系统提示词**（只读面板的数据源，2026-09-15）：提示词的持有者是 **pi**
+     * **系统提示词**（只读面板的数据源）：提示词的持有者是 **pi**
      * （base prompt + 项目 context 文件 + 扩展改写，App 看不到）。走扩展命令 `/pient-sysprompt`
      * 让 pi 把 `ctx.getSystemPrompt()` 写到 `~/.pi/agent/.pient-sysprompt.txt`，再读回来 ——
-     * 面板显示的就是**真实下发的那一份**（旧实现显示的是 App 侧自己拼的提示词，直连内核收口后
-     * 那份已经不存在了）。
+     * 面板显示的就是**真实下发的那一份**。
      * 返回 null = 成功（[systemPrompt] 已更新）；非空 = 原因。
      */
     suspend fun refreshSystemPrompt(): String? {
@@ -2164,9 +2147,9 @@ class ChatState {
         val byId = entries.associateBy { it.id }
         val path = mutableListOf<SessionEntry>()
         var cur = leafBySession[sid]?.let { byId[it] }
-        // 自愈（2026-09-15）：叶不在条目树里（历史 bug：把 pi 的 entry id 写进本地叶，或记录损坏）
-        // → 回退到**末条目**。否则 leafPath 为空、会话在界面上直接变成"空白"（实测：
-        // leaves[s-…] = 78ceb77d ∈ pi 条目而 ∉ 本地条目 → 重启后整个会话读不出消息）。
+        // 自愈：叶不在条目树里（把 pi 的 entry id 写进本地叶，或记录损坏）
+        // → 回退到**末条目**。否则 leafPath 为空、会话在界面上直接变成"空白"
+        // （leaves[s-…] = 78ceb77d ∈ pi 条目而 ∉ 本地条目 → 重启后整个会话读不出消息）。
         if (cur == null && entries.isNotEmpty()) {
             cur = entries.last()
             leafBySession[sid] = cur.id
@@ -2196,7 +2179,7 @@ class ChatState {
     }
 
     private fun markRunning(running: Boolean) {
-        // 前台保活（2026-09-16，M5）：一轮在跑时把进程挂进前台服务 —— 用户切走 / 熄屏后
+        // 前台保活：一轮在跑时把进程挂进前台服务 —— 用户切走 / 熄屏后
         // pi 子进程与它的管道不会被系统清掉（清掉 = 本轮直接消失）。
         // 挂在 markRunning 上是因为它是「本轮是否在跑」的唯一收口点：
         // 开始 / 正常结束 / 中止 / 出错 都经过它。
@@ -2206,7 +2189,7 @@ class ChatState {
             PiKeepAlive.acquire(AppCtx.get(), "chat", L.runtime.aiReplying)
         } else {
             PiKeepAlive.release(AppCtx.get(), "chat")
-            // 回合收尾时刷新上下文用量真值（get_session_stats.contextUsage；2026-09-16）
+            // 回合收尾时刷新上下文用量真值（get_session_stats.contextUsage）
             bgScope.launch { runCatching { refreshContextUsage() } }
         }
         val proj = currentProject ?: return
@@ -2219,11 +2202,11 @@ class ChatState {
     /**
      * 手动终止本轮（输入栏「停止」）。
      *
-     * **位置必须跟随后端**（2026-09-15 修 bug）：本回合的 [piDesiredLeaf] 此刻是**过期的** ——
+     * **位置必须跟随后端**：本回合的 [piDesiredLeaf] 此刻是**过期的** ——
      * 上次写入是上一回合结束时的 `refreshPiTree(follow = true)`，本回合被中止就永远没来得及更新。
      * 留着它，下一次位置对账（开画布、或下一次发送的 T1）会把 pi 的叶**拉回上一回合**，于是
      * 「刚发的那条消息」下面再发一条会挂成它的**兄弟节点** —— 画布上就是「节点有了，但下一条
-     * 不顺下去、凭空冒出一条分支」（用户实测）。
+     * 不顺下去、凭空冒出一条分支」。
      * 所以：① 立刻丢掉过期的期望位置（宁可不对账，也不要拉回旧位置）；② 等 pi 收尾（它要把
      * 已生成的部分落成 aborted 条目）后把位置跟随后端，并按 pi 重建上屏流。
      */
@@ -2251,14 +2234,14 @@ class ChatState {
         }
     }
 
-    // ── 分支（2026-09-02 分支功能设计：/tree 画布页 + fork；2026-09-11 真实化）──
+    // ── 分支（/tree 画布页 + fork）──
 
     /**
-     * /tree 画布页会话树（2026-09-11 起由真实条目树派生，不再是 mock/null）：
+     * /tree 画布页会话树：
      * 节点 = 一条用户消息；exchange = 该节点回合条目（用户消息 + 其后单链非用户条目
      * = AI 回答/思考/工具过程）；children = 从该节点长出的用户消息分支；
      * active = 当前 leaf 上溯路径上的节点（活跃分支）。
-     * 接入 pi 运行时后改由 SDK `getTree()` 同源数据驱动。
+     * 由 SDK `getTree()` 同源数据驱动。
      */
     val branchTree: SessionTreeNode?
         get() {
@@ -2323,7 +2306,7 @@ class ChatState {
     }
 
     /**
-     * **节点回合全文**（画布 FAB1 节点详情卡的数据源，《Pient 分支功能设计》§3.6）：
+     * **节点回合全文**（画布 FAB1 节点详情卡的数据源）：
      * 该节点（一条用户消息）+ 其后到下一个用户节点之前的全部条目，**按会话顺序**映射成 [Msg] ——
      * 用户消息 → 思考（`thinking` 块）→ 工具调用（`toolCall` 块）+ 结果（`toolResult` 条目）→
      * AI 回答（`text` 块）。详情卡直接复用聊天页那套渲染组件（ThinkingDisclosure / ToolRow）。
@@ -2410,9 +2393,9 @@ class ChatState {
     }
 
     /**
-     * /tree 画布页切到目标节点（会话内分支，pi `branch(entryId)` / pi-web 封装命令
+     * /tree 画布页切到目标节点（会话内分支，pi `branch(entryId)` /
      * `navigate_tree`（底层 SDK `navigateTree()`）同语义）：leaf 移到该节点**回合末尾**
-     * （用户消息 + 其 AI 回答），上屏消息流由 root→leaf 重建——满足验收口径「返回消息区
+     * （用户消息 + 其 AI 回答），上屏消息流由 root→leaf 重建——「返回消息区
      * 最后一条对话消息 = 所选节点那次对话的末尾消息」。
      * 非破坏性：不删任何条目，被切走的分支仍留在条目树里；此后继续发消息 = 从该节点
      * 长出新的兄弟分支。
@@ -2423,7 +2406,7 @@ class ChatState {
         // 走扩展命令 /pient-nav：pi 侧会切换上下文（必要时还能生成被放弃分支的摘要），
         // 之后我们只拉一次 pi 的树刷新画布；本地 leaf 同步一份让 UI 立刻响应。
         val rec = sessionRecord(sid)
-        // pi 唯一路径（2026-09-15 收口：不再有 piChannelEnabled 开关）
+        // pi 唯一路径（无 piChannelEnabled 开关）
         if (piTreeSessionId == sid && piTree != null &&
             !rec?.piSessionFile.isNullOrBlank() && PiRpc.usable()
         ) {
@@ -2431,7 +2414,7 @@ class ChatState {
             // 的 navigateTree 会触发它「叶退到父 + 文本回填编辑器」的重编辑语义，位置退到该节点**之前**。
             // **尚无回答的节点没有锚点** —— 交给 pi 的扩展命令，由它给这条用户消息补一条**锚点标记**
             // 再定位（assets/pient-pi-extension.ts 的 resolveTarget）：语义统一为「停在该消息本身」，
-            // 有没有回答行为一致（2026-09-15 用户定）。
+            // 有没有回答行为一致。
             val anchor = piAnchorOf[nodeId]
             val target = anchor ?: nodeId
             piDesiredLeaf[sid] = target
@@ -2469,15 +2452,15 @@ class ChatState {
     }
 
     // ── 输入栏：模型选择器 ────────────────────────────────
-    // 模型数据源（2026-09-09 起）：已配置服务商的模型列表（AiConfigStore）；
+    // 模型数据源：已配置服务商的模型列表（AiConfigStore）；
     // id = "providerId/modelName"。
     var selectedModelId by mutableStateOf("")
     var thinkingEnabled by mutableStateOf(false)
 
     /**
-     * 用户偏好档位 = **pi 的档位字面量**（`minimal`…`max`，2026-09-17 改）。
+     * 用户偏好档位 = **pi 的档位字面量**（`minimal`…`max`）。
      *
-     * 为什么不再用应用的五档枚举存偏好：界面现在**按 pi 报的档位渲染**（pi-web 口径），
+     * 为什么不用应用的五档枚举存偏好：界面**按 pi 报的档位渲染**，
      * 存字面量就不需要「五档 ↔ n 档」的等距映射（那层映射会让档位少的模型出现两个停位等价、
      * 「拖了没变化」的观感）。切到档位少的模型时 pi 会夹取并回读，偏好本身不被改写。
      */
@@ -2486,7 +2469,7 @@ class ChatState {
     /**
      * **pi 侧此刻的档位**（真值在 pi：`get_state.thinkingLevel`）。null = 未知（通道没起 / 还没问过）。
      *
-     * 为什么要这份镜像（2026-09-17）：思考参数是**由 pi 发出去的**（应用侧不再拼请求体），
+     * 为什么要这份镜像：思考参数是**由 pi 发出去的**（应用侧不拼请求体），
      * 所以开关与滑轨若不推到 pi 就只是界面装饰 —— 关掉开关 ≠ 真关思考。现在的口径 =
      * 界面存的是「用户偏好」、[syncThinkingToPi] 推给 pi、再回读 pi 的夹取结果上屏。
      */
@@ -2553,7 +2536,7 @@ class ChatState {
     }
 
     /**
-     * 上一条的**挂起版**：发送路径必须 `await` 它（2026-09-17 实测发现）——
+     * 上一条的**挂起版**：发送路径必须 `await` 它 ——
      * 通道刚重启时 pi 的档位还是默认 `medium`，若推送与 `prompt` 并行发出，**本轮会跑在旧档位上**
      * （只有下一条消息才对）。所以发送前一律先 await 同步完再发。
      */
@@ -2580,7 +2563,7 @@ class ChatState {
         val now = PiRpc.thinkingLevelNow()
         if (now != target) PiRpc.setThinkingLevel(target)
         // **只记 pi 确认过的值**：不能再 `?: target` 回落 —— 那样通道没起时界面会把「偏好」当成
-        // pi 的真值念出来（2026-09-17 真机自查：没通道时那行写「服务商实际收到：low」）。
+        // pi 的真值念出来（没通道时那行写「服务商实际收到：low」）。
         // 拿不到就留 null，由界面走「预计…」的估算分支（见 ModelSelectorSheet）。
         piThinkingLevel = PiRpc.thinkingLevelNow() ?: now
     }
@@ -2595,8 +2578,8 @@ class ChatState {
         get() = availableModels.firstOrNull { it.id == selectedModelId }
             ?: availableModels.firstOrNull()
 
-    // AI 已配置标记（2026-09-08 用户定：聊天页首次引导第二步）：模型配置页「测试连接」
-    // 成功即置真（持久化于 AiConfigStore，2026-09-09 起）；与项目一起作为聊天页引导的
+    // AI 已配置标记（聊天页首次引导第二步）：模型配置页「测试连接」
+    // 成功即置真（持久化于 AiConfigStore）；与项目一起作为聊天页引导的
     // 两个完成条件，两者齐备才显示输入栏。
     var aiConfigured: Boolean
         get() = AiConfigStore.aiConfigured
@@ -2608,8 +2591,8 @@ class ChatState {
     var contextPercent by mutableStateOf(0f)
 
     /**
-     * 最近一次请求的实际上下文占用（token；输入+缓存读写+输出 —— Operit 的
-     * `getLastCurrentWindowSize` 等价物）：触发式总结的用量阈值判定用它。
+     * 最近一次请求的实际上下文占用（token；输入+缓存读写+输出）：
+     * 触发式总结的用量阈值判定用它。
      */
     var contextUsedTokens by mutableStateOf(0)
 
@@ -2617,15 +2600,15 @@ class ChatState {
     var compacting by mutableStateOf(false)
         private set
 
-    // 上下文用量（**pi 真值**，2026-09-16 取代原型常量 61200 / 180000）：
+    // 上下文用量（**pi 真值**）：
     // 由 [refreshContextUsage] 从 `get_session_stats.contextUsage` 填；窗口未知时卡上显示 `—`。
     var windowTokens by mutableStateOf(0)
     var maxWindowTokens by mutableStateOf(0)
-    // 用量是否已知：pi 在「压缩后还没有新回复」时给不出 tokens（agent-session.ts 的口径），
-    // 此时卡上照 pi-web 显示 `?`，不编数字。
+    // 用量是否已知：pi 在「压缩后还没有新回复」时给不出 tokens，
+    // 此时卡上显示 `?`，不编数字。
     var contextUsageKnown by mutableStateOf(false)
     var connectionLabel by mutableStateOf(L.runtime.connected)
-    // 系统提示词只读展示（2026-09-01，对齐 pi-web system 面板）：
+    // 系统提示词只读展示：
     // **真实值 = pi 当前生效的那一份**（base prompt + 项目 context 文件 + 扩展改写），
     // 打开面板时由 [refreshSystemPrompt] 经扩展命令 `/pient-sysprompt` 回流写入 ——
     // 面板显示的必须是模型真正收到的内容（App 侧不再持有自己的提示词）。
@@ -2641,16 +2624,13 @@ class ChatState {
         activePanel = if (activePanel == p) Panel.MESSAGES else p
     }
 
-    // ── 消息窗口（长会话防护，2026-09-12）──────────────────
-    // 参考 Hermes 桌面端长会话（components/assistant-ui/thread/list.tsx 的 showEarlier）：
+    // ── 消息窗口（长会话防护）──────────────────
     // 只把最近一段内容交给列表渲染，更早的靠「显示更早的消息」一页一页往前翻。
-    // 计价用**估算高度**（屏数）而不是条数——条数在长短消息差异大的两端表现完全不同
-    // （用户真机实测发现，2026-09-12）。
+    // 计价用**估算高度**（屏数）而不是条数——条数在长短消息差异大的两端表现完全不同。
     //
     // 状态 = **每会话的上屏窗口起点**（翻到哪记哪，仅内存不落盘）。不能记「已展开屏数」
     // 再从最新一条重算起点：单条超长消息会顶住累加（见 showEarlierMessages），
-    // 「再加一屏」算出来的起点原地不动 → 新增 0 条 → 点击既不加载也不滚动
-    // （2026-09-12 用户报「点好几次才加载出消息」）。
+    // 「再加一屏」算出来的起点原地不动 → 新增 0 条 → 点击既不加载也不滚动。
     private val messageWindowStartBySession = mutableStateMapOf<String, Int>()
 
     /**
@@ -2694,9 +2674,8 @@ class ChatState {
      * 「显示更早的消息」：把窗口起点再往前推**一屏**；返回**本次新增条数**。
      *
      * 关键 = 从**当前起点**本地往前量，而不是按「已展开屏数 × 一屏」从最新一条重算：
-     * 单条消息可能远比一屏高（实测 6.2 万字符 ≈ 68 屏），从最新一条重算时累加会被它顶住，
-     * 起点算出来还是原值 → 新增 0 条 → 点击既不加载也不滚动（2026-09-12 实测：连点 6 次
-     * 界面逐字零变化，按公式要连点 ≈75 次才越过那条消息）。本地量保证**每次点击至少往前 1 条**：
+     * 单条消息可能远比一屏高（如 6.2 万字符 ≈ 68 屏），从最新一条重算时累加会被它顶住，
+     * 起点算出来还是原值 → 新增 0 条 → 点击既不加载也不滚动。本地量保证**每次点击至少往前 1 条**：
      * 一屏装不下的那条整条放进来（消息不能切半条），其余情况仍是一屏。
      */
     fun showEarlierMessages(sessionId: String?, messages: List<Msg>, screenDp: Float): Int {
@@ -2723,7 +2702,7 @@ class ChatState {
     }
 
     // ── 文件页状态 ────────────────────────────────────────
-    // 文件树（2026-09-02 真实化：当前项目真实目录；null = 尚未加载或目录不存在时由 UI 回退演示树）
+    // 文件树（当前项目真实目录；null = 尚未加载或目录不存在时由 UI 回退演示树）
     var fileTreeRoot by mutableStateOf<FileNode?>(null)
 
     /** 文件树正在后台扫描（面板显示加载态；扫描全程不占主线程） */
@@ -2749,10 +2728,10 @@ class ChatState {
     /**
      * 重载当前项目文件树（真实文件系统；目录不存在时 fileTreeRoot 置 null）。
      *
-     * **扫描一定在 IO 线程**（2026-09-12 修复「项目文件夹里文件一多，打开应用就卡死」）：
-     * 旧实现在主线程同步递归整棵树，SAF 项目每个文件还要 4 次 ContentProvider 查询 ——
-     * 4000 个文件 ≈ 1.6 万次 IPC，主线程被占住数分钟 → ANR（实测复现）。
-     * 现改为：IO 线程扫描 + 请求序号防竞态；调用方可直接 await（LaunchedEffect），
+     * **扫描一定在 IO 线程**（否则「项目文件夹里文件一多，打开应用就卡死」）：
+     * 在主线程同步递归整棵树、SAF 项目每个文件还要 4 次 ContentProvider 查询 ——
+     * 4000 个文件 ≈ 1.6 万次 IPC，主线程被占住数分钟 → ANR。
+     * 实现：IO 线程扫描 + 请求序号防竞态；调用方可直接 await（LaunchedEffect），
      * 不必关心线程（suspend 返回时状态已就绪）。
      */
     suspend fun refreshFileTree(context: Context) {
@@ -2781,13 +2760,13 @@ class ChatState {
     // FilesPanel 据此把右下 FAB 抬到工具栏之上——二进制 / 超限文件走提示分支不显示工具栏，
     // 只有渲染方知道，故不做扩展名的静态推测（否则 zip 之类会凭空抬起 FAB）
     var symbolToolbarVisible by mutableStateOf(false)
-    // 行号不设开关（2026-09-10 用户定）：是否显示由预览的文件类型决定，见 FileContentView.CodeView
+    // 行号不设开关（是否显示由预览的文件类型决定，见 FileContentView.CodeView）
     val expandedDirs = mutableStateSetOf<String>() // 文件树展开路径
     // 文件树长按菜单「@ 提及插入输入框」请求（**成品引用文本**：`@路径 ` / `@"含空格 路径" `，
     // 由 FileTreePanel 按 mentionTextFor 生成；ChatScreen 消费后置 null）
     var mentionInsertRequest by mutableStateOf<String?>(null)
 
-    // ── 编辑态（2026-09-10：文本/代码可编辑，参照 Operit 工作区编辑器）──
+    // ── 编辑态（文本/代码可编辑）──
     /** 文件键：同一文件 = 名称 + 真实位置（与 openFile 判定口径一致） */
     fun fileKey(node: FileNode): String = (node.source ?: "") + "|" + node.name
 

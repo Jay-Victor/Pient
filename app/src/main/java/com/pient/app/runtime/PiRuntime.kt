@@ -10,10 +10,9 @@ import java.io.File
 /**
  * 终端层（Ubuntu rootfs / PRoot）在设备上的落点、随包资源与**首启解包**。
  *
- * **打包形态（2026-09-14 设计基线，用户口径）**：Ubuntu 24.04 rootfs **随 APK 分发**
+ * **打包形态**：Ubuntu 24.04 rootfs **随 APK 分发**
  * （`assets/pient-rootfs.tgz`），首次进入应用时在后台解包到应用私有目录 —— 用户不需要下载
- * Ubuntu；而 node / python 等环境**不随包**，由用户在环境配置页 / 首启弹窗里下载安装
- * （参考 Operit 的「装开发包」口径）。
+ * Ubuntu；而 node / python 等环境**不随包**，由用户在环境配置页 / 首启弹窗里下载安装。
  *
  * 分两处存放，**这不是随意选的位置**：
  *
@@ -21,7 +20,7 @@ import java.io.File
  *    目录（`/data/app/.../lib/<abi>/libpient_*.so`），随 APK 以 jniLibs 形式分发。
  *    原因：Android 10 起应用不得 execve 自己私有目录里的文件——SELinux 策略里
  *    `untrusted_app × app_data_file` 只给 `execute`(mmap)、不给 `execute_no_trans`(execve)，
- *    实测 avc：`denied { execute_no_trans } … permissive=0`；私有目录里的 **ELF 与 shebang 脚本
+ *    avc：`denied { execute_no_trans } … permissive=0`；私有目录里的 **ELF 与 shebang 脚本
  *    两种都 exec 不了**。而 `apk_data_file`（/data/app 下的一切，含 native lib 目录）允许 execve。
  *
  * 2. **整棵 rootfs 与按 SONAME 命名的依赖软链**留应用私有目录：rootfs 里的 GNU 程序由 loader 以
@@ -43,7 +42,7 @@ object PiRuntime {
 
     /**
      * 随包的 rootfs 归档（assets；构建期由 `syncPientRootfsArchive` 放进来）。
-     * **后缀不能是 .gz**：aapt 会把 assets 里的 `*.gz` 自动解压并去掉后缀（实测 30MB 的 tar.gz
+     * **后缀不能是 .gz**：aapt 会把 assets 里的 `*.gz` 自动解压并去掉后缀（30MB 的 tar.gz
      * 变成 84MB 的 assets/pient-rootfs.tar）。
      */
     private const val ROOTFS_ARCHIVE_ASSET = "pient-rootfs.tgz"
@@ -87,7 +86,7 @@ object PiRuntime {
     /**
      * 终端会话的入口包装脚本：把 `pient-shell -c 命令` 转成
      * `proot … /bin/bash -c 命令`（命令真正跑在 Ubuntu 里，用户看到的与 AI 用的一致）。
-     * 必须是 native lib 目录里的文件：私有目录里的 shebang 脚本不能 exec（实测 EACCES）。
+     * 必须是 native lib 目录里的文件：私有目录里的 shebang 脚本不能 exec（EACCES）。
      */
     fun shellPath(context: Context): File = nativeBinary(context, "pient-shell")
 
@@ -102,7 +101,7 @@ object PiRuntime {
     /**
      * ELF 的 e_machine（小端，偏移 18）：0x3E = x86_64、0xB7 = aarch64、0x28 = armhf；读不到返回 null。
      * 只判「文件在不在」不够：单 ABI 出包装错机器时，解出来的 rootfs 是**另一个架构**的
-     * （实测 x86_64 包装到 arm64 真机：bash 在、整棵树都在），于是应用会认为「已解包」永不重解，
+     * （x86_64 包装到 arm64 设备：bash 在、整棵树都在），于是应用会认为「已解包」永不重解，
      * 直到终端里出现 exec 格式错误。所以连架构一起判（见 [rootfsReady]）。
      */
     fun elfMachine(file: File): String? = runCatching {
@@ -135,9 +134,9 @@ object PiRuntime {
 
     /** 解包进度/原因的公开快照（终端页/环境页要显示「正在解包 …%」） */
     /**
-     * rootfs 没就绪的**具体原因**（一句人话；2026-09-15）。
-     * 旧写法只区分「解包中 / 其它」，于是任何"不是解包中"的情形都被说成「安装包未内置 Ubuntu」——
-     * 实测误报：rootfs 明明在包里、只是 bash 不可执行/架构不符时也这么显示。
+     * rootfs 没就绪的**具体原因**（一句人话）。
+     * 只分「解包中 / 其它」两类，会让任何"不是解包中"的情形都被说成「安装包未内置 Ubuntu」——
+     * rootfs 明明在包里、只是 bash 不可执行/架构不符时就会误报。
      */
     fun rootfsIssue(context: Context): String {
         val bash = rootfsBash(context)
@@ -168,7 +167,7 @@ object PiRuntime {
      * **首启解包**：把随包的 rootfs 归档铺到私有目录（`files/pient-rt/rootfs`）。
      *
      * 为什么由应用自己跑 `/system/bin/sh` 解包：Linux rootfs 里有符号链接、权限位、上万个文件，
-     * Kotlin 侧逐个写不现实；toybox 的 `gunzip | tar -x` 在应用上下文里实测可用，而且**解出来的
+     * Kotlin 侧逐个写不现实；toybox 的 `gunzip | tar -x` 在应用上下文里可用，而且**解出来的
      * 文件属主就是应用自己**——正是 PRoot 要的。
      * 进度：tar 的成员按目录序排列，数顶层目录出现的个数即可（比递归统计文件数便宜得多）。
      */
@@ -193,7 +192,7 @@ object PiRuntime {
         }
         val tar = File(tmpDir(context), ROOTFS_ARCHIVE_ASSET)
         // tmp 目录由解包自己保证存在：首启解包跑在其它组件之前，别依赖别人先建好
-        // （实测：tmp 不存在时归档拷贝直接 `open failed: ENOENT`）。
+        // （tmp 不存在时归档拷贝直接 `open failed: ENOENT`）。
         tar.parentFile?.mkdirs()
         try {
             onProgress(0.02f, L.runtime.extractingArchive)
@@ -217,7 +216,7 @@ object PiRuntime {
             val code = proc.exitValue()
             if (code != 0) {
                 // tar 对**硬链接**条目会报 Permission denied 并整体退出 1：SELinux 不允许
-                // untrusted_app 建硬链接（实测 avc: denied { link } … app_data_file）。
+                // untrusted_app 建硬链接（avc: denied { link } … app_data_file）。
                 // ubuntu-base 里只有极少数这种条目，所以真正的判据是「/bin/bash 在不在」，
                 // 不是 tar 的退出码。
                 PientLog.w(TAG, "解包退出码 $code（多半只是硬链接被拒）：${tail.take(200)}")
@@ -243,16 +242,15 @@ object PiRuntime {
     }
 
     /**
-     * **按需自动解包**（Operit 口径：环境缺什么，用之前就地补，不需要用户手动点）。
+     * **按需自动解包**（环境缺什么，用之前就地补，不需要用户手动点）。
      *
-     * Operit 把 `install_ubuntu()` 写进生成的启动脚本（`common.sh`），首次起终端会话时自动解包、
-     * 进度回显在终端里；这里更进一步——应用一启动就在后台解（用户连终端页都不用打开）。
+     * 应用一启动就在后台解包（用户连终端页都不用打开）。
      *
      * 三个条件缺一不可：rootfs 未就绪 / 没有别的解包在跑 / **APK 里确实带了归档**。
      */
     fun ensureRootfsAsync(context: Context): Boolean {
         // 每次启动先把软链对一遍：**APK 更新后 /data/app 路径会变**，旧链会悬空
-        // （实测：重装后 `env: exec …/bin/proot: No such file or directory`，
+        // （重装后 `env: exec …/bin/proot: No such file or directory`，
         //  要等首次进终端页才被 prepareTerminal 修好 —— 应用启动就该修）
         ensureLinks(context)
         installPiExtension(context)   // 应用启动即装（内容变了才重写；rootfs 没就绪也只是先写好文件）
@@ -308,7 +306,7 @@ object PiRuntime {
     fun ensureLinks(context: Context) {
         val nativeDir = context.applicationInfo.nativeLibraryDir
         // 先清掉「已退场运行时」留下的旧链（APK 更新会让 /data/app 路径变化）——悬空链会让
-        // 包装脚本 exec 直接失败（实测 `env: exec …/bin/proot: No such file or directory`）。
+        // 包装脚本 exec 直接失败（`env: exec …/bin/proot: No such file or directory`）。
         linkDir(context).listFiles()?.forEach { f ->
             if (f.name in NATIVE_BINARIES) return@forEach
             if (runCatching { Os.readlink(f.absolutePath) }.isSuccess) {
@@ -378,7 +376,7 @@ object PiRuntime {
     }
 
     /**
-     * 让 guest 里有 DNS：ubuntu-base 自带的 `/etc/resolv.conf` 是**空文件**（实测 0 字节），
+     * 让 guest 里有 DNS：ubuntu-base 自带的 `/etc/resolv.conf` 是**空文件**（0 字节），
      * 表现为 guest 内 `apt-get update` / `getent` 全部 `Temporary failure resolving …`。
      * 取系统的 DNS（ConnectivityManager → LinkProperties.dnsServers）写进去；读不到时给公共兜底。
      * 幂等：内容一致就不落盘（会话启动都会调一次，网络切换后自动跟上）。
@@ -433,7 +431,7 @@ object PiRuntime {
         appDir(context).mkdirs()
         ensureLinks(context)
         installPiExtension(context)
-        // Android shell 回桥的端点文件（要求 5）：rootfs 刚解包好时这里补写一次 ——
+        // Android shell 回桥的端点文件：rootfs 刚解包好时这里补写一次 ——
         // 应用启动那一刻 rootfs 可能还没就绪，端点文件当时写不进去（父目录不存在）。
         ExecBridge.writeEndpointFile(context)
         ensureRootfsAsync(context)
@@ -457,7 +455,7 @@ object PiRuntime {
      * pi 包的落点（npm 全局布局下的 `@earendil-works/pi-coding-agent`）：解出来就等同
      * 「`npm i -g` 装过」—— 用户装完 node 就能直接 `pi`，而「更新 pi」只要再跑一次
      * `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`（装到同一处直接覆盖；
-     * pi 带 npm-shrinkwrap.json，实测 `npm i -g` 同样是「包 + 内嵌 node_modules」的布局）。
+     * pi 带 npm-shrinkwrap.json，`npm i -g` 同样是「包 + 内嵌 node_modules」的布局）。
      */
     fun piDir(context: Context): File =
         File(nodeModulesDir(context), "@earendil-works/pi-coding-agent")
@@ -559,7 +557,7 @@ object PiRuntime {
                     )
                 }.onFailure { PientLog.w(TAG, "pi 软链建立失败：${it.message}") }
                 // **必须显式加执行位**：Android 侧 tar 解出来的文件是 0600（umask 077），
-                // 少了 +x 就是 `/usr/bin/pi: Permission denied`（实测踩过）。
+                // 少了 +x 就是 `/usr/bin/pi: Permission denied`。
                 listOf("dist/bundle/cli.js", "dist/bundle/rpc-entry.js").forEach { rel ->
                     val exe = File(piDir(context), rel)
                     if (exe.isFile) {
@@ -598,7 +596,7 @@ object PiRuntime {
      * 为什么必须强制：`exec_env` 是给「用户/终端页/工具命令」选的落点（Ubuntu PRoot / Ubuntu chroot /
      * Android shell）。但 **pi 自己**（App 的 RPC 通道、`pi list/install/remove`、技能扫描脚本）永远
      * 只能跑在 Ubuntu 里 —— node 与 pi 都装在那棵 rootfs 里；一旦跟着 `exec_env=android` 走，
-     * 通道会以「Android 上没有 pi」的方式整体失效（实测前的设计约束，别省这一步）。
+     * 通道会以「Android 上没有 pi」的方式整体失效（设计约束，别省这一步）。
      *
      * @param execEnv 传 `ubuntu-chroot` 可让 pi 走 chroot（只在明确的场景下用）
      */

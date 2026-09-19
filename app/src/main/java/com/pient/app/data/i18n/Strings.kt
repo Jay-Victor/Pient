@@ -1,7 +1,7 @@
 package com.pient.app.data.i18n
 
 /**
- * 界面文案总表（自研消息表，机制对齐 pi-web `lib/i18n`）。
+ * 界面文案总表（自研消息表）。
  *
  * 用法：在任意位置写 `L.<组>.<条目>`，例如 `Text(L.settings.languageTitle)`。
  * - 组 = 文案归属的功能域（common/settings/chat/…），每组一张 `Strings<组>.kt`（接口 + Zh/En 实现）。
@@ -146,7 +146,7 @@ object HiStrings : Strings {
     override val runtime = HiRuntime
 }
 
-/** 新增语言包（Fr）文案包 */
+/** 语言包（Fr）文案包 */
 object FrStrings : Strings {
     override val common = FrCommon
     override val settings = FrSettings
@@ -166,7 +166,7 @@ object FrStrings : Strings {
     override val runtime = FrRuntime
 }
 
-/** 新增语言包（Pt）文案包 */
+/** 语言包（Pt）文案包 */
 object PtStrings : Strings {
     override val common = PtCommon
     override val settings = PtSettings

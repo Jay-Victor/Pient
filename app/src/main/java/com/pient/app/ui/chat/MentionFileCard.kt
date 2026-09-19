@@ -37,12 +37,12 @@ data class MentionFile(
     val path: String,   // 项目相对路径（@ 引用格式用；目录带尾斜杠）
     /**
      * 小写扩展名（FileNode.ext 同源）。图标与类型判定必须走文件树同一函数
-     * `nodeIcon(isDir, ext)` —— 此前本模型自带 `isImage` 布尔 + 各处各写一份图标
+     * `nodeIcon(isDir, ext)` —— 本模型自带 `isImage` 布尔、各处各写一份图标
      * （非图片一律 Description），与文件树（video=MOVIE / audio=MUSIC_NOTE /
      * 其它=INSERT_DRIVE_FILE）不一致，@ 引用 chip 的图案与文件树对不上。
      */
     val ext: String = "",
-    /** 目录（2026-09-17 加，与 pi-web 一致：候选与引用都含目录，引用文本带尾斜杠） */
+    /** 目录（候选与引用都含目录，引用文本带尾斜杠） */
     val isDir: Boolean = false,
 ) {
     /** 小写缓存：候选过滤每击键都要比较 —— 别在过滤里反复 lowercase（大树下每键的分配） */
@@ -89,7 +89,7 @@ fun findMentionPathMatches(text: String, files: List<MentionFile>): List<Mention
  * - `路径…` → 段长 = 路径长度；`"路径"…` → 段长 = 路径长度 + 2（**闭合引号必须紧跟路径**，
  *   半截的 `@"abc` 不算命中）；路径之后可再跟行范围后缀 `:12` / `:12-20`（算进段长）。
  *
- * 最长优先 =「路径最长且是当前文本前缀」的那个 —— 与原实现（按路径长度降序取首个命中）
+ * 最长优先 =「路径最长且是当前文本前缀」的那个 —— 与「按路径长度降序取首个命中」
  * 等义，但不必每次击键重排一份列表（候选可达上万条）。
  */
 private fun matchMentionAt(rest: String, files: List<MentionFile>): MentionHit? {
@@ -115,7 +115,7 @@ private data class MentionHit(val file: MentionFile, val segLen: Int, val suffix
 
 /**
  * 行范围后缀长度：`:` 后是数字（可再接 `-数字`）才算，否则 0（正文里的普通冒号不受影响）。
- * 与 [mentionTextFor] 的行范围形态同源（pi-web `buildFileLineMentionText` 口径）。
+ * 与 [mentionTextFor] 的行范围形态同源。
  */
 private fun lineRangeSuffixLength(s: String): Int {
     if (!s.startsWith(":")) return 0
@@ -134,9 +134,8 @@ private fun lineRangeSuffixLength(s: String): Int {
 /**
  * @ 引用文本的**唯一实现**（插入输入框用）：`@路径 `；目录带尾斜杠；含空白加引号；
  * 可选行范围（`@路径:12` / `@路径:12-20`，后缀写在引号外）。
- * 引号写法 = pi-web `buildAtMentionText` / pi TUI `buildCompletionValue` 同规则
- * （`@"my file.txt" `）—— 不加引号时模型只看到被空格切开的半截路径；行范围后缀 =
- * pi-web `buildFileLineMentionText` 同格式。
+ * 引号写法 = pi TUI `buildCompletionValue` 同规则（`@"my file.txt" `）—— 不加引号时
+ * 模型只看到被空格切开的半截路径；行范围后缀 = `buildFileLineMentionText` 同格式。
  */
 fun mentionTextFor(path: String, isDir: Boolean = false, lines: IntRange? = null): String {
     val p = if (isDir && !path.endsWith("/")) "$path/" else path
@@ -152,7 +151,7 @@ fun mentionTextFor(path: String, isDir: Boolean = false, lines: IntRange? = null
 /**
  * 遍历项目文件树，扁平化为 @ 引用候选（**目录 + 文件**；目录路径带尾斜杠）。
  * 路径一律取 [FileNode.relPath]（树加载时算一次）——与文件树长按「@ 提及插入输入框」
- * 同一份口径（原实现在这里按遍历前缀另拼一份、长按那边只拿得到基名 → 必然漂移）。
+ * 同一份口径（在这里按遍历前缀另拼一份、长按那边只拿得到基名 → 必然漂移）。
  */
 fun buildMentionFiles(node: FileNode): List<MentionFile> {
     val result = mutableListOf<MentionFile>()
@@ -229,8 +228,7 @@ fun filterMentionFiles(files: List<MentionFile>, query: String): List<MentionFil
 
 /**
  * 光标处是否有完整的 @ 引用 token 收尾（含或不含尾随空格）。
- * 返回整个 token 的删除范围（起点含 '@'，终点含尾随空格）——与 Operit
- * MentionTokenUtils.findMentionTokenEndingAtCursor 同语义：光标停在
+ * 返回整个 token 的删除范围（起点含 '@'，终点含尾随空格）——光标停在
  * "@路径" 末尾或 "@路径 " 末尾都算。用于"一键删除整段 @ 引用"。
  */
 fun findMentionTokenEndingAtCursor(
@@ -251,7 +249,7 @@ fun findMentionTokenEndingAtCursor(
 }
 
 /**
- * @ 引用删除归一化（参照 Operit ChatViewModel.normalizeMentionDeletion）：
+ * @ 引用删除归一化：
  * 检测"单字符退格且光标停在某 @ 引用 token 末尾"，把整个 token
  * （含尾随空格）一次删掉、光标移到 token 起点。其余编辑原样放行。
  */
@@ -275,7 +273,7 @@ fun normalizeMentionDeletion(
 }
 
 /**
- * @ 引用文件卡片（2026-08-28 新增，2026-09-12 加高度上限与实时筛选）：输入框里输入 "@" 后以悬浮浮层
+ * @ 引用文件卡片：输入框里输入 "@" 后以悬浮浮层
  * 出现在输入框左上方（覆盖聊天内容，不挤压布局）；卡片列项目文件夹内的文件（图标 + 文件名 + 相对路径），
  * 点选后把「@ + 已输入筛选字符」整段替换为 "@路径 " 内联引用（pi @ 提及语义）。
  * 点外关闭由父级透明遮罩处理。

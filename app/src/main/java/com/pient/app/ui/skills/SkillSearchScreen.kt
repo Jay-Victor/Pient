@@ -49,9 +49,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 技能搜索页（**真数据层**，2026-09-15 接回 pi 生态）：
+ * 技能搜索页（**真数据层**）：
  *
- * - **市场结果** = skills.sh（与 pi-web 同一条通信：`GET /api/search`，失败回落
+ * - **市场结果** = skills.sh（`GET /api/search`，失败回落
  *   `npx skills find`），见 [PiSkillsMarket]；
  * - **安装** = `npx skills add <包> -y --agent pi [-g]` —— `--agent pi` 让 skills CLI 按
  *   pi 的目录约定落地（项目作用域 `.agents/skills`、全局 `~/.agents/skills`），
@@ -59,7 +59,7 @@ import kotlinx.coroutines.withContext
  * - **已安装（本地匹配）** = 直接扫盘 pi 的技能目录（[PiSkills]：`~/.pi/agent/skills`、
  *   `~/.agents/skills`、项目 `.pi/skills`、`.agents/skills`）。
  *
- * 页面结构沿用原设计（搜索行 + 分组列表），只把占位数据换成真实数据。
+ * 页面结构：搜索行 + 分组列表。
  */
 @Composable
 fun SkillSearchScreen(nav: NavController) {
@@ -133,7 +133,7 @@ fun SkillSearchScreen(nav: NavController) {
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .weight(1f)
-                    .height(44.dp) // 与右侧L.common.search按钮（height 44）等高（2026-08-27 对齐）
+                    .height(44.dp) // 与右侧 L.common.search 按钮（height 44）等高
                     .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(12.dp))
                     .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
                     .padding(horizontal = 12.dp),
@@ -169,7 +169,7 @@ fun SkillSearchScreen(nav: NavController) {
                 )
             }
             // 搜索按钮：与输入框同高 44dp；宽度固定 72dp 以对齐输入框行
-            //（PientButton 自身已带左右 20dp 内边距，2026-09-12 起）
+            //（PientButton 自身已带左右 20dp 内边距）
             PientButton(
                 if (searching) L.skills.searching else L.common.search,
                 onClick = { searched = query },

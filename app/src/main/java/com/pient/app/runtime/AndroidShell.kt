@@ -129,7 +129,7 @@ private class FileOutputStreamCompat(private val pfd: ParcelFileDescriptor?) : O
 }
 
 /**
- * **Android shell 通道**（2026-09-14 设计基线第 4 条 / 用户要求 5）：
+ * **Android shell 通道**：
  * 让 AI（pi 的 `android_shell` 工具）与终端页能在 **Android 系统里**执行命令 ——
  * 这是 Ubuntu(PRoot) 做不到的部分：`pm`/`am`/`cmd`/`dumpsys` 等系统命令、装应用、改系统设置、
  * 读别的 app 私有数据（`/data/data`，需要 Root）、操作硬件。root 档下还能把 Ubuntu 从
@@ -216,7 +216,7 @@ object AndroidShell {
     // ───────────────────────── 执行 ─────────────────────────
 
     /**
-     * 执行一条 Android 命令并返回结果 —— **即发即走**（2026-09-15 用户口径）：
+     * 执行一条 Android 命令并返回结果 —— **即发即走**：
      * 每次调用都是**独立的一次执行**，没有会话、不保留 `cd` / `export` 之类的状态；
      * 命令里需要先切目录/设变量就在同一条命令里写（`cd /sdcard && ls`）。
      * 命令走 `sh -c`，所以 `;` `&&` 管道重定向都合法。

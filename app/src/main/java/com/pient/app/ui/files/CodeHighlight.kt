@@ -22,15 +22,15 @@ import com.pient.app.data.CodeToken
 import com.pient.app.data.scanCode
 
 /**
- * 代码着色 + 缩进标记（移植 Operit 工作区编辑器）
- * - 调色板 = Operit `theme/EditorTheme.kt` 的 LightTheme / DarkTheme
- * - 着色区间 = `data/CodeSyntax.kt scanCode`（同 Operit EditorSyntaxHighlighter）
- * - 缩进标记 = Operit `CanvasCodeEditorView.drawIndentGuides`：每 4 空格一个标记，
+ * 代码着色 + 缩进标记
+ * - 调色板 = LightTheme / DarkTheme（VS Code Light+ / Dark+ 色系）
+ * - 着色区间 = `data/CodeSyntax.kt scanCode`
+ * - 缩进标记 = `drawIndentGuides`：每 4 空格一个标记，
  *   x = 文本左缘 + 级别×4×字宽 − 0.5×字宽，纵向自 lineTop+2dp 到 lineBottom−2dp，1dp 描边，
  *   颜色 = blend(背景, 槽边框, 0.68)（Pient 槽无边框 → 取主题 outlineVariant）
  */
 
-/** 语法元素调色板（值取自 Operit EditorTheme；textColor 由主题 onBackground 提供，不在此列） */
+/** 语法元素调色板（textColor 由主题 onBackground 提供，不在此列） */
 data class CodePalette(
     val keyword: Color,
     val type: Color,
@@ -39,11 +39,11 @@ data class CodePalette(
     val string: Color,
     val number: Color,
     val comment: Color,
-    /** Operit gutterBorderColor（缩进标记混色用） */
+    /** gutterBorderColor（缩进标记混色用） */
     val gutterBorder: Color,
-    /** Markdown 标题（Pient 增补：取品牌 warn 色，Operit 无 markdown 语言） */
+    /** Markdown 标题（取品牌 warn 色） */
     val heading: Color,
-    /** Markdown 链接地址（Pient 增补：取对话分类青，与正文/标记色区分） */
+    /** Markdown 链接地址（取对话分类青，与正文/标记色区分） */
     val link: Color,
 ) {
     fun colorOf(token: CodeToken): Color = when (token) {
@@ -59,7 +59,7 @@ data class CodePalette(
     }
 }
 
-/** Operit `EditorTheme.LightTheme`（VS Code Light+ 色系） */
+/** Light 调色板（VS Code Light+ 色系） */
 val CodePaletteLight = CodePalette(
     keyword = Color(0xFF0000FF),
     type = Color(0xFF267F99),
@@ -73,7 +73,7 @@ val CodePaletteLight = CodePalette(
     link = Color(0xFF1B7C83),      // LightCategoryConversation
 )
 
-/** Operit `EditorTheme.DarkTheme`（VS Code Dark+ 色系） */
+/** Dark 调色板（VS Code Dark+ 色系） */
 val CodePaletteDark = CodePalette(
     keyword = Color(0xFF6CB6FF),
     type = Color(0xFF4EC9B0),

@@ -28,12 +28,12 @@ class AiException(message: String) : Exception(message)
 data class WirePart(val type: String, val mime: String, val base64: String)
 
 /**
- * AI 后端（2026-09-09 实现 AI 接入）：直连服务商 HTTP API 的对话能力。
+ * AI 后端：直连服务商 HTTP API 的对话能力。
  * 协议二选一（按端点自动判定）：
  * - OpenAI 兼容：`POST {endpoint}/chat/completions`（Bearer 鉴权，SSE 流式）；
  * - Anthropic 兼容：`POST {endpoint}/v1/messages`（x-api-key 鉴权，SSE 事件流）。
  * 思考级别映射：Anthropic = thinking.budget_tokens；OpenAI = reasoning_effort。
- * 2026-09-14 用户拍板：工具能力整体移除 —— 请求不再带 `tools`，回包也不解析工具调用。
+ * 工具能力整体移除 —— 请求不带 `tools`，回包也不解析工具调用。
  * 仍不支持：Bedrock SigV4 签名（端点仍可配置，请求会报鉴权错误）。
  */
 object AiBackend {
@@ -63,8 +63,7 @@ object AiBackend {
         return e.contains("anthropic.com") || e.endsWith("/anthropic")
     }
 
-    // 档位映射见下方 levelWire()/sampleIndex()（2026-09-12）：五档 → 服务商实际档位，
-    // 旧的 thinkingBudget()/reasoningEffort() 一对一映射已被它取代（不再有 xhigh→high 这种硬收敛）。
+    // 档位映射见下方 levelWire()/sampleIndex()：五档 → 服务商实际档位
 
     private fun modelsUrl(cfg: ProviderConfig): String {
         val e = cfg.endpoint.trim().trimEnd('/')
@@ -91,7 +90,7 @@ object AiBackend {
         }.build()
         val resp = execute(req)
         // ★ 响应体读取与 JSON 解析必须在 IO 线程：execute 恢复后协程继续跑在 Main 上，
-        //   慢网络/大响应会把整段下载+解析塞进主线程 → 卡顿/ANR（2026-09-09 修复）
+        //   慢网络/大响应会把整段下载+解析塞进主线程 → 卡顿/ANR
         return withContext(Dispatchers.IO) {
             resp.use { r ->
                 val body = r.body?.string().orEmpty()
@@ -113,8 +112,8 @@ object AiBackend {
     /**
      * 端点走哪套协议（决定「逐一测试」怎么发请求）—— **逐条对齐该 api 在 pi 里的真实形态**：
      * - `openai-completions` → `POST {baseUrl}/chat/completions`；
-     * - `openai-responses` → `POST {baseUrl}/responses`（pi 的 openai / xai 主用法就是这条；旧实现
-     *   一律按 chat/completions 探活 —— 路径不同，配置正常也会被报成 ✕）；
+     * - `openai-responses` → `POST {baseUrl}/responses`（pi 的 openai / xai 主用法就是这条；一律按
+     *   chat/completions 探活 —— 路径不同，配置正常也会被报成 ✕）；
      * - `anthropic-messages` → `POST {baseUrl}/v1/messages`；
      * - `azure-openai-responses`（要 `api-version` 查询参数 + `api-key` 头）与
      *   `openai-codex-responses`（ChatGPT 后端 + OAuth）应用内无法忠实复现 → 如实报「测不了」，
@@ -142,7 +141,7 @@ object AiBackend {
     /**
      * pi 会不会把 `models[].samplingParams`（温度 / Top-K / Top-P）真的写进请求体。
      *
-     * 口径（2026-09-17 读 pi-0.85.1 源码）：只有 **openai-completions / openai-responses /
+     * 口径：只有 **openai-completions / openai-responses /
      * azure-openai-responses** 三条路径 `Object.assign(params, options.samplingParams)`；
      * anthropic-messages / google(±vertex) / bedrock / mistral / openai-codex-responses 虽然都调
      * `buildBaseOptions`（把 samplingParams 并进 options），但请求体构造里**不读它** ——
@@ -159,10 +158,10 @@ object AiBackend {
     /**
      * 对**单个模型**发一条极短的推理请求（`max_tokens=16`）。
      *
-     * 为什么不能只 GET `/models`（2026-09-17 用户口径）：那条只证明「能列模型」——
+     * 为什么不能只 GET `/models`：那条只证明「能列模型」——
      * 套餐不含该模型、模型名写错、权限不对都发现不了。逐模型真发一次才叫「可用」。
      *
-     * URL 口径**逐字照 pi**（pi 把 baseUrl 原样交给官方 SDK，由 SDK 拼路径），见 [chatProtocol]：
+     * URL 口径（pi 把 baseUrl 原样交给官方 SDK，由 SDK 拼路径），见 [chatProtocol]：
      * openai 兼容 = `{endpoint}/chat/completions`、responses = `{endpoint}/responses`、
      * anthropic = `{endpoint}/v1/messages`。
      */
@@ -247,7 +246,7 @@ object AiBackend {
 
     /**
      * 档位采样：把 5 档按比例落到「对方的 n 个位置」上，`round(ordinal × (n−1) / 4)`。
-     * **只服务两条路**（都不再是常用路径，见 [levelWire] 的说明）：① 服务商在 ProviderCatalog 里
+     * **只服务两条路**（两条都不是常用路径，见 [levelWire] 的说明）：① 服务商在 ProviderCatalog 里
      * 声明的预算表；② Anthropic 协议的 `budget_tokens` 阶梯（pi 那边是 `adjustMaxTokensForThinking`
      * ＋可选的 ThinkingBudgets 表，应用只能给个近似值，界面已标「预计」）。
      */
@@ -279,10 +278,10 @@ object AiBackend {
             return LevelWire.Budget(BUDGET_LADDER[sampleIndex(level, BUDGET_LADDER.size)])
         }
         val format = effectiveReasoningFormat(cfg)
-        // **原样报档位名**（2026-09-17 真机实测后改）：pi 的请求体是
-        // `model.thinkingLevelMap?.[档位] ?? 档位`（openai-completions.ts:882），而应用管理的模型**不写**
-        // thinkingLevelMap ⇒ pi 发出去的就是档位名本身。此前按「服务商词表」等距采样，会出现
-        // 真值行和估算行**互相矛盾**的情况（实测：偏好 low，pi 答「实际收到：low」，估算却写「high」
+        // **原样报档位名**：pi 的请求体是
+        // `model.thinkingLevelMap?.[档位] ?? 档位`，而应用管理的模型**不写**
+        // thinkingLevelMap ⇒ pi 发出去的就是档位名本身。按「服务商词表」等距采样则会出现
+        // 真值行和估算行**互相矛盾**的情况（偏好 low 时，pi 答「实际收到：low」，估算却写「high」
         // —— 那是 DeepSeek 词表 low/high/max 按五档比例采出来的中档）。这行既然叫
         // 「预计服务商收到」，口径就必须是 pi 的线上值。
         if (format == ReasoningFormat.NONE) return LevelWire.Unsupported
@@ -296,14 +295,13 @@ object AiBackend {
     /**
      * null 安全取值：org.json 的 optString 对 JSON null 返回字面量 "null"
      * （JSONObject.NULL.toString()），推理模型流式分片常见 "content": null，
-     * 直接拼接会把 "null" 写进回复正文（2026-09-09 实测 bug）——必须判 isNull。
+     * 直接拼接会把 "null" 写进回复正文 ——必须判 isNull。
      */
     private fun JSONObject.strOrEmpty(key: String): String =
         if (isNull(key)) "" else optString(key)
 
     /**
-     * OpenAI 兼容协议的推理字段优先级（逐项对齐 pi `openai-completions.ts` 的
-     * OPENAI_COMPLETIONS_REASONING_FIELDS）：llama.cpp 走 reasoning_content、多数
+     * OpenAI 兼容协议的推理字段优先级：llama.cpp 走 reasoning_content、多数
      * 国内服务商走 reasoning_content（DeepSeek）/ reasoning（GLM 等）、少数走
      * reasoning_text。**每个分片只取第一个非空字段**——有的端点同时回两个同值字段
      * （chutes.ai），不按优先级取会把思考文本拼两遍。
@@ -312,7 +310,7 @@ object AiBackend {
 
     // ───────────────────────── 基础工具 ─────────────────────────
 
-    /** 服务商配置里的首个模型名（思考参数写法推断 / 历史代码共用） */
+    /** 服务商配置里的首个模型名（思考参数写法推断） */
     private fun modelNameOf(cfg: ProviderConfig): String = cfg.models.firstOrNull().orEmpty()
 
     /** HTTP 错误体 → 用户可读消息（OpenAI/Anthropic error 结构均可解析） */

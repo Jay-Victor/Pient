@@ -37,7 +37,7 @@ import com.pient.app.ui.theme.PientPanel
 import java.util.Locale
 
 /**
- * 上下文用量卡（2026-08-28 重设计，参照 Hermes 桌面端 context-usage-panel.tsx）：
+ * 上下文用量卡：
  * - 位置与模型选择器浮层一致：贴屏幕右侧（右距屏 6dp）、底部锚定到输入栏上缘，
  *   同宽 268.8dp、同 16dp 圆角 PientPanel，点外关闭（无 scrim）。
  * - 内容自上而下：
@@ -45,9 +45,8 @@ import java.util.Locale
  *   ② 「已用 X%」；
  *   ③ 堆叠进度条（6dp 高、全圆角，轨道 outlineVariant，各分类色段按 token 占比）；
  *   ④ 分类明细（每行：8dp 色块（2dp 圆角）＋ 分类名（弱化）＋ token 数（等宽））。
- * - 已移除「自动压缩」入口（用户决策 2026-08-28）。
- * - 分类色 = Hermes --context-usage-* 语义映射 GitHub 色系（见 theme/Color.kt 注释）。
- * 数据源：get_state / 后端 context breakdown（UI 原型阶段为 ChatState mock）。
+ * - 分类色 = 各分类语义映射 GitHub 色系（见 theme/Color.kt 注释）。
+ * 数据源：get_state / 后端 context breakdown。
  */
 @Composable
 fun ContextUsageCard(
@@ -59,7 +58,7 @@ fun ContextUsageCard(
 ) {
     val used = chatState.windowTokens
     val max = chatState.maxWindowTokens
-    // 用量是否已知（pi 压缩后还没有新回复时给不出 tokens；2026-09-16）
+    // 用量是否已知（pi 压缩后还没有新回复时给不出 tokens）
     val known = chatState.contextUsageKnown
     val windowLabel = if (max > 0) formatCompact(max) else "—"
 
@@ -74,7 +73,7 @@ fun ContextUsageCard(
                 .fillMaxWidth()
                 .padding(12.dp),
         ) {
-            // ① 标题行（Hermes copy.title + copy.tokenSummary）
+            // ① 标题行（标题 + token 摘要）
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth(),
@@ -93,7 +92,7 @@ fun ContextUsageCard(
                 )
             }
 
-            // ② 已用百分比（Hermes copy.percentFull；数值 = pi 的 contextUsage.percent）
+            // ② 已用百分比（数值 = pi 的 contextUsage.percent）
             Text(
                 if (known) L.chat.contextUsedPercent(chatState.contextPercent.toInt()) else L.chat.contextUsedUnknown,
                 style = MaterialTheme.typography.bodySmall,
@@ -101,7 +100,7 @@ fun ContextUsageCard(
                 modifier = Modifier.padding(top = 6.dp),
             )
 
-            // ③ 单段进度条（2026-09-16 用户拍板：**分类明细整块删掉、进度条保留**）：
+            // ③ 单段进度条（只有「上下文占用」一段）：
             // 宽度 = pi 的 contextUsage.percent；未知时留空条（不编数字）
             val usedFrac = (chatState.contextPercent / 100f).coerceIn(0f, 1f)
             val barColor = usageColor()
@@ -120,7 +119,7 @@ fun ContextUsageCard(
                     },
             )
 
-            // ⑤ 压缩（**pi 原生**，2026-09-15 收口）：触发线 = `估算 tokens > 上下文窗口 − reserveTokens`
+            // ⑤ 压缩（**pi 原生**）：触发线 = `估算 tokens > 上下文窗口 − reserveTokens`
             // （pi 在 settings.json 的 `compaction` 里自己判，App 不参与）；这里只做等价换算展示。
             // 右侧「压缩上下文」= 移动端对桌面端 `/compact` 的等价入口（走 pi RPC `compact`），随时可按。
             val cfg = chatState.selectedModel?.provider?.let { AiConfigStore.configs[it] }
@@ -165,14 +164,14 @@ fun ContextUsageCard(
 }
 
 /**
- * 进度条颜色（2026-09-16）：只剩单段「上下文占用」——用原「对话」分类色，
- * 即 Hermes `--context-usage-conversation` 的语义映射（青）。
+ * 进度条颜色：单段「上下文占用」用「对话」分类色，
+ * 「对话」分类的语义映射（青）。
  */
 @Composable
 private fun usageColor(): Color =
     if (LocalPientIsDark.current) DarkCategoryConversation else LightCategoryConversation
 
-/** Hermes compactNumber 同规则：999→"999"，1000→"1k"，1230→"1.2k"，10000→"10k"，1.5M */
+/** 缩写规则：999→"999"，1000→"1k"，1230→"1.2k"，10000→"10k"，1.5M */
 private fun formatCompact(value: Int): String {
     if (value <= 0) return "0"
     fun scaled(v: Float, suffix: String): String =

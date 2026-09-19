@@ -72,21 +72,21 @@ import kotlinx.coroutines.withContext
  * 主题：外观模式三选（深色/亮色/跟随系统）即时生效；ChatState 提升到
  * 导航外层，跨页面保活（侧栏切页返回后聊天状态不丢）。
  *
- * ★ 主题一致性三保障（2026-08-27 修复"亮色下页面仍黑 / 黑字不可见"）：
+ * ★ 主题一致性三保障（"亮色下页面仍黑 / 黑字不可见"）：
  * 1. 页面底色统一在本组件根部绘制 colorScheme.background —— 所有路由页面
- *    都不再依赖窗口底色（android:windowBackground 仅作首帧兜底）；
+ *    都不依赖窗口底色（android:windowBackground 仅作首帧兜底）；
  * 2. 窗口底色随主题动态同步，亮色模式下启动/转场不露出暗色底；
  * 3. 明暗状态只来自 Compose 状态（themeMode + 系统 isSystemInDarkTheme），
- *    不使用 SideEffect + 全局变量同步（会滞后一帧，历史教训见 Theme.kt）。
+ *    不使用 SideEffect + 全局变量同步（会滞后一帧）。
  */
 @Composable
 fun PientApp() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("pient_prefs", Context.MODE_PRIVATE) }
     var onboarded by remember { mutableStateOf(prefs.getBoolean("onboarded", false)) }
-    // ★ 启动加载（2026-09-12）：原实现在**组合期同步读盘**（state.json 实测 505KB + 价格表资产
-    //   + AI 配置 + 用量台账），主线程被占住 → 系统启动画面一直挂到第一帧，实测停留 3.6s。
-    //   现改为：① ChatState 与「已加载」标记提到进程级（Activity 重建不重走开屏、也不重读盘）；
+    // ★ 启动加载：读盘不能放在组合期同步做——state.json（505KB 量级）+ 价格表资产
+    //   + AI 配置 + 用量台账会把主线程占住 → 系统启动画面一直挂到第一帧。
+    //   做法：① ChatState 与「已加载」标记提到进程级（Activity 重建不重走开屏、也不重读盘）；
     //   ② 读盘整体下放 IO 线程；③ 加载期间由 StartupOverlay 覆盖（含数据未就绪时
     //   「创建项目 / 配置 AI」引导的误闪）。
     val chatState = remember {
@@ -94,23 +94,23 @@ fun PientApp() {
     }
     var ready by remember { mutableStateOf(PientRuntime.dataLoaded) }
     LaunchedEffect(Unit) {
-        // 读盘闸门（2026-09-15）：Activity 重建 / 双重组合会让这段 LaunchedEffect 跑两次，
-        // 而旧写法只在读盘**完成后**才置 dataLoaded —— 第二次进来又读一遍，同一份数据落两遍
-        // （实测 state.json 的 entries 变成 64 = 32×2）。现在：谁认领谁读盘，其余调用者等同一份
-        // 结果（顺带避免"读盘未完成就用空状态写盘"的老事故）。
+        // 读盘闸门：Activity 重建 / 双重组合会让这段 LaunchedEffect 跑两次，
+        // 若只在读盘**完成后**才置 dataLoaded —— 第二次进来又读一遍，同一份数据落两遍
+        // （state.json 的 entries 会翻倍）。所以：谁认领谁读盘，其余调用者等同一份
+        // 结果（顺带避免"读盘未完成就用空状态写盘"的事故）。
         if (PientRuntime.claimLoad()) {
             val startedAt = SystemClock.uptimeMillis()
             withContext(Dispatchers.IO) {
-                // 内置模型价格表（assets/model_pricing.tsv，Operit 式内置定价）
+                // 内置模型价格表（assets/model_pricing.tsv）
                 ModelPricingDefaults.load(context)
-                // 会话记录与 AI 配置恢复（2026-09-09：项目/会话/消息记录跨重启保留）
+                // 会话记录与 AI 配置恢复（项目/会话/消息记录跨重启保留）
                 AiConfigStore.load(context)
                 ChatStore.load(context, chatState)
-                // 用量台账恢复（2026-09-11：模型用量信息页的真实数据源）
+                // 用量台账恢复（模型用量信息页的真实数据源）
                 UsageStore.load(context)
             }
             PientRuntime.finishLoad()
-            // 最短展示：真机读盘可能百毫秒内完成，过短会像「闪一下」。
+            // 最短展示：读盘可能百毫秒内完成，过短会像「闪一下」。
             // 行为设置里关掉「开屏动画」时不做这层等待——不显示开屏页，读盘完就直接进主界面。
             if (SettingsStore.startupAnimation) {
                 val elapsed = SystemClock.uptimeMillis() - startedAt
@@ -130,7 +130,7 @@ fun PientApp() {
         chatState.syncWorkspaceToCurrentProject()
     }
 
-    // 通知点开回终端页（2026-09-16）：前台服务通知把面板请求留在 PientRuntime.pendingPanel
+    // 通知点开回终端页：前台服务通知把面板请求留在 PientRuntime.pendingPanel
     // （通知到达时 ChatState 还没建），这里就绪后消费一次。**key 里必须带 pendingPanel 本身**：
     // 应用已在前台时只有它会变（见 PientRuntime.pendingPanel 注释）。
     LaunchedEffect(chatState, ready, PientRuntime.pendingPanel) {
@@ -241,8 +241,8 @@ fun PientApp() {
         }.collect { SettingsStore.saveFont(context) }
     }
 
-    // AI 配置持久化（2026-09-09：服务商/密钥/模型/参数 + 连接测试标记；2026-09-11 加模型定价与汇率），重启后保持。
-    // ★ 必须 gate 在 ready 之后（2026-09-12 实测事故）：AiConfigStore 现在是异步读盘，
+    // AI 配置持久化（服务商/密钥/模型/参数 + 连接测试标记；模型定价与汇率），重启后保持。
+    // ★ 必须 gate 在 ready 之后：AiConfigStore 是异步读盘，
     //   snapshotFlow 一旦先启动就会把「尚未读盘的空配置」当成初值写盘 → 把用户配置清空。
     LaunchedEffect(ready) {
         if (!ready) return@LaunchedEffect
@@ -256,7 +256,7 @@ fun PientApp() {
         }.collect { AiConfigStore.save(context) }
     }
 
-    // 项目会话记录持久化（2026-09-09：项目/会话/消息记录全量落盘），重启后保持。
+    // 项目会话记录持久化（项目/会话/消息记录全量落盘），重启后保持。
     // snapshotFlow 内遍历全部会话与消息：任意增删改都会触发；写盘放 IO 线程防卡 UI。
     // ★ 同样 gate 在 ready 之后：否则空 ChatState 会被先写盘（同上事故）。
     LaunchedEffect(ready) {
@@ -276,7 +276,7 @@ fun PientApp() {
         }
     }
 
-    // 用量台账持久化（2026-09-11：每次回复记一笔，防抖落盘 usage.json）。★ 同样 gate 在 ready 之后
+    // 用量台账持久化（每次回复记一笔，防抖落盘 usage.json）。★ 同样 gate 在 ready 之后
     LaunchedEffect(ready) {
         if (!ready) return@LaunchedEffect
         snapshotFlow { UsageStore.records.toList() }.debounce(800).collect {
@@ -302,9 +302,9 @@ fun PientApp() {
         // 卡片/消息气泡等容器在底色之上用各自的 surface 令牌分层。
         // 自定义背景（背景设置标签）作为最底层覆盖其上（未设置时不绘制，底色保持）。
         //
-        // ★ 玻璃材质基础设施（2026-09-12，输入框设置「输入框材质」）：
+        // ★ 玻璃材质基础设施（输入框设置「输入框材质」）：
         // 底色 + 背景层放进「背景捕获层」，应用内容与其同级 —— 输入栏的磨砂/液态玻璃
-        // 从中采样背景纹理；若把内容放进捕获层会造成渲染树自引用（Mdcito 同款红线）。
+        // 从中采样背景纹理；若把内容放进捕获层会造成渲染树自引用（红线）。
         PientGlassProvisioning(
             backgroundContent = {
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
@@ -315,7 +315,7 @@ fun PientApp() {
                 NavHost(
                     navController = nav,
                     startDestination = if (onboarded) "chat" else "onboarding",
-                    // 页面级路由 = 水平推入（2026-08-27）：新页从右滑入、旧页向左让位；
+                    // 页面级路由 = 水平推入：新页从右滑入、旧页向左让位；
                     // 返回时旧页从左滑回、当前页向右退出。API 34+ 自动支持预测性返回手势。
                     enterTransition = { slideInHorizontally(tween(300)) { it } },
                     exitTransition = { slideOutHorizontally(tween(300)) { -it } },
@@ -367,7 +367,7 @@ fun PientApp() {
                     composable("system_permissions") {
                         SystemPermissionScreen(nav = nav)
                     }
-                    // 应用日志管理（2026-09-17）：导出/查看/清空（见 ui/settings/LogManagementScreen.kt）
+                    // 应用日志管理：导出/查看/清空（见 ui/settings/LogManagementScreen.kt）
                     composable("app_logs") {
                         LogManagementScreen(nav = nav)
                     }
@@ -398,23 +398,23 @@ internal object PientRuntime {
     var dataLoaded = false
 
     /**
-     * 待消费的「打开哪个面板」请求（2026-09-16）：前台服务通知点开时由 MainActivity 写入，
+     * 待消费的「打开哪个面板」请求：前台服务通知点开时由 MainActivity 写入，
      * PientApp 在 ChatState 就绪后消费一次（通知到达时 ChatState 可能还没建，所以先存着）。
      * 值 = [com.pient.app.runtime.PiKeepAlive.PANEL_TERMINAL] 等。
      *
      * **必须是 Compose 可观察状态**：应用已经在前台时点通知只会触发 onNewIntent（chatState/ready
-     * 都没变），普通变量不会让消费用的 LaunchedEffect 重跑 —— 面板就切不过去（实测踩到）。
+     * 都没变），普通变量不会让消费用的 LaunchedEffect 重跑 —— 面板就切不过去。
      */
     var pendingPanel by androidx.compose.runtime.mutableStateOf<String?>(null)
 
     /**
-     * 应用是否在前台可见（2026-09-16）：MainActivity 的 onStart/onStop 维护。
+     * 应用是否在前台可见：MainActivity 的 onStart/onStop 维护。
      * 用途 =「保活被系统停掉」这类说明挑渠道：前台用 Toast（用户正看着屏幕），后台发通知。
      */
     @Volatile
     var appVisible = false
 
-    /** 读盘闸门（2026-09-15）：并发/重复组合只允许一次读盘，其余 await 同一份结果 */
+    /** 读盘闸门：并发/重复组合只允许一次读盘，其余 await 同一份结果 */
     private val lock = Any()
     private var gate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
 

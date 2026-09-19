@@ -86,7 +86,7 @@ import kotlin.math.floor
 import kotlin.math.log10
 import kotlin.math.pow
 
-/** 时间维度（deepseek 开放平台用量页同款维度） */
+/** 时间维度 */
 private enum class UsageRange {
     ALL, TODAY, YESTERDAY, LAST_7, LAST_30, WEEK, MONTH, CUSTOM;
 
@@ -122,10 +122,10 @@ private fun modelColor(name: String, order: List<String>): Color {
 private data class StackSegment(val label: String, val color: Color, val value: Double)
 
 /**
- * 模型用量信息（2026-09-01 制作，结构参照 deepseek 开放平台用量页；三版）：
- * 时间维度选择器 + 模型选择器（2026-09-01 新增，同款式卡片 + v 箭头列表）→ 三卡 →
+ * 模型用量信息：
+ * 时间维度选择器 + 模型选择器（同款式卡片 + v 箭头列表）→ 三卡 →
  * Token / 费用 两张堆叠柱状图卡（单模型时按输入/输出堆叠，全部模型按模型堆叠）。
- * 数据为**真实用量台账**（2026-09-11 起，UsageStore：每次回复记一笔；
+ * 数据为**真实用量台账**（UsageStore：每次回复记一笔；
  * 金额按「模型费用信息」配置的单价计算，未配单价的模型金额为 0）。
  */
 @Composable
@@ -138,11 +138,11 @@ fun UsageScreen(nav: NavController) {
     var showCustom by remember { mutableStateOf(false) }
     var customStart by remember { mutableStateOf<LocalDate?>(null) }
     var customEnd by remember { mutableStateOf<LocalDate?>(null) }
-    // 模型定价弹窗（Operit 式：用量页里点模型 → 编辑定价和计费方式）+ 汇率输入态
+    // 模型定价弹窗（用量页里点模型 → 编辑定价和计费方式）+ 汇率输入态
     var pricingModel by remember { mutableStateOf<String?>(null) }
     var rateInput by remember { mutableStateOf(AiConfigStore.usdToCnyRate.toString()) }
 
-    // ── 真实数据源（2026-09-11 起替换 UsageMock 演示数据）──
+    // ── 真实数据源 ──
     // 用量台账：每次回复记一笔（UsageStore，落盘 usage.json）；
     // 费用不落盘、按「模型费用信息」里配置的单价实时计算 → 改单价金额立即重算。
     val recordCount = UsageStore.records.size
@@ -168,8 +168,8 @@ fun UsageScreen(nav: NavController) {
         }
     }
     // X 轴 = 所选时间范围的**每一天**（无记录的日期补零成空柱槽）。
-    // 2026-09-11 用户报「选了非今天的时间维度，图里只有一天」：此前直接用台账里有记录的
-    // 日期当轴（UsageStore.daily() 只含出现过的日期），于是近30天/近7天也只剩一两根柱。
+    // 直接用台账里有记录的日期当轴（UsageStore.daily() 只含出现过的日期）会让
+    // 近30天/近7天也只剩一两根柱。
     val days = remember(daily, start, end) {
         if (start != null && end != null && !start.isAfter(end)) {
             val out = ArrayList<Pair<LocalDate, Map<String, ModelDayUsage>>>()
@@ -205,7 +205,7 @@ fun UsageScreen(nav: NavController) {
         val m = model
         if (m == null) null else daily.values.asSequence().mapNotNull { it[m] }.firstOrNull()?.billingMode
     }
-    // 是否有 USD 计价模型的费用（有则显示汇率折算提示；Operit settings_rate_applied_hint 同款）
+    // 是否有 USD 计价模型的费用（有则显示汇率折算提示）
     val hasUsdCost = remember(days) {
         days.any { (_, perModel) ->
             perModel.any { (_, u) -> u.currency == PricingCurrency.USD && u.cost > 0.0 }
@@ -243,7 +243,7 @@ fun UsageScreen(nav: NavController) {
                 val u = perModel[m] ?: return@map emptyList()
                 val c = modelColor(m, modelNames)
                 if (selectedBillingMode == BillingMode.COUNT) {
-                    // 按次计费：无输入/输出拆分，单段显示（Operit 按次计费只算每次请求价）
+                    // 按次计费：无输入/输出拆分，单段显示（按次计费只算每次请求价）
                     listOf(StackSegment(L.models.usageChartPerRequest, c, u.cost))
                 } else {
                     listOf(
@@ -281,7 +281,7 @@ fun UsageScreen(nav: NavController) {
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            // 顶栏（2026-09-06：导出已移除；时区三点已移除）
+            // 顶栏
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -309,7 +309,7 @@ fun UsageScreen(nav: NavController) {
                     .verticalScroll(rememberScrollState())
                     .padding(bottom = 16.dp),
             ) {
-                // ── 时间维度 + 模型选择器（2026-09-01 合并为同一行） ──
+                // ── 时间维度 + 模型选择器 ──
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
@@ -350,7 +350,7 @@ fun UsageScreen(nav: NavController) {
                         expanded = modelMenu,
                         onArrowClick = { modelMenu = true },
                         onDismiss = { modelMenu = false },
-                        // 模型卡占剩余宽度 + fillMax 通栏：长模型名收缩省略（2026-09-03）
+                        // 模型卡占剩余宽度 + fillMax 通栏：长模型名收缩省略
                         modifier = Modifier.weight(1f),
                         fillMax = true,
                     ) {
@@ -387,7 +387,7 @@ fun UsageScreen(nav: NavController) {
                     StatCard(L.models.usageApiRequests, formatCount(totals.second), Modifier.weight(1f))
                     StatCard("Tokens", formatCompact(totals.first), Modifier.weight(1f))
                 }
-                // 汇率折算提示（有 USD 计价模型的费用时显示；Operit settings_rate_applied_hint 同款）
+                // 汇率折算提示（有 USD 计价模型的费用时显示）
                 if (hasUsdCost) {
                     Text(
                         L.models.usageTotalCostNote("%.4f".format(AiConfigStore.usdToCnyRate)),
@@ -425,7 +425,7 @@ fun UsageScreen(nav: NavController) {
                     onEditPricing = { name -> pricingModel = name },
                 )
                 Spacer(Modifier.height(12.dp))
-                // ── 汇率设置卡（Operit 汇率设置同款：美元计费模型按此汇率折算为人民币总费用） ──
+                // ── 汇率设置卡（美元计费模型按此汇率折算为人民币总费用） ──
                 ExchangeRateCard(
                     rateInput = rateInput,
                     onRateInputChange = { rateInput = it },
@@ -463,7 +463,7 @@ fun UsageScreen(nav: NavController) {
             )
         }
 
-        // ── 模型定价弹窗（页面级浮层；Operit 式：从用量页模型行进入） ──
+        // ── 模型定价弹窗（页面级浮层；从用量页模型行进入） ──
         pricingModel?.let { name ->
             ModelPricingDialog(model = name, onDismiss = { pricingModel = null })
         }
@@ -513,7 +513,7 @@ private fun SelectorCard(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onBackground,
                 // fillMax 时弹性占满剩余：值区有界，超长值（模型名）省略号截断
-                // （2026-09-03；fill=false 在窄分配下会退化到 0 宽）
+                // （fill=false 在窄分配下会退化到 0 宽）
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = if (fillMax) Modifier.weight(1f).padding(end = 6.dp)
@@ -561,7 +561,7 @@ private fun StatCard(label: String, value: String, modifier: Modifier = Modifier
 }
 
 /** 用量排行卡（模型消耗榜）：标题右侧 Token/费用 分段控制器；名次徽标 + 模型色点 + 模型名 + 值 + 模型色进度条。
- *  每行可点 = 打开该模型的定价弹窗（Operit「点击编辑定价和计费方式」同款），行下显示计费摘要。 */
+ *  每行可点 = 打开该模型的定价弹窗，行下显示计费摘要。 */
 @Composable
 private fun UsageRankingCard(
     rankData: List<Triple<String, Long, Double>>,
@@ -655,7 +655,7 @@ private fun UsageRankingCard(
                     color = MaterialTheme.colorScheme.onBackground,
                 )
             }
-            // 计费摘要 + 编辑入口提示（Operit 模型卡：计费方式 chip +「点击编辑定价和计费方式」）
+            // 计费摘要 + 编辑入口提示（计费方式 chip +「点击编辑定价和计费方式」）
             Text(
                 billingSummary(pricing) + L.models.usageEditPricingHint,
                 style = MaterialTheme.typography.labelSmall,
@@ -734,8 +734,8 @@ private fun UsageChartCard(
             StackedBarChart(days, stacks, byCost)
         }
         Spacer(Modifier.height(8.dp))
-        // 图例（模型名可能很长：FlowRow 换行 + 单项单行省略。
-        // 2026-09-11 用户报「图右下角有竖直的字」= 图例第二个长模型名被挤成一列竖排字）
+        // 图例（模型名可能很长：FlowRow 换行 + 单项单行省略，
+        // 否则长模型名会被挤成一列竖排字）
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -765,7 +765,7 @@ private fun UsageChartCard(
 }
 
 /**
- * 堆叠柱状图（2026-09-01 二版：支持左右滑动——天数多时按最小柱槽宽度展开，
+ * 堆叠柱状图（支持左右滑动——天数多时按最小柱槽宽度展开，
  * 图表区横向滚动，Y 轴及刻度固定在左侧不随之滑动；初始定位到最右=最新数据）：
  * 柱总高 = 该时间点总体用量；柱内色块 = 各段贡献（自下而上堆叠，顶层色块顶部圆角）。
  */
@@ -831,7 +831,7 @@ private fun StackedBarChart(
                         .pointerInput(stacks) {
                             detectTapGestures { offset ->
                                 // 命中判定 = 柱体矩形（|x-柱心|≤柱宽/2 且 y 在柱顶..柱底）；
-                                // 点柱间空隙/柱上方空白/X 轴标签区 = 关闭浮层（2026-09-01 修复）
+                                // 点柱间空隙/柱上方空白/X 轴标签区 = 关闭浮层
                                 val slotPx = slot.toPx()
                                 val barHalf = slotPx * 0.62f / 2f
                                 val idx = (offset.x / slotPx).toInt().coerceIn(0, n - 1)
@@ -862,13 +862,13 @@ private fun StackedBarChart(
                         stacks.forEachIndexed { i, col ->
                             val cx = slotPx * i + slotPx / 2f
                             // 自底向上连续推导边界（prevBottom 单一来源），避免各段 top/h
-                            // 独立浮点计算造成亚像素舍入缝隙（2026-09-01 用户报色块间细缝）
+                            // 独立浮点计算造成亚像素舍入缝隙
                             var prevBottom = chartH
                             col.forEachIndexed { si, seg ->
                                 val h = (seg.value / maxVal * chartH).toFloat()
                                 val top = prevBottom - h
                                 // 相邻段共享同一边界值 + 0.5px 重叠，覆盖抗锯齿边缘透底；
-                                // 全部直角（2026-09-02 用户定：不要圆角，色块直角对齐）
+                                // 全部直角（不要圆角，色块直角对齐）
                                 val drawH = (prevBottom - top) + 0.5f
                                 drawRect(
                                     color = seg.color,
@@ -881,7 +881,7 @@ private fun StackedBarChart(
                     }
                     // X 轴日期标签（按 ~80dp 一根的密度标注，滚动时标签随内容移动）
                     // 首尾标签横向 clamp 在画布内：否则居中绘制会让内容两端各有一半露在
-                    // 画布外被裁掉（2026-09-11 用户报「滑到左右两端有遮挡、没显示全」）
+                    // 画布外被裁掉
                     val step = maxOf(1, ((80.dp / slot)).toInt())
                     val maxX = (size.width - 1f).coerceAtLeast(0f)
                     days.forEachIndexed { i, d ->
@@ -1132,9 +1132,9 @@ private fun toast(context: android.content.Context, msg: String) {
     android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
 }
 
-// ───────────────────────────── 模型定价（2026-09-11 按 Operit 的处理方式） ─────────────────────────────
+// ───────────────────────────── 模型定价 ─────────────────────────────
 
-/** 计费摘要文案（排行行副标题；币种用模型原生符号——Operit 模型卡的计费方式 + 单价） */
+/** 计费摘要文案（排行行副标题；币种用模型原生符号——计费方式 + 单价） */
 private fun billingSummary(p: ModelPricing): String {
     val sym = p.currency.symbol
     return when (p.billingMode) {
@@ -1180,7 +1180,7 @@ private fun PriceField(label: String, value: String, onValueChange: (String) -> 
     }
 }
 
-/** 汇率设置卡（Operit ExchangeRateSettingsCard 同款：标题 + 副标题 + 汇率输入 + 保存） */
+/** 汇率设置卡（标题 + 副标题 + 汇率输入 + 保存） */
 @Composable
 private fun ExchangeRateCard(
     rateInput: String,
@@ -1235,10 +1235,9 @@ private fun ExchangeRateCard(
 }
 
 /**
- * 模型定价弹窗（Operit「编辑模型定价 - 模型名」同款结构）：
+ * 模型定价弹窗：
  * 「当前计价币种：CNY」提示 + 计费方式（PientSegmented：按Token计费 / 按次计费）
- * + 价格输入（一律按人民币填写；USD 计价模型保存时经汇率折回原生价存储，与 Operit
- * convertCnyToPricingCurrency 口径一致）+ 保存/取消。
+ * + 价格输入（一律按人民币填写；USD 计价模型保存时经汇率折回原生价存储）+ 保存/取消。
  */
 @Composable
 private fun ModelPricingDialog(model: String, onDismiss: () -> Unit) {

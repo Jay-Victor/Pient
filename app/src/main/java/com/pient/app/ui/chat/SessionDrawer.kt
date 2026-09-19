@@ -119,19 +119,18 @@ import kotlinx.coroutines.withContext
  * ★ 这份留白也算「侧栏右缘」的一部分：面板右缘 = 展开位移量 296dp + 本值 = 308dp。
  *   凡是按「侧栏宽」算的数值——**推动展开的主内容位移、抽屉自身滑入起始位、平板压缩的
  *   宽度/位移、点外关闭的 x 阈值**——都必须用 `296dp + SidebarFloatingInset`，
- *   只算 296dp 会让侧栏右缘（含右描边）压在聊天页上 12dp
- *   （2026-09-12 用户报「侧栏右侧部分遮挡聊天页」）。贴边样式本值不参与（= 0）。
+ *   只算 296dp 会让侧栏右缘（含右描边）压在聊天页上 12dp。贴边样式本值不参与（= 0）。
  *   本常量与 [SessionDrawer] 里的 `padding(start=…)` 是同一份实现，改一处即可。
  */
 internal val SidebarFloatingInset = 12.dp
 
 /**
- * 会话侧栏（P2，设计计划 3.2）：
+ * 会话侧栏：
  * 品牌 + 搜索 / 批量管理 / 新建会话 / 项目选择器（切换 + 新建；项目行三点菜单重命名/删除）/
  * 会话列表（按项目过滤、时间分组；关键字搜索；行尾三点菜单）
  * 底部技能·插件·设置。宽度 296dp。
  *
- * 外观由「主题与外观 → 侧边栏设置」决定（2026-09-12）：
+ * 外观由「主题与外观 → 侧边栏设置」决定：
  * - 侧边栏样式：贴边（默认，贴屏幕左缘、仅右侧两角 16dp 圆角）/ 悬浮（四周留白 + 四角全圆角 28dp）；
  * - 侧边栏材质：简约（纯色面板，可调透明度）/ 磨砂玻璃 / 液态玻璃（见 [PientGlassSurface]）。
  *
@@ -155,7 +154,7 @@ fun SessionDrawer(
     var projectRenameFor by remember { mutableStateOf<String?>(null) }
     var projectDeleteConfirmFor by remember { mutableStateOf<String?>(null) }
     var projectUnbindConfirmFor by remember { mutableStateOf<String?>(null) }
-    // 重置工作区（2026-09-14 对齐 Operit createAndResetWorkspaceDirectory）
+    // 重置工作区
     var projectResetConfirmFor by remember { mutableStateOf<String?>(null) }
     var renameFor by remember { mutableStateOf<String?>(null) }
     var deleteConfirmFor by remember { mutableStateOf<String?>(null) }
@@ -170,7 +169,7 @@ fun SessionDrawer(
     val sessionGroups = groupSessionsByRecency(projectSessions.filter { !it.pinned })
     val allSelected = projectSessions.isNotEmpty() && selectedIds.containsAll(projectSessions.map { it.id })
     val searching = searchOpen && searchQuery.isNotBlank()
-    // 内容检索（2026-09-16）：标题之外再搜消息正文 —— 命中片段显示在会话行下方。
+    // 内容检索：标题之外再搜消息正文 —— 命中片段显示在会话行下方。
     // 放 LaunchedEffect（按 query 触发）+ IO 线程：搜索要遍历会话消息，不能在组合里做。
     var contentHits by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     LaunchedEffect(searchQuery, searching) {
@@ -186,8 +185,8 @@ fun SessionDrawer(
         }
     } else projectSessions
 
-    // ── 侧边栏外观（侧边栏设置，2026-09-12）──
-    // 贴边 = 贴屏幕左缘、仅右侧两角 16dp（Operit drawerShape 同款）；
+    // ── 侧边栏外观（侧边栏设置）──
+    // 贴边 = 贴屏幕左缘、仅右侧两角 16dp；
     // 悬浮 = 四周留白（左/上/下 12dp）+ 四角全圆角 28dp（与「悬浮输入框」同口径），
     //        像卡片一样浮在页面上（上下留白叠在状态栏/导航栏 inset 之外）。
     val sidebarFloating = SettingsStore.sidebarStyle == SidebarStyle.FLOATING
@@ -218,7 +217,7 @@ fun SessionDrawer(
                     },
                 )
                 .width(296.dp)
-                .statusBarsPadding() // Operit 同款：padding(top=inset) 在 fillMaxHeight 之前，容器全高
+                .statusBarsPadding() // padding(top=inset) 在 fillMaxHeight 之前，容器全高
                 .fillMaxHeight()
                 .clip(drawerShape), // 悬浮时四角全圆角：内容（列表/底栏）随形状裁切
         ) {
@@ -318,7 +317,7 @@ fun SessionDrawer(
                             searchOpen = false
                             searchQuery = ""
                             // 批量模式：列表一次性全部展开——折叠组与渐进未揭示的会话
-                            // 也要可见可选（否则全选/勾选前得先手动展开，用户要求 2026-09-10）
+                            // 也要可见可选（否则全选/勾选前得先手动展开）
                             chatState.expandAllTimeGroups(sessionGroups)
                         })
                         .padding(6.dp),
@@ -335,7 +334,7 @@ fun SessionDrawer(
                     modifier = Modifier
                         .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
                         .clickable(onClick = {
-                            // 未绑定项目时引导先创建项目（2026-09-08：无 mock 项目）
+                            // 未绑定项目时引导先创建项目（无 mock 项目）
                             if (chatState.currentProject == null) {
                                 Toast.makeText(context, L.session.createProjectFirst, Toast.LENGTH_SHORT).show()
                             } else {
@@ -520,7 +519,7 @@ fun SessionDrawer(
                             .height(1.dp)
                             .background(MaterialTheme.colorScheme.outlineVariant),
                     )
-                    // ── 新建项目（2026-09-14 用户拍板：移除「选择本地文件夹」整条链路，只留这一个入口）──
+                    // ── 新建项目 ──
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center,
@@ -720,7 +719,7 @@ fun SessionDrawer(
                     }
                 }
                 if (pinned.isNotEmpty()) {
-                    // 置顶分组头：与时间分组头同款（文字 + 折叠箭头 + 横线，2026-09-09 用户要求
+                    // 置顶分组头：与时间分组头同款（文字 + 折叠箭头 + 横线，
                     // 统一视觉；折叠键 = "pinned" 进 collapsedTimeGroups，与其他日历桶同机制）
                     item(key = "g-pinned") {
                         TimeGroupHeader(
@@ -750,7 +749,7 @@ fun SessionDrawer(
                         }
                     }
                 }
-                // ── 渐进揭示（2026-09-09 用户要求）──
+                // ── 渐进揭示 ──
                 // 默认仅显示最近分组（展开）+ 次新分组（折叠，内容空）；折叠组下方右侧
                 // 横向三点按键，每点揭示 5 个会话；组完全揭示后下一更老分组解锁接替；
                 // 全部组揭示完三点消失。组头点击仍可手动全展开/折叠（展开 = 全揭示）。
@@ -864,10 +863,10 @@ fun SessionDrawer(
         }
     }
 
-    // 项目详细信息弹窗（2026-09-02 新增：位置 / 大小 / 修改时间；单「确定」按钮）
+    // 项目详细信息弹窗（位置 / 大小 / 修改时间；单「确定」按钮）
     projectDetailFor?.let { name ->
         val project = chatState.projects.firstOrNull { it.name == name } ?: return@let
-        // 统计放 IO 线程（2026-09-16 修；与项目管理页同一口径）
+        // 统计放 IO 线程（与项目管理页同一口径）
         var info by remember(project.path, project.uri) { mutableStateOf<ProjectInfo?>(null) }
         LaunchedEffect(project.path, project.uri) { info = computeProjectInfo(context, project) }
         Box(Modifier.fillMaxSize()) {
@@ -875,7 +874,7 @@ fun SessionDrawer(
                 title = L.common.details,
                 onDismiss = { projectDetailFor = null },
                 onConfirm = { projectDetailFor = null },
-                showClose = false,   // 2026-09-02 用户：详细信息卡片右上角 × 多余（点外/确定可关）
+                showClose = false,   // 详细信息卡片不带右上角 ×（点外/确定可关）
                 showCancel = false,
             ) {
                 Column(
@@ -891,7 +890,7 @@ fun SessionDrawer(
     }
 
 
-    // 重置工作区确认（2026-09-14：清空项目根目录内容、保留根目录本身；破坏性 → 红字确认）
+    // 重置工作区确认（清空项目根目录内容、保留根目录本身；破坏性 → 红字确认）
     projectResetConfirmFor?.let { rn ->
         val rp = chatState.projects.firstOrNull { it.name == rn }
         if (rp != null) {
@@ -921,7 +920,7 @@ fun SessionDrawer(
         }
     }
 
-    // 新建项目弹窗（2026-09-14：加项目类型模板，对齐 Operit 的「在应用内创建新工作区」）
+    // 新建项目弹窗（项目类型模板）
     if (newProjectDialogOpen) {
         var name by remember { mutableStateOf("") }
         var type by remember { mutableStateOf(ProjectType.BLANK) }
@@ -1029,7 +1028,7 @@ fun SessionDrawer(
                 confirmEnabled = newName.isNotBlank() &&
                     (newName.trim() == name || chatState.projects.none { it.name == newName.trim() }),
                 onConfirm = {
-                    // 失败（目录被占用 / 同名目录）如实提示，不再静默「只改记录」（2026-09-16）
+                    // 失败（目录被占用 / 同名目录）如实提示
                     chatState.renameProject(name, newName)?.let { err ->
                         android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_SHORT).show()
                     }
@@ -1053,7 +1052,7 @@ fun SessionDrawer(
         }
     }
 
-    // 项目删除确认弹窗（2026-09-03 语义更新：删除项目文件夹及其中所有文件 + 会话记录）
+    // 项目删除确认弹窗（删除项目文件夹及其中所有文件 + 会话记录）
     projectDeleteConfirmFor?.let { name ->
         val project = chatState.projects.firstOrNull { it.name == name }
         Box(Modifier.fillMaxSize()) {
@@ -1084,7 +1083,7 @@ fun SessionDrawer(
         }
     }
 
-    // 项目解绑确认弹窗（2026-09-03 新增：移出列表 + 删除会话记录，保留项目文件夹及文件）
+    // 项目解绑确认弹窗（移出列表 + 删除会话记录，保留项目文件夹及文件）
     projectUnbindConfirmFor?.let { name ->
         Box(Modifier.fillMaxSize()) {
             PientDialog(
@@ -1146,7 +1145,7 @@ fun SessionDrawer(
                     selectedIds.toList().forEach { chatState.deleteSession(it) }
                     selectedIds.clear()
                     batchDeleteConfirm = false
-                    // 2026-09-09：删除最后一个会话后 ChatState 自动新建，批量模式一律退出
+                    // 删除最后一个会话后 ChatState 自动新建，批量模式一律退出
                     batchMode = false
                 },
             ) {
@@ -1195,8 +1194,8 @@ fun SessionDrawer(
 }
 
 /**
- * 时间/置顶分组头：分组文字 + 折叠箭头 + 右侧横线（2026-08-30 样式）。
- * 2026-09-09 加折叠（Hermes SidebarDateDivider 同款）：整行可点切换折叠，
+ * 时间/置顶分组头：分组文字 + 折叠箭头 + 右侧横线。
+ * 整行可点切换折叠，
  * 箭头右=折叠 / 下=展开（chevron-right rotate-90 语义），折叠仅隐藏组内会话、
  * 组头保留；无标签组不渲染头（不可折叠）。置顶分组复用本组件（键 "pinned"）。
  */
@@ -1233,7 +1232,7 @@ private fun TimeGroupHeader(label: String, collapsed: Boolean, onToggle: () -> U
 }
 
 /**
- * 会话行：名称 + 最后聊天时间（参考 Hermes）+ 竖直三点（菜单：置顶/重命名/删除）。
+ * 会话行：名称 + 最后聊天时间 + 竖直三点（菜单：置顶/重命名/删除）。
  * 批量模式：前导圆形勾选 + 名称，点击行切换选择，三点菜单禁用。
  * 会话运行中（session.running）时行首显示旋转圆弧指示。
  */
@@ -1312,7 +1311,7 @@ private fun SessionRow(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        // 最后活动相对时间（Hermes 会话行口径：刚刚/N分/N时/N天，渲染时由 updatedAt 派生）
+        // 最后活动相对时间（刚刚/N分/N时/N天，渲染时由 updatedAt 派生）
         Text(
             relativeTimeLabel(session.updatedAt),
             style = MaterialTheme.typography.labelSmall,
@@ -1414,7 +1413,7 @@ private fun DrawerEntry(
 }
 
 // ─────────────────────────────────────────────────────────────
-// 项目详细信息（2026-09-02）：位置 / 大小 / 修改时间
-// 实现已移至公共组件 ui/components/Common.kt（ProjectInfo / computeProjectInfo / DetailRow，
-// 2026-09-03 项目管理页复用）；此处直接使用。
+// 项目详细信息：位置 / 大小 / 修改时间
+// 实现位于公共组件 ui/components/Common.kt（ProjectInfo / computeProjectInfo / DetailRow，
+// 项目管理页复用）；此处直接使用。
 // ─────────────────────────────────────────────────────────────

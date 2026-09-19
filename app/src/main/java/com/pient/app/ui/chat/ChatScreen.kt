@@ -109,7 +109,7 @@ import com.pient.app.PientRuntime
  * 之间切换承载；侧栏抽屉与文件树均为同窗口浮层（玻璃真模糊要求）。
  *
  * @param startupReady 首屏数据（项目/会话/AI 配置）是否已读盘完成。关掉「开屏动画」时开屏页
- *   不渲染，这个标志用来压住「数据未就绪 → 引导清单误闪」（原先由开屏页盖住）。
+ *   不渲染，这个标志用来压住「数据未就绪 → 引导清单误闪」。
  */
 @Composable
 fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean = true) {
@@ -122,8 +122,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
     var contextCardOpen by remember { mutableStateOf(false) }
     var systemPromptOpen by remember { mutableStateOf(false) }
     var urlDialogOpen by remember { mutableStateOf(false) }
-    // 消息定位弹窗与消息区滚动状态（2026-09-09 提升到 ChatScreen 根层：弹窗 scrim 需全屏
-    // 覆盖顶栏与系统状态栏；listState 提升后 ChatMessages 与定位弹窗共享同一滚动状态）
+    // 消息定位弹窗与消息区滚动状态（弹窗 scrim 需全屏
+    // 覆盖顶栏与系统状态栏；listState 放这里，ChatMessages 与定位弹窗共享同一滚动状态）
     var locatorOpen by remember { mutableStateOf(false) }
     val messagesListState = rememberLazyListState()
     // 消息列表的可视高度（dp）——「一屏」的计量单位：优先用实测视口高度，
@@ -131,8 +131,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
     //
     // ★ 必须走 derivedStateOf，不能在组合期直接读 layoutInfo：layoutInfo 是**粗粒度**状态，
     //   每次测量都可能换一个新对象，直接在组合期读它 → 整页（顶栏/抽屉/输入栏/消息区）
-    //   跟着反复重组，白白占用 UI 线程（2026-09-12 滚动卡顿排查实测：滑动时 ChatScreen
-    //   每秒重组 8~19 次，绝大多数由这个视口高度读取触发）。派生块把「读」收窄成
+    //   跟着反复重组，白白占用 UI 线程。派生块把「读」收窄成
     //   **视口高度真的变了才通知**。
     val listViewportDp by remember(density) {
         derivedStateOf {
@@ -140,23 +139,23 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
             with(density) { (if (px > 0) px else (screenHpx * 0.72f).toInt()).toDp().value }
         }
     }
-    // 长按消息 → fork 上下文菜单（2026-09-02 分支功能设计 §4）：目标消息下标 + 气泡根坐标 + 触点
+    // 长按消息 → fork 上下文菜单：目标消息下标 + 气泡根坐标 + 触点
     var forkMenuTarget by remember { mutableStateOf<MessageMenuTarget?>(null) }
-    // 复制消息卡（2026-09-11）：内容在打开时快照，避免下标失效；null = 未打开
+    // 复制消息卡：内容在打开时快照，避免下标失效；null = 未打开
     var copyCardText by remember { mutableStateOf<String?>(null) }
-    // 复制消息卡的 XML 分段（2026-09-17）：与 copyCardText 同一次打开时快照 —— 该回合 AI 侧全量
+    // 复制消息卡的 XML 分段：与 copyCardText 同一次打开时快照 —— 该回合 AI 侧全量
     var copyCardXml by remember { mutableStateOf("") }
-    // 待发送引用块（引用某条消息追问；2026-09-11）
+    // 待发送引用块（引用某条消息追问）
     var pendingQuote by remember { mutableStateOf<Quote?>(null) }
     var inputFocusTick by remember { mutableIntStateOf(0) }
-    // 输入框文本与 @ 引用状态（提升到 ChatScreen：引用卡为悬浮浮层）。
+    // 输入框文本与 @ 引用状态（放在 ChatScreen 层：引用卡为悬浮浮层）。
     // TextFieldValue 承载光标位置：@ 选择文件后光标需落在 "@路径 " 末尾，
     // 且退格一键删除整段引用（String 状态无法控制光标）。
     var inputText by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(""))
     }
 
-    // pi 就绪态（2026-09-15 拍板 B）：进页面即测一次（通道没起时顺带起一次）
+    // pi 就绪态：进页面即测一次（通道没起时顺带起一次）
     LaunchedEffect(Unit) { chatState.refreshPiReadiness() }
 
     // 被阻断的发送等一次性提示（用完即清）
@@ -165,7 +164,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
         Toast.makeText(context, note, Toast.LENGTH_SHORT).show()
         chatState.blockedNote = null
     }
-    // 被拦下的发送：把文本还给输入栏并聚焦（2026-09-16：pi 还在处理上一轮时不再硬发，
+    // 被拦下的发送：把文本还给输入栏并聚焦（pi 还在处理上一轮时不再硬发，
     // 见 ChatState.streamReply 开头的拦截 —— 草稿不能因为"没发出去"而丢）
     LaunchedEffect(chatState.draftRestore) {
         val t = chatState.draftRestore ?: return@LaunchedEffect
@@ -173,7 +172,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
         chatState.draftRestore = null
         inputFocusTick++
     }
-    // @ 引用查询（派生态，2026-09-12）：光标前最近一个「词首 @」到光标之间的文本即筛选串；
+    // @ 引用查询（派生态）：光标前最近一个「词首 @」到光标之间的文本即筛选串；
     // null = 不在引用输入中（引用已提交 "@路径 " 之后、词中 @、或压根没 @）。
     // 查询串随每次输入变化 → 引用卡候选列表实时筛选，不需要额外的开关状态。
     val mentionQuery = remember(inputText.text, inputText.selection) { findMentionQueryAt(inputText) }
@@ -187,7 +186,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
     }
     // ★ 润色 / 回退回填是唯一例外：它的查询串在下面那条 effect 里**已经**记成已关闭，
     //   这里判据只看 mentionQuery 是否为 null，不会把刚记下的关闭标记清掉。
-    // 润色结果 / 回退内容回填输入框（2026-09-16 输入栏润色；一次性信号，口径同 draftRestore）。
+    // 润色结果 / 回退内容回填输入框（输入栏润色；一次性信号，口径同 draftRestore）。
     // 光标落到末尾 —— 回填后是接着看/接着改的。
     LaunchedEffect(chatState.polishApply) {
         val t = chatState.polishApply ?: return@LaunchedEffect
@@ -211,7 +210,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
     // 由 FileTreePanel 用 mentionTextFor 生成），这里只做追加；引用卡不再弹出
     LaunchedEffect(chatState.mentionInsertRequest) {
         chatState.mentionInsertRequest?.let { mention ->
-            // 光标停在插入文本末尾（与候选卡点选同一口径）—— 此前默认落在文本开头，
+            // 光标停在插入文本末尾（与候选卡点选同一口径）—— 落在文本开头的话，
             // 长按插入后接着打字会跑到最前面
             val merged = inputText.text + mention
             inputText = TextFieldValue(merged, selection = TextRange(merged.length))
@@ -229,9 +228,9 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
     val mentionBottomOffset =
         if (dockTopY > 0f) with(density) { (screenHpx - dockTopY).toDp() + 8.dp } else 8.dp
 
-    // ── 输入栏命令词候选卡（2026-09-17 用户 spec）：`/` 技能卡 ──
+    // ── 输入栏命令词候选卡：`/` 技能卡 ──
     // 只在**整条消息以 `/` 开头**时弹：pi 只在消息以 `/skill:名字` / `/命令` 开头时才展开/执行
-    // （`core/agent-session.ts` 的 `_expandSkillCommand` 用 startsWith 判定；pi-web 斜杠菜单同口径），
+    // （pi 的 `_expandSkillCommand` 用 startsWith 判定），
     // 词中的 `/` 插进去发到 pi 那儿只是一段普通文本 —— 不给「看着能点、发出去不生效」的入口。
     val skillQuery = remember(inputText.text, inputText.selection) { findPickerQueryAt(inputText, '/') }
     // 点外/返回键关闭后，同一查询串不再自动弹出（继续输入改变查询串 = 重新出现；与 @ 引用卡同款）
@@ -251,16 +250,15 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
         }
     }
 
-    // 输入栏背后内容层（2026-09-12，修「玻璃输入框看着像遮罩、内容滑过不透」）：
-    // 输入栏改为覆盖在面板内容之上（Operit ClassicChatInputSection 同款 —— 其输入栏是
-    // align(BottomCenter) 浮层），面板内容单独录一层 backdrop / 标记 liquefiable 供玻璃采样，
+    // 输入栏背后内容层：输入栏是覆盖在面板内容之上的 align(BottomCenter) 浮层，
+    // 面板内容单独录一层 backdrop / 标记 liquefiable 供玻璃采样，
     // 从而「内容滑过输入栏时能从玻璃里透出模糊的内容」。输入栏与该层同级 → 不会渲染树自引用。
     val panelBackdrop = rememberLayerBackdrop()
     val waterGlassState = LocalWaterGlassState.current
     val chatGlassOn = SettingsStore.inputBarMaterial != PanelMaterial.DEFAULT
-    // 侧边栏玻璃（2026-09-12，侧边栏设置）：抽屉是面板内容层之上的浮层（zIndex 2 vs 1），
+    // 侧边栏玻璃：抽屉是面板内容层之上的浮层（zIndex 2 vs 1），
     // 采样的是同一路「面板内容」backdrop —— 该层不含抽屉自身，故不会出现「采样层里套着
-    // 玻璃节点」的自引用（Mdcito 记录的红线 / 渲染树递归）。
+    // 玻璃节点」的自引用（渲染树递归）。
     // 抽屉顶栏那一条带采样不到内容层时会落到主题背景层（combined backdrop 的另一路），
     // 观感与顶栏本身一致（都是浅色实面）。
     val sidebarGlassOn = SettingsStore.sidebarMaterial != PanelMaterial.DEFAULT
@@ -274,10 +272,10 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
         chatState.refreshFileTree(context)
     }
 
-    // ── 返回键优先级链（2026-09-11 修复：此前侧栏展开时单击返回直接退出应用）──
+    // ── 返回键优先级链 ──
     // 按渲染层级从高到低逐层关闭最上层浮层/抽屉（zIndex 3 浮层的渲染顺序见下方 when 分支，
     // 后渲染者在上；侧栏为 zIndex 2 故最后关），全部关完才进入二次退出。
-    // 旧实现 `BackHandler(enabled = overlaysClosed)` 在浮层/抽屉打开时**禁用**拦截，而
+    // 不能用 `BackHandler(enabled = overlaysClosed)` 在浮层/抽屉打开时**禁用**拦截——而
     // Pient 的浮层都是自绘「点外关闭」面板、全项目仅 ChatScreen 与 ModelConfigScreen 两处
     // BackHandler → 返回键落到系统默认行为 = finish Activity，即抽屉展开时单击返回 = 退出。
     var lastBackPress by remember { mutableStateOf(0L) }
@@ -310,7 +308,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
         }
     }
 
-    // ── 抽屉手势（Operit PhoneLayout 同款实现）：
+    // ── 抽屉手势：
     //   根 Box 挂全局 drag 检测——全屏任意位置水平右滑打开（水平位移主导：
     //   |dx| > |dy| 才触发，不与消息列表滚动冲突）、左滑关闭；阈值 40px。
     //   子级手势（列表滚动/文本选择/输入框拖动）先消费事件，天然互不抢占。
@@ -323,33 +321,30 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
     val multiPointerDown = remember { mutableStateOf(false) }
 
     // ── 抽屉展出方式（行为设置）：SLIDE = 水平滑出（默认）／ PERSPECTIVE ／ PUSH ──
-    // 手机 = 三选一；平板 = 固定压缩滑出（2026-09-10 用户决策：平板不支持
+    // 手机 = 三选一；平板 = 固定压缩滑出（平板不支持
     // 3D 透视展开 / 推动展开），与手机端所选展出方式无关。
-    // 手机 = 3D 透视（Operit PhoneLayout 同款，仅选中 PERSPECTIVE 时）；
-    // 平板 = 聊天页宽度压缩 + 侧边栏滑出（Operit TabletLayout 同款 width+offset 结构），
-    // 为平板默认行为（2026-08-30 用户决策）。
+    // 手机 = 3D 透视（仅选中 PERSPECTIVE 时）；
+    // 平板 = 聊天页宽度压缩 + 侧边栏滑出（width+offset 结构），
+    // 为平板默认行为。
     val configuration = LocalConfiguration.current
     val isTablet = isTabletLayout()
     val drawerMode = SettingsStore.drawerMode
     val use3D = drawerMode == DrawerMode.PERSPECTIVE && !isTablet
-    // 推动展开（2026-09-10，仅手机）：侧栏滑入的同时主内容整体右移一个侧栏宽——两者由同一
+    // 推动展开（仅手机）：侧栏滑入的同时主内容整体右移一个侧栏宽——两者由同一
     // progress 驱动，逐帧同步；用 offset（不改变布局尺寸）推移，页面内部不回排版面。
     val usePush = drawerMode == DrawerMode.PUSH && !isTablet
     val useCompress = isTablet
-    // 平板端 = 常驻侧边栏语义（导航切换/点外一律不收起，2026-08-30 用户决策）；手机端点击即收
+    // 平板端 = 常驻侧边栏语义（导航切换/点外一律不收起）；手机端点击即收
     val persistentDrawer = isTablet
     val drawerWidth = 296.dp
     // ★ 悬浮侧栏（侧边栏样式）整体外缩 12dp：面板右缘 = 296dp + 12dp = 308dp。
     //   **所有按「侧栏宽」算的位移/宽度/点外阈值一律用 drawerRevealWidth（面板右缘）**——
-    //   仍按 296dp 算会让侧栏右缘（含右描边）压在聊天页上 12dp
-    //   （2026-09-12 用户报「侧栏右侧部分遮挡聊天页」；实测：内容右移 777px=296dp、
-    //   面板右缘 808.5px=308dp → 重叠 31.5px=12dp）。贴边样式 inset = 0，
-    //   三模式的数值与改造前逐项一致（3D 的 0.82×宽仍是 Operit 口径，不受影响）。
+    //   仍按 296dp 算会让侧栏右缘（含右描边）压在聊天页上 12dp。贴边样式 inset = 0。
     val sidebarFloating = SettingsStore.sidebarStyle == SidebarStyle.FLOATING
     val drawerRevealWidth = if (sidebarFloating) drawerWidth + SidebarFloatingInset else drawerWidth
 
-    // 抽屉动画进度（Operit PhoneLayout：开 LowBouncy / 关 NoBouncy，stiffness 1000；
-    // 平板压缩模式对齐 Operit TabletLayout 的 tween 280ms 宽度动画；
+    // 抽屉动画进度（3D：开 LowBouncy / 关 NoBouncy，stiffness 1000；
+    // 平板压缩模式 = tween 280ms 宽度动画；
     // 推动展开与水平滑出同为 300ms tween——侧栏与主内容同步位移）
     val progress by animateFloatAsState(
         targetValue = if (chatState.drawerOpen) 1f else 0f,
@@ -366,10 +361,9 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
         label = "drawerProgress",
     )
 
-    // ── Operit PhoneLayout 数值逐项对齐（enableNavigationAnimation 分支）──
-    // 主内容：平移 82% 宽 + 下移 12dp + 缩放 0.92 + Y 轴 -7° + 圆角 24dp
-    // （Operit 原版还有 18dp 阴影，用户 2026-09-09 定：多余，移除）；
-    // 抽屉：-宽→0 滑入 + 缩放 0.92→1 + 透明度 0.72→1；scrim 透明（Operit 同款）。
+    // ── 3D 透视模式（PERSPECTIVE）数值 ──
+    // 主内容：平移 82% 宽 + 下移 12dp + 缩放 0.92 + Y 轴 -7° + 圆角 24dp；
+    // 抽屉：-宽→0 滑入 + 缩放 0.92→1 + 透明度 0.72→1；scrim 透明。
     val contentTranslationX = when {
         use3D -> drawerWidth * (0.82f * progress)
         useCompress -> drawerWidth * progress
@@ -441,8 +435,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                 }
             },
     ) {
-        // ── 主内容（zIndex 1）：3D 模式 graphicsLayer 整体变换（Operit Surface 同款），
-        //    平板压缩模式 = 宽度收缩 + 右移（Operit TabletLayout 同款 layout 层方案），
+        // ── 主内容（zIndex 1）：3D 模式 graphicsLayer 整体变换，
+        //    平板压缩模式 = 宽度收缩 + 右移（layout 层方案），
         //    推动展开 = 整体右移一个侧栏宽（offset 不改变布局尺寸，页面内部不回排版面）──
         Box(
             Modifier
@@ -476,8 +470,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                     attachSheetOpen = false // 切页时收起附件卡片
                 },
             )
-            // pi 运行时就绪条（2026-09-15 用户拍板 B）：**pi = 唯一产品路径** ——
-            // 未就绪时明确告知 + 给「环境配置」修复入口（不再静默降级到没有工具的直连内核）
+            // pi 运行时就绪条：**pi = 唯一产品路径** ——
+            // 未就绪时明确告知 + 给「环境配置」修复入口（不静默降级到没有工具的直连内核）
             if (chatState.piReadiness == ChatState.PiReadiness.Unready) {
                 PiUnreadyStrip(
                     reason = chatState.piUnreadyReason,
@@ -486,10 +480,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                     modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 2.dp),
                 )
             }
-            // 工具能力已整体移除（2026-09-14）：「宿主未就绪 → 工具不可用」这类降级提示不存在
-            // （原 HostNotReadyStrip 早已删除）。
-            // 面板内容 + 覆盖其上的输入栏（2026-09-12：输入栏 dock 改为浮层，
-            // 面板内容伸到屏幕底部、可从玻璃里透出 —— Operit 输入栏 align(BottomCenter) 同款）
+            // 面板内容 + 覆盖其上的输入栏（输入栏 dock 是浮层，
+            // 面板内容伸到屏幕底部、可从玻璃里透出 —— align(BottomCenter)）
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 Box(
                     Modifier
@@ -529,7 +521,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                     }
                 }
                 // 输入栏 dock 仅在消息区显示（文件/终端页有各自交互区）；
-                // 项目与 AI 配置齐备前不显示（2026-09-08：聊天页引导清单接管）
+                // 项目与 AI 配置齐备前不显示（聊天页引导清单接管）
                 if (chatState.activePanel == Panel.MESSAGES &&
                     chatState.currentProject != null && chatState.aiConfigured
                 ) {
@@ -544,9 +536,9 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                         text = inputText,
                         onTextChange = {
                             // 一键删除整段 @ 引用：单字符退格 + 光标停在 token 末尾
-                            // → 整个 "@路径 " 一起删掉（Operit normalizeMentionDeletion 同款）
+                            // → 整个 "@路径 " 一起删掉
                             inputText = normalizeMentionDeletion(inputText, it, mentionFiles)
-                            // 用户改动了润色结果 → 润色态作废（回退键变回润色键，2026-09-16 spec）
+                            // 用户改动了润色结果 → 润色态作废（回退键变回润色键）
                             chatState.clearPolishRevert()
                         },
                         mentionFiles = mentionFiles,
@@ -557,21 +549,21 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                         onToggleContextCard = { contextCardOpen = !contextCardOpen },
                         onToggleSystemPrompt = {
                             systemPromptOpen = !systemPromptOpen
-                            // 打开面板时向 pi 取**真实下发的那一份**（App 侧已不再持有提示词）
+                            // 打开面板时向 pi 取**真实下发的那一份**（App 侧不持有提示词）
                             if (systemPromptOpen) scope.launch { chatState.refreshSystemPrompt() }
                         },
                         onSend = { text ->
-                            // pi 未就绪 → 阻断发送，并把草稿**原样还回**输入栏（2026-09-15 拍板 B；
+                            // pi 未就绪 → 阻断发送，并把草稿**原样还回**输入栏（
                             // 输入栏在点击时已自行清空文本，这里补回来，避免"消息没发出去还丢了草稿"）
                             if (chatState.piReadiness == ChatState.PiReadiness.Unready) {
                                 inputText = TextFieldValue(text, TextRange(text.length))
                                 Toast.makeText(context, L.chat.piUnreadyToast, Toast.LENGTH_SHORT).show()
                             } else {
-                                // 首条消息自动建会话（2026-09-08：无 mock 会话后，发送即建当前项目首会话）
+                                // 首条消息自动建会话（发送即建当前项目首会话）
                                 if (chatState.currentSessionId == null) chatState.newSession()
                                 val q = pendingQuote
                                 // 本轮跑在 ChatState 自己的 scope 上，**不是**这里的 UI scope —— 离开页面
-                                // 不该静默取消一轮（2026-09-16 真机实测的根因，见 ChatState.startTurn）
+                                // 不该静默取消一轮（见 ChatState.startTurn）
                                 chatState.startTurn(text, q)
                                 pendingQuote = null // 引用随消息落库（Msg.User.quote），输入栏引用卡随之清空
                             }
@@ -593,12 +585,11 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
 
         // ── 侧栏抽屉（zIndex 2）──
         if (use3D || useCompress || usePush) {
-            // 3D 透视 / 平板压缩 / 推动展开：同一 progress 驱动抽屉滑入（Operit PhoneLayout 同款）。
+            // 3D 透视 / 平板压缩 / 推动展开：同一 progress 驱动抽屉滑入。
             // 完全关闭时移出组合（不占命中区域）；3D 与推动展开的点外关闭层为透明 ——
-            // Operit 同款：scrim 透明，3D 变换/内容推移本身传达模态。
+            // scrim 透明，3D 变换/内容推移本身传达模态。
             // 平板端不设点外关闭层（常驻侧边栏语义）：否则全屏透明层会拦截压缩/推移后
-            // 聊天页的点击（顶栏终端/文件按钮等），点一次先关抽屉、点两次才进页面
-            // （2026-08-30 平板实测 bug）。
+            // 聊天页的点击（顶栏终端/文件按钮等），点一次先关抽屉、点两次才进页面。
             if (chatState.drawerOpen || progress > 0.001f) {
                 Box(Modifier.zIndex(2f)) {
                     if (chatState.drawerOpen && !persistentDrawer) {
@@ -639,8 +630,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
         } else {
             // 水平滑出（默认）：抽屉滑动与遮罩淡入拆为两层、同规格 tween(300ms) 同步——
             // 遮罩固定全屏铺底（覆盖顶栏/输入 dock 全区域）只做透明度 0→1 淡入，
-            // 抽屉从左滑入；抽屉滑出到位时遮罩恰好完全显现（原实现两者同盒滑动，
-            // 遮罩随盒从左边推出：动画前半程右侧屏幕无遮罩）。
+            // 抽屉从左滑入；抽屉滑出到位时遮罩恰好完全显现（两者同盒滑动时，
+            // 遮罩会随盒从左边推出：动画前半程右侧屏幕无遮罩）。
             AnimatedVisibility(
                 visible = chatState.drawerOpen,
                 enter = fadeIn(tween(durationMillis = 300)),
@@ -648,7 +639,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                 modifier = Modifier.zIndex(2f),
             ) {
                 // ★ 遮罩层全屏铺底 + 点外关闭（x > 侧栏宽 296dp 才收起；侧栏内
-                //   空白区穿透下来的点击被忽略，修复「点侧栏内某些位置抽屉收起」）。
+                //   空白区穿透下来的点击被忽略（否则点侧栏内某些位置会收起抽屉）。
                 //   淡入淡出不改变布局位置——x 判定基于未偏移的布局坐标，始终有效。
                 Box(
                     Modifier
@@ -709,7 +700,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
 
         // ── 上下文用量卡（与模型选择器同款浮层：点外关闭、无 scrim、贴右下） ──
         if (contextCardOpen) {
-            // 打开时拉一次 pi 的上下文用量真值（get_session_stats.contextUsage；2026-09-16）
+            // 打开时拉一次 pi 的上下文用量真值（get_session_stats.contextUsage）
             LaunchedEffect(Unit) { chatState.requestContextUsage() }
             Box(Modifier.fillMaxSize().zIndex(3f)) {
                 // ★ 点外关闭层必须在卡片之下（先画），否则会拦截卡片内所有点击
@@ -739,7 +730,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
             }
         }
 
-        // ── 系统提示词只读面板（2026-09-01，pi-web system 面板同款；浮层同家族规格） ──
+        // ── 系统提示词只读面板（浮层同家族规格） ──
         if (systemPromptOpen) {
             Box(Modifier.fillMaxSize().zIndex(3f)) {
                 Box(
@@ -776,7 +767,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
             }
         }
 
-        // ── URL 输入弹窗（附件菜单 → URL，Hermes url-dialog 同款） ──
+        // ── URL 输入弹窗（附件菜单 → URL） ──
         if (urlDialogOpen) {
             Box(Modifier.zIndex(3f)) {
                 UrlDialog(
@@ -817,8 +808,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
             }
         }
 
-        // ── `/` 技能卡（2026-09-17）：pi 真认的技能（含插件带来的），全局/项目分段 ──
-        // 数据源 = RPC `get_commands`（用户拍板：以 pi 实际加载的为准）→ 选中插 `/skill:<名字> `，
+        // ── `/` 技能卡：pi 真认的技能（含插件带来的），全局/项目分段 ──
+        // 数据源 = RPC `get_commands`（以 pi 实际加载的为准）→ 选中插 `/skill:<名字> `，
         // 发出去由 pi 的 `_expandSkillCommand` 展开成技能全文（不进磁盘扫描，见 PiCommands 头注）。
         if (skillCardOpen) {
             val pool = PiCommands.skills().filter {
@@ -849,7 +840,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
             }
         }
 
-        // ── 长按消息上下文菜单（fork 会话外分支入口，2026-09-02 分支功能设计 §4）──
+        // ── 长按消息上下文菜单（fork 会话外分支入口）──
         if (forkMenuTarget != null) {
             val target = forkMenuTarget!!
             val forkIdx = target.index
@@ -894,7 +885,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                 )
             }
         }
-        // ── 复制消息卡（2026-09-11；页面根层：scrim 全屏覆盖顶栏与状态栏）──
+        // ── 复制消息卡（页面根层：scrim 全屏覆盖顶栏与状态栏）──
         if (copyCardText != null) {
             Box(Modifier.fillMaxSize().zIndex(3f)) {
                 MessageCopyCard(
@@ -904,7 +895,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                 )
             }
         }
-        // ── 消息定位弹窗（2026-09-09 从消息区提升到页面根层：scrim 全屏覆盖顶栏与状态栏） ──
+        // ── 消息定位弹窗（页面根层：scrim 全屏覆盖顶栏与状态栏） ──
         if (locatorOpen) {
             Box(Modifier.fillMaxSize().zIndex(3f)) {
                 val total = chatState.currentMessages.size
@@ -922,7 +913,7 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                         // 跳转必须用 ChatScreen 根层的 scope：弹窗内 own scope 会随
                         // onDismiss 一起被取消，animateScrollToItem 启动即中止（点条目不跳转的根因）。
                         // 先关弹窗再滚动，跳转动画在聊天列表上完整可见。
-                        // 目标可能是被窗口挡住的更早消息：先把它纳入窗口再滚（2026-09-12）
+                        // 目标可能是被窗口挡住的更早消息：先把它纳入窗口再滚
                         chatState.ensureMessageVisible(
                             chatState.currentSessionId,
                             chatState.currentMessages,
@@ -944,7 +935,6 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
     }
 }
 
-// 宿主已冻结（2026-09-14）：原「pi 宿主未就绪提示条」随宿主一并删除
 
 // ───────────────────────────── 顶部栏 ─────────────────────────────
 
@@ -963,7 +953,7 @@ private fun ChatTopBar(
         shape = RoundedCornerShape(0.dp),
     ) {
         // 未绑定项目（首次进入）：顶栏只保留最左侧侧边栏唤出按键——
-        // 无会话名/状态徽标/分支/终端/文件按键（2026-09-08 用户定）
+        // 无会话名/状态徽标/分支/终端/文件按键
         if (chatState.currentProject == null) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -1022,7 +1012,7 @@ private fun ChatTopBar(
                 } else {
                     StatusBadge(L.chat.idle, MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                // 未绑定项目时状态行不显示项目名（2026-09-08：引导页接管）
+                // 未绑定项目时状态行不显示项目名（引导页接管）
                 chatState.currentProject?.let { proj ->
                     Text(
                         "  ·  $proj",
@@ -1034,7 +1024,7 @@ private fun ChatTopBar(
         }
         // 右：分支 / 终端 / 文件（顶栏下方区域四态切换入口，激活图标高亮主色）
         // 三键行为完全一致：仅对应面板激活时 primary，否则 onBackground
-        // （2026-09-02 用户拍板：分支键不做 hasBranches 指示灯）。
+        // （分支键不做 hasBranches 指示灯）。
         val active = chatState.activePanel
         IconButton(onClick = { onPanel(Panel.TREE) }) {
             Icon(
@@ -1084,9 +1074,9 @@ private fun MessagesPanel(
         return
     }
     if (chatState.currentProject == null || !chatState.aiConfigured) {
-        // 2026-09-08 用户定：项目与 AI 配置两者齐备前，消息区显示引导清单
+        // 项目与 AI 配置两者齐备前，消息区显示引导清单
         // （任一未完成即显示，已完成步骤打勾提示）
-        // **环境（pi 就绪）不参与这条判定**（2026-09-15 修）：`piReadiness` 冷启动时是 Unknown，
+        // **环境（pi 就绪）不参与这条判定**：`piReadiness` 冷启动时是 Unknown，
         // 拿它当门会「每次打开都先闪一屏引导」；而且 pi 起不来时会把用户已有的会话整个顶掉。
         // 环境问题的唯一出口 = 聊天页上方那条就绪条（PiUnreadyStrip：说明 + 重试 + 环境配置，
         // 并负责拦发送、保住草稿）；引导清单里那一步只是给「全新用户」看的清单项。
@@ -1102,7 +1092,7 @@ private fun MessagesPanel(
         isStreaming = chatState.isStreaming,
         streamDraft = chatState.streamDraft,
         listState = listState,
-        // 思考模式：流式思考实时预览（Hermes 口径的「思考中」+ 正文贴底）+ 刚流式完的块保持展开。
+        // 思考模式：流式思考实时预览（「思考中」+ 正文贴底）+ 刚流式完的块保持展开。
         // 展示侧同样按开关门控（数据侧 runChat 已门控；此处兜住「流式途中关掉思考模式」——
         // 关掉即不再显示，且同一口径：思考模式关闭 = 思考内容永不上屏）。
         streamThinking = if (chatState.thinkingEnabled) chatState.streamThinking else "",
@@ -1128,9 +1118,9 @@ private fun MessagesPanel(
 }
 
 /**
- * pi 运行时就绪条（2026-09-15 用户拍板 B：pi 是**唯一产品路径**）。
+ * pi 运行时就绪条（pi 是**唯一产品路径**）。
  *
- * 未就绪时聊天页必须**明确阻断**（不再静默改走那条没有工具能力的直连内核），
+ * 未就绪时聊天页必须**明确阻断**（不静默改走那条没有工具能力的直连内核），
  * 并给一眼可见的修复入口：「环境配置」= Ubuntu / pi 的检测与安装页；「重试」= 重测就绪态
  * （通道没起时顺带起一次）。
  */

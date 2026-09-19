@@ -48,8 +48,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * 聊天页自定义背景层（2026-08-31 实现，参照 Operit AppBackgroundLayer）：
- * - 图片：Compose Image + Modifier.blur（Operit 同款，API 31+ 生效）+ ColorMatrix 亮度（10%..150%）
+ * 聊天页自定义背景层：
+ * - 图片：Compose Image + Modifier.blur（API 31+ 生效）+ ColorMatrix 亮度（10%..150%）
  * - 视频：ExoPlayer + StyledPlayerView(texture_view) + setRenderEffect 高斯模糊 + RgbAdjustment 亮度；静音循环
  * - 未设置背景时不绘制，页面底色由 PientApp 根部的 colorScheme.background 承担。
  */
@@ -77,7 +77,7 @@ fun AppBackgroundLayer(modifier: Modifier = Modifier) {
 }
 
 /**
- * 背景图片内存缓存（2026-09-12 修「打开 Pient 一瞬间背景没加载出来」）：
+ * 背景图片内存缓存：
  * 按 `uri@宽x高` 缓存解码结果，冷启动时由 [preloadBackgroundImage] 在进程启动阶段
  * 提前解码（与 Compose 启动重叠），聊天页首帧就能同步命中缓存、不再等 IO。
  * 只留最近 2 张（换背景时旧图很快被淘汰）。
@@ -117,7 +117,7 @@ fun preloadBackgroundImage(context: Context) {
     }
 }
 
-/** 图片背景：降采样解码 + 模糊（Modifier.blur，Operit 同款）+ ColorMatrix 亮度缩放 */
+/** 图片背景：降采样解码 + 模糊（Modifier.blur）+ ColorMatrix 亮度缩放 */
 @Composable
 private fun ImageBackground(uri: String, blur: Boolean, blurRadiusDp: Float, brightness: Float) {
     val context = LocalContext.current
@@ -188,8 +188,8 @@ private fun VideoBackground(
             playWhenReady = true
         }
     }
-    // 播放设置实时生效——按副作用粒度拆分（2026-08-31 修复"拖动亮度滑轨视频暂停"）：
-    // 此前五元组 LaunchedEffect 中亮度每帧变化都执行 setMediaItem+prepare() 重新加载媒体 → 播放中断。
+    // 播放设置实时生效——按副作用粒度拆分：
+    // 五元组 LaunchedEffect 里亮度每帧变化都执行 setMediaItem+prepare() 重新加载媒体 → 播放中断。
     // 拆分后：亮度只走 GL 特效（不重载）；静音/循环只改属性；只有裁剪区间变更才重载媒体。
     LaunchedEffect(muted, loop) {
         player.repeatMode = if (loop) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF

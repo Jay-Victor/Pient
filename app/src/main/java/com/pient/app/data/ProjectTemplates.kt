@@ -5,14 +5,10 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * 项目类型模板（2026-09-14 对齐 Operit `WorkspaceSetup` 的项目类型）。
+ * 项目类型模板。
  *
- * Operit 在「在应用内创建新工作区」时按类型复制模板并写项目配置
- * （`createAndGetDefaultWorkspace` 的 when 分支 + `copyTemplateFiles` + `createProjectConfigIfNeeded`），
- * 类型有 android / flutter / node / typescript / python / java / go / office / blank / web。
- *
- * Pient 先落地 7 种**能给出真实可用内容**的模板；android / flutter 需要真脚手架（SDK / `flutter create`），
- * office 需要二进制文档模板 —— 造个空壳文件名不算模板，宁可先不给（要的话下一轮用 Ubuntu 里的真工具链生成）。
+ * Pient 只落地 7 种**能给出真实可用内容**的模板；android / flutter 需要真脚手架（SDK / `flutter create`），
+ * office 需要二进制文档模板 —— 造个空壳文件名不算模板，宁可先不给。
  */
 enum class ProjectType(val id: String) {
     BLANK("blank"),
@@ -54,7 +50,7 @@ enum class ProjectType(val id: String) {
 
 object ProjectTemplates {
 
-    /** 项目配置文件名（对齐 Operit 的 createProjectConfigIfNeeded） */
+    /** 项目配置文件名 */
     const val CONFIG_FILE = ".pient-project.json"
 
     /**
@@ -77,10 +73,9 @@ object ProjectTemplates {
     /**
      * 写回项目标记文件（`.pient-project.json`；**已存在则不覆盖**）。返回是否写入。
      *
-     * 单独抽出来（2026-09-16）：**重置工作区会把项目根目录清空、连标记一起删掉**，而参考实现里
-     * 那个函数的语义是 `createProjectConfigIfNeeded` —— 重置 = 清内容，不代表这个目录不再是
-     * Pient 项目（标记一丢，文件树/项目管理里就少了模板信息）。「新建项目」与「重置后补写」
-     * 共用这一处实现。
+     * **重置工作区会把项目根目录清空、连标记一起删掉**，所以要单独补写：重置 = 清内容，
+     * 不代表这个目录不再是 Pient 项目（标记一丢，文件树/项目管理里就少了模板信息）。
+     * 「新建项目」与「重置后补写」共用这一处实现。
      *
      * @param createdAt 沿用旧标记里的创建时间；null = 取当前时间
      */
@@ -154,7 +149,7 @@ object ProjectTemplates {
 
         ProjectType.PYTHON -> mapOf(
             // 注意：这里**不能用字符串拼接 + 单个 .trimIndent()** —— Kotlin 里 `a + b + c.trimIndent()`
-            // 只对最后一段生效，前几段保留原始缩进（实测生成的 main.py 文档字符串被缩进 16 空格 →
+            // 只对最后一段生效，前几段保留原始缩进（生成的 main.py 文档字符串被缩进 16 空格 →
             // 模块级缩进 = IndentationError，脚本根本跑不了）。所以整段用一条原始串 + 行注释。
             "main.py" to """
                 # ${name}：入口脚本（python3 main.py [参数…]）

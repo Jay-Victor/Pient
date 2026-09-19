@@ -38,7 +38,7 @@ android {
         jniLibs {
             // 终端层随包二进制（proot / loader / shell 包装脚本）以「原生库」形式分发：
             // Android 10 起应用不得 execve 自己私有目录里的文件（SELinux: untrusted_app ×
-            // app_data_file 只给 execute、不给 execute_no_trans，实测 avc 拒绝），只有
+            // app_data_file 只给 execute、不给 execute_no_trans，avc 会拒绝），只有
             // /data/app 下的 apk_data_file 允许 —— 所以这些文件必须进 native lib 目录。
             // useLegacyPackaging=true 才会在安装时解压到 /data/app/.../lib/<abi>/，
             // 否则只做 APK 内 mmap、磁盘上没有可执行文件。
@@ -49,11 +49,11 @@ android {
 }
 
 // ===== 终端层随包（Ubuntu rootfs + PRoot）=====
-// 设计基线（2026-09-14 第三次申明）：**Ubuntu 随 APK 内置、首启解包**（用户不需要下载）；
+// **Ubuntu 随 APK 内置、首启解包**（用户不需要下载）；
 // node / python 等环境不随包，由用户首次进入时在环境配置页/首启弹窗里下载安装。
 // 源 = runtime/cache/rootfs-<abi>/（runtime/scripts/fetch_rootfs.py 拉取；cache 不入库）；
 // 目标 = jniLibs（可执行文件：proot + loader + shell 包装脚本）+ assets（rootfs 归档）。
-// 目标 ABI（2026-09-16 用户定：**只做 arm64、用真机测试**）：默认即真机 arm64-v8a；
+// 目标 ABI：**只做 arm64、用真机测试** —— 默认即真机 arm64-v8a；
 // 模拟器那一支改为 opt-in —— 要跑 AVD 时才显式 `-PpientRuntimeAbi=x86_64`。
 val pientRuntimeAbi = (findProperty("pientRuntimeAbi") as String?) ?: "arm64-v8a"
 val pientJniAbi = when (pientRuntimeAbi) {
@@ -102,7 +102,7 @@ fun pientElfMachine(file: File): String? = runCatching {
  * 构建期 ABI 校验：这批 ELF 必须全部是 [expected]（`x86_64` / `aarch64`）。
  *
  * **连依赖库一起验**：`usr/lib` 里的 SONAME 别名在切 ABI 后可能残留老架构版本，混进包里要到
- * 设备上才会现形（实测报 `CANNOT LINK EXECUTABLE … is for EM_X86_64 instead of EM_AARCH64`）。
+ * 设备上才会现形（报 `CANNOT LINK EXECUTABLE … is for EM_X86_64 instead of EM_AARCH64`）。
  * 宁可构建失败，也不出「能装、跑不起来」的包。
  */
 fun pientAssertAbi(files: List<File>, expected: String, hint: String) {
@@ -117,7 +117,7 @@ fun pientAssertAbi(files: List<File>, expected: String, hint: String) {
     }
 }
 
-// ABI 策略（与 Operit 同口径）：**单 ABI 出包**——rootfs 约 30MB，fat APK 会翻倍。
+// ABI 策略：**单 ABI 出包**——rootfs 约 30MB，fat APK 会翻倍。
 // 默认 = arm64-v8a（真机，见上）；release 反向锁死 arm64 —— 解析出的 ABI 不是 arm64-v8a
 // 就当场失败（防止有人顺手拿 x86_64 出交付包）。
 if (pientRuntimeAbi !in listOf("arm64-v8a", "aarch64") &&
@@ -158,7 +158,7 @@ val syncPientTerminalBinaries = tasks.register<Copy>("syncPientTerminalBinaries"
     }
     from(File(pientRootfsCacheDir, "bin/proot")) { rename { "libpient_proot.so" } }
     from(File(pientRootfsCacheDir, "libexec/proot/loader")) { rename { "libpient_proot_loader.so" } }
-    // shell 包装脚本也走 native lib 目录：私有目录里的 shebang 脚本同样不能 exec（实测 EACCES）
+    // shell 包装脚本也走 native lib 目录：私有目录里的 shebang 脚本同样不能 exec（EACCES）
     from(File(rootProject.projectDir, "runtime/terminal/pient-shell.sh")) {
         rename { "libpient_shell.so" }
     }
@@ -185,7 +185,7 @@ val syncPientRootfsArchive = tasks.register<Copy>("syncPientRootfsArchive") {
     }
     from(pientRootfsCacheDir) {
         include("ubuntu-base-*.tar.gz")
-        // 后缀不能是 .gz：aapt 会把 assets 里的 *.gz **自动解压并去掉后缀**（实测 30MB 的
+        // 后缀不能是 .gz：aapt 会把 assets 里的 *.gz **自动解压并去掉后缀**（30MB 的
         // tar.gz 变成 84MB 的 assets/pient-rootfs.tar，白胖 50MB）。改成 .tgz 就不触发。
         rename { "pient-rootfs.tgz" }
     }
@@ -237,7 +237,7 @@ val syncPientRuntimeLibs = tasks.register<Copy>("syncPientRuntimeLibs") {
 }
 
 /**
- * pi 官方包**随包预置**（2026-09-14 用户拍板，按 Operit「工具包随 App」的口径）：
+ * pi 官方包**随包预置**：
  * pi 的工具（read/write/edit/bash/grep/find/ls）就在 pi 包里 —— 所以「Pient 里有没有 pi 的工具」
  * 等价于「assets 里有没有这个归档」。归档顶层无 `package/` 前缀（设备侧只用 toybox tar，
  * 没有 --strip-components，见 runtime/scripts/pack_pi_archive.py）。
@@ -262,7 +262,7 @@ tasks.named("preBuild") {
         syncPientPiArchive,
     )
     // 切 ABI 时清掉上一次构建留在 jniLibs 源目录里的另一套 ABI（jniLibs 源是整个
-    // build/pientJniLibs，不清就会 fat 出包：实测 arm64 包里混进了 x86_64 的 proot/loader）
+    // build/pientJniLibs，不清就会 fat 出包：arm64 包里会混进 x86_64 的 proot/loader）
     doFirst {
         pientJniRoot.get().asFile.listFiles()?.forEach { dir ->
             if (dir.isDirectory && dir.name != pientJniAbi) {
@@ -296,23 +296,23 @@ dependencies {
     implementation("androidx.media3:media3-effect:1.7.1")
     implementation("com.vanniktech:android-image-cropper:4.5.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    // 权限体系（2026-09-12，开发计划 6.1 三级权限）：Shizuku 官方 SDK（ADB 级调试通道，与 Operit 同版本）
+    // 权限体系（三级：标准 / 调试 / Root）：Shizuku 官方 SDK（ADB 级调试通道）
     //   api      — 状态/授权 API（Shizuku.pingBinder / checkSelfPermission / requestPermission）
     //   provider — binder 接收入口（AndroidManifest 里需声明 rikka.shizuku.ShizukuProvider，见 manifest）
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
-    // aidl = `moe.shizuku.server.IShizukuService` / `IRemoteProcess` 的接口定义（2026-09-15 加）：
+    // aidl = `moe.shizuku.server.IShizukuService` / `IRemoteProcess` 的接口定义：
     // Android shell 通道要在 Java 侧调 `IShizukuService.newProcess(...)` 以 shell 身份起进程 ——
     // 那两个类型就在这个 artifact 里（api 只是 Java 友好封装，不含 newProcess）。
     implementation("dev.rikka.shizuku:aidl:13.1.5")
-    // 数学公式渲染（LaTeX → 位图，Operit 同款依赖：jlatexmath 的 Android 移植，字体资源随 AAR 打包）
+    // 数学公式渲染（LaTeX → 位图，jlatexmath 的 Android 移植，字体资源随 AAR 打包）
     implementation("ru.noties:jlatexmath-android:0.2.0")
-    // 输入框材质（磨砂玻璃 / 液态玻璃，2026-09-12，与 Mdcito 同款依赖）：
+    // 输入框材质（磨砂玻璃 / 液态玻璃）：
     //   com.kyant.backdrop  — 背景采样 + 高斯模糊 + 边缘高光/投影（磨砂玻璃，enableLens 时含透镜折射）
     //   io.github.fletchmckee.liquid — 水玻璃流体折射/色散（液态玻璃）
     implementation("io.github.kyant0:backdrop:1.0.6")
     implementation("io.github.fletchmckee.liquid:liquid:1.1.1")
-    // 文档预览（Operit 同款：.doc = poi-scratchpad HWPF、.xls/.xlsx = poi/poi-ooxml WorkbookFactory）
+    // 文档预览（.doc = poi-scratchpad HWPF、.xls/.xlsx = poi/poi-ooxml WorkbookFactory）
     implementation("org.apache.poi:poi:5.2.3")
     implementation("org.apache.poi:poi-ooxml:5.2.3")
     implementation("org.apache.poi:poi-scratchpad:5.2.3")

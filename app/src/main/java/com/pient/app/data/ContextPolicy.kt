@@ -2,12 +2,11 @@ package com.pient.app.data
 
 import com.pient.app.data.i18n.L
 /**
- * 上下文管理策略（**pi 原生口径**；2026-09-15 收口）。
+ * 上下文管理策略（**pi 原生口径**）。
  *
  * 上下文（切片、压缩、媒体保留、历史裁剪）**整体归 pi**：压缩配置写进 pi 的 settings.json
  * （`compaction{enabled,reserveTokens,keepRecentTokens}`，见 [PiAgentFiles]），手动压缩走
- * 官方 RPC `compact`（见 [ChatState.compactNow]）。App 不判触发、不切片、不生成摘要 ——
- * 旧的内核自实现（Operit 总结式管线 + `data/Compaction.kt` + 拼历史）已整体删除。
+ * 官方 RPC `compact`（见 [ChatState.compactNow]）。App 不判触发、不切片、不生成摘要。
  *
  * 这里只剩两件「必须在 App 侧做」的事：
  * ① [autoCompactThresholdPercent] —— 用量卡把 pi 的触发线换算成百分比只读展示；
@@ -45,7 +44,7 @@ object ContextPolicy {
 
     /**
      * 本条用户消息的请求文本：正文 + 附件清单（附件以「名称 · 路径」进请求；媒体本体由
-     * [MediaInline] 按媒体开关直发，不在这里）。历史媒体不再由 App 裁剪 —— 上下文整体归 pi。
+     * [MediaInline] 按媒体开关直发，不在这里）。历史媒体不由 App 裁剪 —— 上下文整体归 pi。
      */
     fun promptTextFor(msg: Msg.User): String {
         if (msg.attachments.isEmpty()) return msg.text
@@ -60,7 +59,7 @@ object ContextPolicy {
     /** 未直发说明行的前缀（超上限 / 读取失败） */
     const val ATTACH_OMIT_PREFIX = "[附件未直发] "
 
-    /** 媒体未直发的占位文案（Operit strings.xml 原文：`openai_image_omitted` / `openai_audio_video_omitted`） */
+    /** 媒体未直发的占位文案（`openai_image_omitted` / `openai_audio_video_omitted`） */
     const val OMIT_IMAGE = "图片内容已省略，当前模型不支持图片处理"
     const val OMIT_MEDIA = "音视频内容已省略，当前模型不支持音视频处理"
 
@@ -68,7 +67,7 @@ object ContextPolicy {
         ATTACH_PREFIX + a.name + (a.path?.let { " · $it" } ?: "")
 
     /**
-     * [promptTextFor] 的逆运算（2026-09-17）：把 pi 侧那条用户消息的文本拆回 (正文, 附件清单)。
+     * [promptTextFor] 的逆运算：把 pi 侧那条用户消息的文本拆回 (正文, 附件清单)。
      *
      * pi 的会话文件里用户消息**只有文本** —— 附件是以「尾部两段元数据」拼进去的：
      * `正文 \n\n [附件] 名称 · 路径（一行一个） \n\n [附件未直发]/省略说明（可能没有）`。

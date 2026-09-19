@@ -36,9 +36,9 @@ import com.pient.app.data.UBUNTU_COMPONENTS
 import com.pient.app.ui.components.PientDialog
 
 /**
- * 首启「环境安装」弹窗（2026-09-14 接回真实安装）。
+ * 首启「环境安装」弹窗。
  *
- * 定位（用户 2026-09-13 拍板）：**首启进终端页弹一次、可跳过**；rootfs 就绪后才弹
+ * 定位：**首启进终端页弹一次、可跳过**；rootfs 就绪后才弹
  * （解包那 1–2 秒别让用户在还没就绪的界面上做选择）。
  * 与「环境配置 → 环境内软件」是同一份清单（[UBUNTU_COMPONENTS]）、同一个分类
  * （[ComponentGroups]）；点「安装所选」→ 交给调用方跑（终端页的专用会话），弹窗只负责勾选。

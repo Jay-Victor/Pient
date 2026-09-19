@@ -25,7 +25,7 @@ import com.pient.app.data.i18n.L
 import com.pient.app.ui.chat.mentionTextFor
 
 /**
- * 代码文件编辑器（2026-09-11 新增）：正文（行号 + 语法着色 + 缩进标记）+ 底部符号工具栏。
+ * 代码文件编辑器：正文（行号 + 语法着色 + 缩进标记）+ 底部符号工具栏。
  *
  * 结构 = `Column { 编辑区(weight 1f) + CodeSymbolToolbar }`，与 `MarkdownSourceEditor` 同构：
  * 工具栏随系统键盘一起上移（IME 避让由工具栏承担，编辑区传 `applyImePadding = false`）。

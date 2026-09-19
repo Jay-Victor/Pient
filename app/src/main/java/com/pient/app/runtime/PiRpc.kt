@@ -30,7 +30,7 @@ sealed class PiRpcState {
 }
 
 /**
- * **App ↔ pi 的通道**（2026-09-14）：直接和 **Ubuntu(guest) 里的 pi 进程**讲官方 RPC。
+ * **App ↔ pi 的通道**：直接和 **Ubuntu(guest) 里的 pi 进程**讲官方 RPC。
  *
  * 为什么是 RPC 而不是接 SDK：pi 跑在 PRoot 的 Ubuntu 里（自带 node 环境、自带工具链），
  * App 不需要再嵌一层 node；官方 `--mode rpc` 就是为「外部客户端驱动」设计的
@@ -71,7 +71,7 @@ object PiRpc {
             stderrTail.addLast(line)
             while (stderrTail.size > 40) stderrTail.removeFirst()
         }
-        // 同时进应用日志（2026-09-17）：内存尾巴只服务 UI 的 40 行提示，落盘这份才留得住
+        // 同时进应用日志：内存尾巴只服务 UI 的 40 行提示，落盘这份才留得住
         //（pi 在 RPC 模式下不写日志文件，stderr 就是它唯一的报错出口）
         PientLog.w("PiStderr", line)
     }
@@ -120,7 +120,7 @@ object PiRpc {
             if (p.isAlive && cur == key && !configDirty) {
                 return true
             }
-            // 诊断（2026-09-15）：旧代码静默 stop+重启，通道反复启停无从查起 —— 把原因打出来
+            // 诊断：通道反复启停无从查起 —— 把原因打出来
             val why = when {
                 !p.isAlive -> "旧进程已退出（exit=" + (runCatching { p.exitValue() }.getOrNull()?.toString() ?: "?") + "）"
                 configDirty -> "配置页改过 pi 原生文件（重读 models.json / auth.json / settings.json）"
@@ -229,7 +229,7 @@ object PiRpc {
 
     suspend fun abort(): JSONObject? = send(JSONObject().put("type", "abort"), awaitMs = 10_000)
 
-    // ─────────────── 会话 / 树 / 分叉（2026-09-14 会话映射用）───────────────
+    // ─────────────── 会话 / 树 / 分叉（会话映射用）───────────────
     // pi 官方 RPC 提供：get_tree / get_entries / get_fork_messages / fork / clone /
     // new_session / switch_session / set_session_name / get_session_stats / get_commands。
     // **唯一缺的是"移动活跃叶"**（TUI 的 /tree）——那走我们预置的扩展命令 `/pient-nav`
@@ -319,7 +319,7 @@ object PiRpc {
     /**
      * **手动压缩上下文**（pi 官方 RPC `compact`，= 桌面端的 `/compact`）。
      *
-     * 压缩整体归 pi：App 不判触发、不切片、不生成摘要（《会话与上下文管理设计》§7 配套）。
+     * 压缩整体归 pi：App 不判触发、不切片、不生成摘要。
      * `customInstructions` = 自定义摘要指令（配置页的「压缩指令」）。
      * pi 侧 `compact` 会调一次模型生成 checkpoint 摘要，并把 `agent.state.messages` 重建为
      * 压缩后的形态 —— 所以调用方随后要 `refreshPiTree()` + `syncMessagesFromPi()` 才能看到结果。
@@ -343,13 +343,13 @@ object PiRpc {
         return res
     }
 
-    // ─────────────── 思考档位（2026-09-17：界面开关/滑轨真正作用到 pi）───────────────
+    // ─────────────── 思考档位（界面开关/滑轨作用到 pi）───────────────
 
     /**
      * 设 pi 侧的思考档位（`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`）。
      *
      * pi 会按模型能力**自动夹取**（`session.setThinkingLevel` → `clampThinkingLevel`），不会报错；
-     * 且只在档位真的变化时才往会话里 append 一条 `thinking_level_change`（agent-session.ts:1808）
+     * 且只在档位真的变化时才往会话里 append 一条 `thinking_level_change`
      * —— 所以重复推同一档位是 no-op、不污染会话文件。
      */
     suspend fun setThinkingLevel(level: String): JSONObject? =
@@ -368,7 +368,7 @@ object PiRpc {
             ?.takeIf { it.isNotBlank() && it != "null" }
 
     /**
-     * 起得来 ≠ 活着（2026-09-15 实测）：rootfs 不可执行 / proot 报错时进程会**秒退**，
+     * 起得来 ≠ 活着：rootfs 不可执行 / proot 报错时进程会**秒退**，
      * 而 `start()` 只看 ProcessBuilder 是否成功 → 会误报可用。这里给进程一个露馅窗口。
      */
     suspend fun aliveAfterStartup(timeoutMs: Long = 2500): Boolean {
@@ -400,8 +400,8 @@ object PiRpc {
     /**
      * 读 stdout：**按字节攒够一行、整行用 UTF-8 解码**。
      *
-     * 曾经的写法是逐字节 `b.toChar()`——那等于把 UTF-8 当 Latin-1 解：ASCII 看不出问题，
-     * 一旦模型回中文就变成「ãåæ¯æµè¯åå¤」（实测踩过）。UTF-8 的多字节序列不可能含 0x0A，
+     * 逐字节 `b.toChar()` 等于把 UTF-8 当 Latin-1 解：ASCII 看不出问题，
+     * 一旦模型回中文就变成「ãåæ¯æµè¯åå¤」。UTF-8 的多字节序列不可能含 0x0A，
      * 所以「按 LF 切行、整行解码」天然不会切坏字符。
      */
     private fun readStdout(proc: Process) {
@@ -433,7 +433,7 @@ object PiRpc {
             }
         } catch (t: Throwable) {
             PientLog.w(TAG, "读 stdout 结束：${t.message}")
-            // 进程退出的现场（2026-09-15）：exit 码 + stderr 末行 —— 通道 churn 排查靠它
+            // 进程退出的现场：exit 码 + stderr 末行 —— 通道 churn 排查靠它
             val code = runCatching { proc.exitValue() }.getOrNull()
             val tail = stderrText().lines().lastOrNull { it.isNotBlank() }.orEmpty()
             PientLog.w(TAG, "pi 进程 stdout 结束（exit=$code）" + if (tail.isBlank()) "" else " · stderr 末行：$tail")
@@ -444,7 +444,7 @@ object PiRpc {
     private fun readStderr(proc: Process) {
         runCatching {
             proc.errorStream.bufferedReader(StandardCharsets.UTF_8).forEachLine {
-                // 落盘/内存尾巴都在 noteStderr 里（一处写，别在这里再记一遍 —— 2026-09-17 去重）
+                // 落盘/内存尾巴都在 noteStderr 里（一处写，别在这里再记一遍）
                 noteStderr(it)
             }
         }

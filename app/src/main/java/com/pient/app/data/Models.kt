@@ -9,9 +9,8 @@ import androidx.compose.ui.graphics.toArgb
 import com.pient.app.data.i18n.Languages
 
 // ─────────────────────────────────────────────────────────────
-// 全局设置（跨页面即时生效；UI 原型阶段以内存状态承载）
-// 注（2026-08-27 用户决策）：已全面弃用玻璃拟态，容器统一为
-// 普通材质（PientPanel：纯色面板 + hairline 边框）。
+// 全局设置（跨页面即时生效；以内存状态承载）
+// 容器统一为普通材质（PientPanel：纯色面板 + hairline 边框）。
 // ─────────────────────────────────────────────────────────────
 enum class DensityLevel { DEFAULT, COMPACT }
 
@@ -60,8 +59,8 @@ enum class FontSource { BUILTIN, CUSTOM }
 enum class InputBarStyle { BOTTOM, FLOATING }
 
 /**
- * 面板材质（输入框设置 / 侧边栏设置共用，效果与依赖对齐 Mdcito 的卡片风格）：
- * - DEFAULT 简约（原「默认」）：实色面板 + hairline 描边，可调透明度（全应用统一容器材质，无玻璃）
+ * 面板材质（输入框设置 / 侧边栏设置共用）：
+ * - DEFAULT 简约：实色面板 + hairline 描边，可调透明度（全应用统一容器材质，无玻璃）
  * - FROSTED 磨砂玻璃：采样背后内容并高斯模糊 + 边缘高光 + 投影，可调纹理强度（kyant backdrop）
  * - LIQUID 液态玻璃：水玻璃流体折射/色散/边缘曲率（fletchmckee liquid）
  *
@@ -76,10 +75,10 @@ enum class PanelMaterial { DEFAULT, FROSTED, LIQUID }
  */
 enum class SidebarStyle { EDGE, FLOATING }
 
-/** 简约材质透明度滑轨范围（0 = 完全不透明，100 = 完全透明；口径对齐 Mdcito 卡片透明度） */
+/** 简约材质透明度滑轨范围（0 = 完全不透明，100 = 完全透明） */
 const val PANEL_TRANSPARENCY_MAX = 100
 
-/** 磨砂玻璃纹理强度滑轨范围（Mdcito 纹理强度 0..300：模糊 10 + 20×、叠加浓度 ×0.30） */
+/** 磨砂玻璃纹理强度滑轨范围（0..300：模糊 10 + 20×、叠加浓度 ×0.30） */
 const val PANEL_FROST_INTENSITY_MAX = 300
 
 /** 字体大小滑轨范围（sp） */
@@ -99,7 +98,7 @@ data class BuiltinFontOption(
     val assetPath: String = "",    // ASSET：assets 内字体路径
 )
 
-/** 内置字体列表（2026-08-31 用户定名：默认字体/思源黑体/思源宋体/霞鹜文楷/无衬线体/JetBrains Mono） */
+/** 内置字体列表（默认字体/思源黑体/思源宋体/霞鹜文楷/无衬线体/JetBrains Mono） */
 val BuiltinFonts = listOf(
     BuiltinFontOption("默认字体", BuiltinFontKind.SYSTEM_FAMILY, familyName = "sans-serif"),
     BuiltinFontOption("思源黑体", BuiltinFontKind.SYSTEM_FILE, familyName = "sans-serif", filePath = "/system/fonts/NotoSansCJK-Regular.ttc"),
@@ -110,18 +109,18 @@ val BuiltinFonts = listOf(
 )
 
 object SettingsStore {
-    var themeMode by mutableStateOf(ThemeMode.LIGHT)   // 2026-09-01：首启默认亮色（用户定）
+    var themeMode by mutableStateOf(ThemeMode.LIGHT)   // 首启默认亮色
     var accent by mutableStateOf(AccentPresets[0])
     var darkScheme by mutableStateOf(DarkSchemes[0])
     var lightScheme by mutableStateOf(LightSchemes[0])
     var density by mutableStateOf(DensityLevel.DEFAULT)
     var bubbleStyle by mutableStateOf(BubbleStyle.FLAT)
-    // ── 界面语言（2026-09-16，语言设置页）：保存值 = Languages.SYSTEM("system") 或语言包 id
+    // ── 界面语言（语言设置页）：保存值 = Languages.SYSTEM("system") 或语言包 id
     //    （"zh-CN" / "en"）；文案本体见 data/i18n/，切换即时生效（重组，无需重启）──
     var language by mutableStateOf(Languages.SYSTEM)
     var drawerMode by mutableStateOf(DrawerMode.SLIDE)
 
-    // ── 权限档位（2026-09-12）：L0 标准 / L1 调试(Shizuku) / L2 Root ──
+    // ── 权限档位：L0 标准 / L1 调试(Shizuku) / L2 Root ──
     //   首启引导页「系统权限选项页」选定、设置页「系统权限设置」页可改；语义见 data/SystemPermissions.kt
     var permissionTier by mutableStateOf(PermissionTier.STANDARD)
 
@@ -133,34 +132,34 @@ object SettingsStore {
 
     var selectedComponents by mutableStateOf(setOf("ca", "git", "curl"))
 
-    // ── 首启环境安装（2026-09-13，对齐 Operit 的 SetupScreen）：首次进终端页弹一次「环境安装」，
+    // ── 首启环境安装：首次进终端页弹一次「环境安装」，
     //    用户点「安装所选」或「跳过」后置位，永不再自动弹（可在「环境配置」页手动再进）──
     var envSetupDone by mutableStateOf(false)
 
-    // ── 开屏设置（2026-09-12）：启动时是否播放开屏加载动画 ──
+    // ── 开屏设置：启动时是否播放开屏加载动画 ──
     //   关 = 不显示开屏页（跳过动画与最短展示），数据仍在后台加载，直接进入主界面
     var startupAnimation by mutableStateOf(true)
 
-    // ── 文件预览页设置（2026-09-10）：带行号的文件长行不折行，改为向右延展 + 横向滚动 ──
+    // ── 文件预览页设置：带行号的文件长行不折行，改为向右延展 + 横向滚动 ──
     var filePreviewNoWrap by mutableStateOf(false)
 
-    // ── 后台保活（2026-09-16，行为设置）：后台常驻通知 ──
+    // ── 后台保活（行为设置）：后台常驻通知 ──
     //   开 = 前台服务一直挂着（常驻档，走 specialUse 类型，绕开 dataSync 的「后台 6 小时 / 24 小时」
     //   上限），通知栏常驻一条；关 = 按需（AI 回合 / 终端会话有活时才挂）。见 runtime/PiKeepAlive.kt
     var residentNotification by mutableStateOf(false)
 
-    // ── 消息通知（2026-09-16，行为设置，照 Operit 的「回复通知」口径）：AI 回复完成且**应用不在
+    // ── 消息通知（行为设置）：AI 回复完成且**应用不在
     //   前台**时发一条系统通知；提示音 / 震动各自独立开关（对应通知渠道的声音与震动属性，见
-    //   runtime/ReplyNotify.kt）。默认 = 通知开、声音关、震动关（Operit 同款：能收到但不打扰）
+    //   runtime/ReplyNotify.kt）。默认 = 通知开、声音关、震动关（能收到但不打扰）
     var replyNotify by mutableStateOf(true)
     var replyNotifySound by mutableStateOf(false)
     var replyNotifyVibrate by mutableStateOf(false)
 
-    // ── 自定义主题色（2026-09-01）：开关 + 色相（0..360）；开启时覆盖 12 预设色作为 accent ──
+    // ── 自定义主题色：开关 + 色相（0..360）；开启时覆盖 12 预设色作为 accent ──
     var customAccentEnabled by mutableStateOf(false)
     var customAccentHue by mutableStateOf(215f)   // 默认蓝 hue ≈ 215
 
-    // ── 背景设置（2026-08-31）：自定义背景（图片/视频各持一份 URI）+ 背景效果 ──
+    // ── 背景设置：自定义背景（图片/视频各持一份 URI）+ 背景效果 ──
     var backgroundMediaType by mutableStateOf(BackgroundMediaType.IMAGE)
     var backgroundImageUri by mutableStateOf<String?>(null)
     var backgroundVideoUri by mutableStateOf<String?>(null)
@@ -168,7 +167,7 @@ object SettingsStore {
     var backgroundBlurRadius by mutableStateOf(10f)   // 1..25
     var backgroundBrightness by mutableStateOf(1f)    // 0.1..1.5
 
-    // ── 视频背景播放设置（2026-08-31）：静音/循环/裁剪区间（秒；null = 未裁剪）/画面裁剪模式/播放倍速 ──
+    // ── 视频背景播放设置：静音/循环/裁剪区间（秒；null = 未裁剪）/画面裁剪模式/播放倍速 ──
     var videoBackgroundMuted by mutableStateOf(true)
     var videoBackgroundLoop by mutableStateOf(true)
     var videoTrimStartSec by mutableStateOf<Float?>(null)
@@ -176,21 +175,21 @@ object SettingsStore {
     var videoCropMode by mutableStateOf(VideoCropMode.ORIGINAL)
     var videoPlaybackSpeed by mutableStateOf(1f)   // 0.5..2.0
 
-    // ── 字体设置（2026-08-31）：字体样式（内置/自定义）+ 字体大小 ──
+    // ── 字体设置：字体样式（内置/自定义）+ 字体大小 ──
     var fontSource by mutableStateOf(FontSource.BUILTIN)
     var builtinFontName by mutableStateOf(BuiltinFonts[0].name)   // 存储键 = 选项名
     var customFontPath by mutableStateOf<String?>(null)   // filesDir/fonts/ 下文件名
     var customFontLabel by mutableStateOf<String?>(null)  // 导入文件原始名（弹窗显示名）
     var fontSize by mutableStateOf(14f)                   // 12..24 sp
 
-    // ── 输入框设置（2026-09-12）：输入框样式（贴底/悬浮）+ 输入框材质（简约/磨砂玻璃/液态玻璃）
-    //    + 材质各自的可调项（简约→透明度 0..100；磨砂玻璃→纹理强度 0..300，均对齐 Mdcito） ──
+    // ── 输入框设置：输入框样式（贴底/悬浮）+ 输入框材质（简约/磨砂玻璃/液态玻璃）
+    //    + 材质各自的可调项（简约→透明度 0..100；磨砂玻璃→纹理强度 0..300） ──
     var inputBarStyle by mutableStateOf(InputBarStyle.BOTTOM)
     var inputBarMaterial by mutableStateOf(PanelMaterial.DEFAULT)
     var inputBarTransparency by mutableStateOf(0f)      // 0..100：100 = 完全透明（仅简约材质）
-    var inputBarFrostIntensity by mutableStateOf(50f)   // 0..300（仅磨砂玻璃材质；Mdcito 默认 50）
+    var inputBarFrostIntensity by mutableStateOf(50f)   // 0..300（仅磨砂玻璃材质；默认 50）
 
-    // ── 侧边栏设置（2026-09-12，与输入框设置同构）：侧边栏样式（贴边/悬浮）
+    // ── 侧边栏设置（与输入框设置同构）：侧边栏样式（贴边/悬浮）
     //    + 侧边栏材质（简约/磨砂玻璃/液态玻璃）+ 同两档可调项 ──
     var sidebarStyle by mutableStateOf(SidebarStyle.EDGE)
     var sidebarMaterial by mutableStateOf(PanelMaterial.DEFAULT)
@@ -426,7 +425,7 @@ object SettingsStore {
 /**
  * 主题色预设色板（默认蓝 + 备选）。
  * 每个预设含暗/亮双变体：暗色面板用高亮变体，亮色面板用深色变体，
- * 保证 onPrimary 白字在两种模式下均满足对比度（设计计划附录 A 联动原则）。
+ * 保证 onPrimary 白字在两种模式下均满足对比度。
  */
 data class AccentPreset(
     val dark: Color,
@@ -450,7 +449,7 @@ val AccentPresets = listOf(
 )
 
 /**
- * 界面主题方案（2026-08-31）：底色/表面色套装，浅色与深色各独立一套选择。
+ * 界面主题方案：底色/表面色套装，浅色与深色各独立一套选择。
  * 仅替换背景类令牌；文字色（onBackground/onSurface）、error/scrim 不随方案变化。
  * surfaceContainerLowest 沿用映射：暗色 = surfaceContainerLow，亮色 = background。
  */
@@ -498,7 +497,7 @@ data class Session(
     val running: Boolean = false,
     val pinned: Boolean = false,
     /**
-     * **这个 Pient 会话绑的 pi 会话文件**（2026-09-14 会话映射；guest 里的绝对路径）。
+     * **这个 Pient 会话绑的 pi 会话文件**（会话映射；guest 里的绝对路径）。
      * 懒建：首次真正用到该会话（发第一条消息）时才让 pi `new_session` 并把文件名记回来；
      * 之后的切会话 = `switch_session`，会话内分支 = 在同一个文件里移动活跃叶（`/pient-nav`），
      * 会话外分支（fork/clone）= 新文件 → 新的 Pient 会话。
@@ -509,7 +508,7 @@ data class Session(
 )
 
 // ─────────────────────────────────────────────────────────────
-// 侧栏双重时间编码（2026-09-09 对齐 Hermes 桌面端 lib/time.ts + session-date-groups.ts）：
+// 侧栏双重时间编码：
 // 行级 = 相对时长标签（coarseElapsed 最粗单位 floor：刚刚 / N分 / N时 / N天）；
 // 分组 = 日历桶（4AM 日界；头部最新活动 run 簇无标签，其下依次 今天早些时候 / 昨天 /
 // 本周 / 上周 / 本月 / N月 / YYYY年N月，每桶一个分组头，第一个渲染的分组永不贴标签）。
@@ -523,7 +522,7 @@ const val DAY_MS = 86_400_000L
 private const val DAY_ROLLOVER_HOUR = 4
 
 /**
- * 会话最后活动时间 → 侧栏行相对时间标签（Hermes session-row formatAge 同口径：
+ * 会话最后活动时间 → 侧栏行相对时间标签（
  * coarseElapsed 最粗单位、floor 取整；不足 1 分钟一律「刚刚」——秒级粒度不进侧栏）。
  */
 fun relativeTimeLabel(updatedAt: Long, now: Long = System.currentTimeMillis()): String {
@@ -537,13 +536,13 @@ fun relativeTimeLabel(updatedAt: Long, now: Long = System.currentTimeMillis()): 
     }
 }
 
-/** 时间分组桶类型（Hermes SessionBucketKind 同款） */
+/** 时间分组桶类型 */
 enum class SessionBucketKind { TODAY, YESTERDAY, THIS_WEEK, LAST_WEEK, THIS_MONTH, MONTH, MONTH_YEAR }
 
 /** 日历桶：key = 唯一分桶键；at = 会话名义日起点（epoch ms，月份标签格式化用） */
 data class SessionBucket(val key: String, val kind: SessionBucketKind, val at: Long)
 
-/** 侧栏时间分组输出：label 恒非空（2026-09-09 用户要求头部 run 簇也贴标签） */
+/** 侧栏时间分组输出：label 恒非空（头部 run 簇也贴标签） */
 data class SessionGroup(val key: String, val label: String, val sessions: List<Session>)
 
 private fun startOfLocalDay(ms: Long): Long {
@@ -568,7 +567,7 @@ private fun startOfLocalWeek(ms: Long, weekStartsOn: Int): Long {
 }
 
 /**
- * 粗日历桶（Hermes calendarBucket 同款，周起点默认周一）：今天 → 昨天 → 本周 →
+ * 粗日历桶（周起点默认周一）：今天 → 昨天 → 本周 →
  * 上周 → 本月 → 月 → 月+年。粒度随年龄变粗；空区间不产生桶。
  */
 fun sessionBucket(ms: Long, nowMs: Long, weekStartsOn: Int = 1): SessionBucket {
@@ -604,7 +603,7 @@ private val MONTH_NAMES: Array<String>
         L.theme.monthJul, L.theme.monthAug, L.theme.monthSep, L.theme.monthOct, L.theme.monthNov, L.theme.monthDec,
     )
 
-/** 桶的本地化分组标签（Hermes sessionBucketLabel 同款；固定相对文案 + 中文月份名） */
+/** 桶的本地化分组标签（固定相对文案 + 中文月份名） */
 fun sessionBucketLabel(bucket: SessionBucket): String = when (bucket.kind) {
     SessionBucketKind.TODAY -> L.theme.earlierToday
     SessionBucketKind.YESTERDAY -> L.theme.yesterday
@@ -626,7 +625,7 @@ private const val MIN_RUN_BREAK_MS = 30 * MINUTE_MS
 private const val MAX_RUN_GAP_MS = 8 * HOUR_MS
 
 /**
- * 头部无标签 run 簇切割点（Hermes headRunCutoffMs 同款；times 降序）：
+ * 头部无标签 run 簇切割点（times 降序）：
  * 候选切点 = ≥30min 的活动间隙（>8h 的间隙强制断 run 并停止向后搜索），
  * 选「头部会话数（log 尺度）最接近 5」的切点；run 结束处与下方会话同日历桶时
  * 头部溶解。返回头内最老时间戳；Long.MIN_VALUE = 全列表一个 run（无组头）；
@@ -667,8 +666,8 @@ fun sessionBucketHeadLabel(bucket: SessionBucket): String =
 
 /**
  * 侧栏时间分组：列表按最后活动降序；头部 run 簇贴其最新会话所属日历桶的标签
- * （2026-09-09 用户要求：最上方会话上方也显示分组标签，如「今天」）；其下按
- * 日历桶分组、每桶贴标签（不再保留 Hermes「第一个渲染的分组永不贴标签」——
+ * （最上方会话上方也显示分组标签，如「今天」）；其下按
+ * 日历桶分组、每桶贴标签（不采用「第一个渲染的分组永不贴标签」——
  * 该规则与头部贴标签矛盾）。置顶会话不参与（置顶段独立）。
  */
 fun groupSessionsByRecency(
@@ -712,7 +711,7 @@ fun groupSessionsByRecency(
     return groups
 }
 
-/** 附件类型（chip 图标展示与提交语义区分；2026-09-09 移除「文件夹」项，菜单四项） */
+/** 附件类型（chip 图标展示与提交语义区分） */
 enum class AttachmentKind(val emoji: String) {
     IMAGE("🖼 "), FILE("📎 "), URL("🔗 ")
 }
@@ -728,7 +727,7 @@ sealed class Msg {
     data class User(
         val text: String,
         val attachments: List<Attachment> = emptyList(),
-        /** 引用块（2026-09-11）：引用某条消息追问——对齐 Hermes(@assistant-ui) Quote part
+        /** 引用块：引用某条消息追问——
          *  [{ text, messageId }]：引用随消息一起存（重启/分支/fork 都跟着走），
          *  发送时在正文前注入 markdown 块引用（> …）供模型读取。 */
         val quote: Quote? = null,
@@ -737,14 +736,14 @@ sealed class Msg {
     data class Assistant(
         val markdown: String,
         val usage: Usage? = null,
-        val model: String? = null,   // 消息所用模型（pi-web 助手消息头部模型标签）
+        val model: String? = null,   // 消息所用模型（助手消息头部模型标签）
         val error: Boolean = false,  // 请求失败提示（不进 API 上下文，历史重建时跳过）
     ) : Msg()
 
     data class Thinking(
         val level: String, // off/minimal/low/medium/high/xhigh
         val text: String,
-        /** 思考耗时（毫秒；Hermes 思考行「思考了 3s」口径）。null = 无计时（历史记录/非流式无起点） */
+        /** 思考耗时（毫秒）。null = 无计时（历史记录/非流式无起点） */
         val durationMs: Long? = null,
     ) : Msg()
 
@@ -753,11 +752,11 @@ sealed class Msg {
         val params: String,
         val status: ToolStatus = ToolStatus.DONE,
         val detail: String? = null,
-        /** 工具耗时（毫秒；Hermes 工具行 meta 的 1.2s 口径）。null = 历史记录/未计时 */
+        /** 工具耗时（毫秒）。null = 历史记录/未计时 */
         val durationMs: Long? = null,
         /** 开始时刻（仅内存：ToolEnd 用来算耗时，不落库） */
         val startedAtMs: Long? = null,
-        /** 文件编辑的 unified diff（pi `edit` 的 details.diff；Hermes 文件卡的 +N/−M 与 diff 面板靠它） */
+        /** 文件编辑的 unified diff（pi `edit` 的 details.diff；文件卡的 +N/−M 与 diff 面板靠它） */
         val diff: String? = null,
     ) : Msg()
 
@@ -777,7 +776,7 @@ sealed class Msg {
 }
 
 /**
- * 引用块（消息引用/追问，2026-09-11）：
+ * 引用块（消息引用/追问）：
  * text = 被引用消息的原文（UI 截断展示、注入时用全文）；
  * role = "user" / "assistant"（引用来源角色，用于卡片标注「引用用户消息 / 引用 AI 回答」）。
  */
@@ -794,13 +793,13 @@ data class Quote(
 
     /**
      * 注入模型上下文的形态（markdown 块引用）：引用块 + 空行 + 用户正文。
-     * 与 pi/pi-web 无冲突——pi 的会话条目本就是文本消息，块引用是最通用的「引用+追问」表达。
+     * pi 的会话条目本就是文本消息，块引用是最通用的「引用+追问」表达。
      */
     fun toPrompt(userText: String): String = blockText() + "\n\n" + userText
 
     companion object {
         /**
-         * [toPrompt] 的逆运算（2026-09-17）：把「引用块 + 空行 + 正文」拆回 (引用原文, 正文)。
+         * [toPrompt] 的逆运算：把「引用块 + 空行 + 正文」拆回 (引用原文, 正文)。
          * 判据 = 整段以块引用行开头、且块后紧跟一个空行；不成形态（或拆出空的一侧）返回 null。
          *
          * 为什么需要：pi 的会话文件里只留得下注入后的**文本**，按 pi 重建上屏流时若不拆回来，
@@ -820,7 +819,7 @@ data class Quote(
 }
 
 /**
- * 会话条目（pi session-format v3 同构，2026-09-11）：会话全部条目按 id/parentId
+ * 会话条目（pi session-format v3 同构）：会话全部条目按 id/parentId
  * 链接成树（首条 parentId = null），leaf = 当前所在位置。
  * 会话内分支的真实承载：切分支 = 移动 leaf（不新建会话、不丢条目）；
  * 在旧条目下继续追加消息 = 长出新的兄弟分支，原分支条目保留在树里。
@@ -832,7 +831,7 @@ data class SessionEntry(
 )
 
 /**
- * 会话树节点（P12 /tree 画布页数据源；2026-09-11 起由真实条目树派生）。
+ * 会话树节点（P12 /tree 画布页数据源；由真实条目树派生）。
  * 节点 = 一条用户消息；exchange = 该节点代表的那次对话（用户消息 + 后续至
  * 下一条用户消息前的全部条目，含 AI 回答）；children = 从该节点长出的分支。
  */
@@ -846,7 +845,7 @@ data class SessionTreeNode(
     /** 该节点的用户消息带的附件（画布卡片上的类型图标；直发的图片名字不可考，按类型兜底） */
     val attachments: List<Attachment> = emptyList(),
 ) {
-    /** 是否存在分支（顶栏分支键指示逻辑，pi-web hasBranch 同款：顶层 >1 或任一节点 children >1） */
+    /** 是否存在分支（顶栏分支键指示逻辑：顶层 >1 或任一节点 children >1） */
     fun hasBranches(): Boolean = children.size > 1 || children.any { it.hasBranches() }
 }
 
@@ -872,7 +871,7 @@ data class AiModel(
     val provider: String,
 )
 
-/** thinking 五档 ↔ pi thinking 级别（minimal…xhigh；max 不暴露，设计计划 3.4.1） */
+/** thinking 五档 ↔ pi thinking 级别（minimal…xhigh；max 不暴露） */
 enum class ThinkingLevel(val piValue: String) {
     MINIMAL("minimal"),
     LOW("low"),
@@ -894,8 +893,7 @@ enum class ThinkingLevel(val piValue: String) {
         fun byPi(v: String): ThinkingLevel? = entries.firstOrNull { it.piValue == v }
 
         /**
-         * pi 档位名 → 本地化标签；应用枚举里没有的名字**原样显示字面量**
-         * （pi-web 同款口径：它也是 `mappedVal ?? lvl` 直接露出档位名）。
+         * pi 档位名 → 本地化标签；应用枚举里没有的名字**原样显示字面量**。
          */
         fun labelOf(piValue: String): String = byPi(piValue)?.label ?: piValue
     }
@@ -903,17 +901,13 @@ enum class ThinkingLevel(val piValue: String) {
 
 /**
  * pi 还没答上来（通道没起 / 首次打开面板）时的**回退档位表**：应用内置这五档，
- * 与旧版滑轨一致（`off` 不在这里出：开关管开关；`xhigh`/`max` 不主动暴露 —— pi 的 `getSupportedThinkingLevels` 也只在
+ * （`off` 不在这里出：开关管开关；`xhigh`/`max` 不主动暴露 —— pi 的 `getSupportedThinkingLevels` 也只在
  * `thinkingLevelMap` 显式映射时才把它算进可用档）。pi 一旦答了就以 pi 的列表为准。
  */
 val THINKING_LEVEL_FALLBACK: List<String> = listOf("minimal", "low", "medium", "high")
 
 /**
- * 思考参数的**线上写法**（2026-09-12 真实化；此前只有「省略」一种行为）。
- *
- * 参考源：pi 的 `thinkingFormat` 枚举（packages/ai/src/types.ts:578）+ Operit 每服务商
- * 一个 Provider 类各自拼参数（DeepseekProvider/KimiProvider/DoubaoAIProvider 都发
- * `thinking:{"type":"disabled"}`，QwenProvider/NvidiaProvider 发 `enable_thinking:false`）。
+ * 思考参数的**线上写法**。
  *
  * 语义：**关闭思考模式 = 按该格式显式禁用；开启 = 显式启用**（不再靠省略参数假装关闭）。
  *
@@ -980,7 +974,7 @@ data class SkillItem(
     val global: Boolean = true,
     val skillMd: String? = null,   // SKILL.md 文件内容（真实读盘；null = 无此文件）
     val fileTree: String? = null,  // 技能目录 ASCII 树（真实扫描；null = 无目录信息）
-    /** `SKILL.md` 的绝对路径（真实数据层时期使用；现为占位字段） */
+    /** `SKILL.md` 的绝对路径（当前为占位字段） */
     val path: String? = null,
     /** 市场条目的 `owner/repo/slug`（skills.sh 的安装句柄；本地技能为 null） */
     val marketId: String? = null,
@@ -988,13 +982,13 @@ data class SkillItem(
     val installs: Int? = null,
 )
 
-/** 插件包状态（pi-web PluginPackageInfo.status） */
+/** 插件包状态 */
 enum class PluginStatus { LOADED, INSTALLED, MISSING, DISABLED }
 
 /** 包内资源类型（pi package.json pi 清单四类） */
 enum class PluginResourceKind { EXTENSION, SKILL, PROMPT, THEME }
 
-/** 包内单个资源（pi-web PluginResourceInfo 投影，多一个启用位） */
+/** 包内单个资源（多一个启用位） */
 data class PluginResource(
     val kind: PluginResourceKind,
     val name: String,
@@ -1019,7 +1013,7 @@ data class PluginItem(
 )
 
 // ─────────────────────────────────────────────────────────────
-// 文件树（pi-web FileExplorer 的 TreeNode 投影，懒加载语义）
+// 文件树（懒加载语义）
 // ─────────────────────────────────────────────────────────────
 class FileNode(
     val name: String,
@@ -1031,26 +1025,26 @@ class FileNode(
     val modifiedAt: Long = 0L,            // 最后修改时间（epoch ms；排序用 mock）
     val source: String? = null,           // 真实位置（本地绝对路径 / SAF 文档 URI）；null = mock 节点
     /**
-     * 该节点的内容不完整（2026-09-12 大目录防护）：目录子项数超过单目录上限、
+     * 该节点的内容不完整（大目录防护）：目录子项数超过单目录上限、
      * 树节点总量/扫描时间超出预算，或已到递归深度上限而不再下探。
      * 面板只在根节点上展示页脚提示（「仅显示部分文件」）。
      */
     val truncated: Boolean = false,
     /**
-     * 项目相对路径（**@ 引用的唯一路径口径**，2026-09-17）：树加载器建节点时写入，
+     * 项目相对路径（**@ 引用的唯一路径口径**）：树加载器建节点时写入，
      * 根 = ""、子项 = "父/名"，目录不带尾斜杠（`/` 只在生成引用文本时补，见
-     * `ui/chat/MentionFileCard.kt` 的 mentionTextFor）。此前 @ 的相对路径由两处各自
+     * `ui/chat/MentionFileCard.kt` 的 mentionTextFor）。@ 的相对路径若由两处各自
      * 拼装（候选表按遍历前缀拼、文件树长按只拿得到基名）→ 两处必然漂移。
      */
     val relPath: String = "",
 ) {
     val ext: String
-        // 统一小写：扩展名判定一律忽略大小写（Operit `endsWith(..., ignoreCase = true)` 口径）
+        // 统一小写：扩展名判定一律忽略大小写
         get() = if (isDir) "" else name.substringAfterLast('.', "").lowercase()
 }
 
 /**
- * 文件树子项的默认排序（**一份实现**，2026-09-17）：目录在前、各自按名称小写升序。
+ * 文件树子项的默认排序（**一份实现**）：目录在前、各自按名称小写升序。
  * 文件树面板的「按名称」档与 @ 引用候选表（`buildMentionFiles`）都走它 ——
  * 两处顺序必须一致（用户会逐项对比「@ 列表和文件树不一样」）。
  */
@@ -1061,7 +1055,7 @@ fun sortFileNodesByName(nodes: List<FileNode>): List<FileNode> {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 终端（多会话；执行链路已移除，仅界面态数据）
+// 终端（多会话；仅界面态数据，无执行链路）
 // ─────────────────────────────────────────────────────────────
 data class TerminalLine(
     val text: String,

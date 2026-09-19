@@ -34,7 +34,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
 /**
- * 全屏输入弹窗（设计计划 3.4 IME 适配；参考 Operit FullscreenInputDialog）：
+ * 全屏输入弹窗（IME 适配）：
  * 全屏长文本编辑；文本与输入栏共享同一状态（收起即已同步）；
  * 头部：收起(X) | 全屏输入 | 发送（主色圆钮，空文本禁用）；
  * 编辑区透明底、多行、内部滚动、IME 自动避让。

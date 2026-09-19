@@ -80,8 +80,8 @@ private const val CONTACT_EMAIL = "18261738221@163.com"
 private enum class AboutDialog { UPDATE, LOG }
 
 /**
- * 关于页（2026-08-31 重做，Operit AboutScreen 顶部 + 设置页分组卡片）：
- * 顶部 = 圆形 logo（Operit 同款）+ 产品名「Pient」+ 版本号；
+ * 关于页：
+ * 顶部 = 圆形 logo + 产品名「Pient」+ 版本号；
  * 下方 = 分组标题（卡片左上方）+ 卡片，四组：
  * 更新（检查更新/更新日志）、项目信息（GitHub/Gitee 仓库地址，暂未提供）、
  * 联系（开发者 Jay-Victor / 联系方式暂未提供）、版权（开源许可声明/版权所有）。
@@ -138,7 +138,7 @@ fun AboutScreen(nav: NavController) {
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 16.dp),
         ) {
-            // ── 顶部：logo + 产品名 + 版本号（Operit 同款） ──
+            // ── 顶部：logo + 产品名 + 版本号 ──
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
@@ -247,7 +247,7 @@ fun AboutScreen(nav: NavController) {
         }
     }
 
-    // ── mock 弹窗（原型期演示；接入更新系统后替换） ──
+    // ── mock 弹窗（演示用） ──
     when (dialog) {
         AboutDialog.UPDATE -> PientDialog(
             title = L.common.checkUpdate,

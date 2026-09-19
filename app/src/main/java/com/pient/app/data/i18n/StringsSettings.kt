@@ -52,7 +52,7 @@ interface SettingsStrings {
     val messageNotifyVibrateDesc: String
     val messageNotifyNoPermission: String
 
-    // ── 应用日志管理（2026-09-17）──
+    // ── 应用日志管理 ──
     val logTitle: String
     val logSubtitle: String
     val logFileLabel: String
@@ -91,7 +91,7 @@ interface SettingsStrings {
     val logSystemEmpty: String
     fun logSystemFailed(a0: Any?): String
 
-    // ── 应用日志管理 · 第二批（2026-09-17）：导出范围 / 分享 / 诊断摘要 / 上次运行 / 查看器筛选 ──
+    // ── 应用日志管理：导出范围 / 分享 / 诊断摘要 / 上次运行 / 查看器筛选 ──
     val logScopeLabel: String
     val logScopeAll: String
     val logScopeWarn: String
@@ -174,7 +174,7 @@ object ZhSettings : SettingsStrings {
     override val messageNotifyVibrateDesc: String = "当消息通知触发时进行震动提醒"
     override val messageNotifyNoPermission: String = "未授予通知权限：消息通知不会显示（可在系统设置里开启）"
 
-    // ── 应用日志管理（2026-09-17）──
+    // ── 应用日志管理 ──
     override val logTitle: String = "应用日志管理"
     override val logSubtitle: String = "运行记录 · 导出与清理"
     override val logFileLabel: String = "日志文件"
@@ -213,7 +213,6 @@ object ZhSettings : SettingsStrings {
     override val logSystemEmpty: String = "这次抓取没有匹配到日志行"
     override fun logSystemFailed(a0: Any?): String = "系统日志读取失败：${a0}"
 
-    // ── 第二批（2026-09-17）──
     override val logScopeLabel: String = "范围："
     override val logScopeAll: String = "全部"
     override val logScopeWarn: String = "仅警告以上"
@@ -296,7 +295,7 @@ object EnSettings : SettingsStrings {
     override val messageNotifyVibrateDesc: String = "Vibrate when a message notification fires"
     override val messageNotifyNoPermission: String = "Notification permission not granted: message notifications stay hidden (you can enable it in system settings)"
 
-    // ── 应用日志管理（2026-09-17）──
+    // ── 应用日志管理 ──
     override val logTitle: String = "App log management"
     override val logSubtitle: String = "Runtime log · export and cleanup"
     override val logFileLabel: String = "Log file"
@@ -335,7 +334,6 @@ object EnSettings : SettingsStrings {
     override val logSystemEmpty: String = "No matching log lines were captured this time"
     override fun logSystemFailed(a0: Any?): String = "Failed to read the system log: ${a0}"
 
-    // ── Batch 2 (2026-09-17) ──
     override val logScopeLabel: String = "Scope: "
     override val logScopeAll: String = "Everything"
     override val logScopeWarn: String = "Warnings and errors only"

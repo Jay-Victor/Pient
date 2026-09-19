@@ -28,18 +28,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 /**
- * Markdown 源码模式底部格式工具栏（2026-09-11 新增）。
+ * Markdown 源码模式底部格式工具栏。
  *
- * 参照 `Refences/Mdcito-1.2.0`（`ui/editor/EditorToolbar.kt`）逐值对齐；容器/按键/分组竖线
- * 与代码符号工具栏共用一份实现（见 `EditorToolbarCommon.kt`）：
+ * 容器/按键/分组竖线与代码符号工具栏共用一份实现（见 `EditorToolbarCommon.kt`）：
  * - 分组：撤销/取消撤销 ｜ H1-H6 ｜ 斜体/粗体/粗斜体 ｜ 删除线/分割线 ｜ 无序/有序/任务列表 ｜
  *   行内代码/代码块/引用 ｜ 链接/图片/表格 ｜（右侧固定）搜索
  *
- * 相对 Mdcito 的差异：①数学公式组（∑ / ∑∑）未移植——Pient 的 Markdown 渲染层无公式支持，
- * 插进去也渲染不出来；②未做长按提示气泡（Mdcito 的 SmartToolbarTooltip），改用 contentDescription 无障碍名。
+ * 有意不做：①数学公式组（∑ / ∑∑）——Pient 的 Markdown 渲染层无公式支持，插进去也渲染不出来；
+ * ②长按提示气泡——改用 contentDescription 无障碍名。
  */
 
-/** 工具栏可触发的 markdown 格式动作（与 Mdcito EditorToolbar 回调一一对应） */
+/** 工具栏可触发的 markdown 格式动作（与工具栏按键一一对应） */
 internal sealed interface MdFormat {
     data class Heading(val level: Int) : MdFormat
     data object Italic : MdFormat
@@ -69,7 +68,7 @@ internal fun MarkdownEditorToolbar(
     modifier: Modifier = Modifier,
 ) {
     EditorToolbarContainer(modifier) {
-        // 可横向滚动的格式按钮区（Mdcito：weight(1f) + horizontalScroll）
+        // 可横向滚动的格式按钮区（weight(1f) + horizontalScroll）
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(0.dp),
@@ -118,7 +117,7 @@ internal fun MarkdownEditorToolbar(
             EditorToolbarButton(icon = Icons.Outlined.TableChart, desc = L.files.table, onClick = { onFormat(MdFormat.Table) })
         }
 
-        // 搜索键固定在右侧，不随滚动隐藏（Mdcito 同款）
+        // 搜索键固定在右侧，不随滚动隐藏
         EditorToolbarDivider()
         EditorToolbarButton(icon = Icons.Outlined.Search, desc = L.common.search, onClick = onSearch)
     }

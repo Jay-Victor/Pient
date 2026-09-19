@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit
 /**
  * pi 包（页面上的「插件」）管理 —— 页面按钮 = pi 官方命令，一条不多一条不少。
  *
- * 口径取自 pi 源码 `Refences/pi-0.85.1/packages/coding-agent/src/package-manager-cli.ts`：
+ * 口径取自 pi 官方 CLI：
  *
  * - **列**：`pi list` —— 读「用户设置 + 项目设置」两处，输出分 `User packages:` / `Project packages:` 两段；
  *   每个条目两空格缩进（`source`，可能带 ` (filtered)` 后缀 = 包级过滤），其下四空格缩进是 `installedPath`；
@@ -110,12 +110,12 @@ object PiPackages {
     /**
      * 删包（pi remove 支持 `-l`；source 要与 settings 里配置的写法一致）。
      *
-     * ★ **本地路径源必须传「解析后的绝对路径」**（2026-09-17 真机实测）：pi 删包是两边各算一个
+     * ★ **本地路径源必须传「解析后的绝对路径」**：pi 删包是两边各算一个
      * 匹配 key —— 设置里那条按 `getBaseDirForScope(scope)` 解析（项目级 = `<项目>/.pi/`），
      * 而命令行输入按**当前 cwd（=/workspace）**解析（`getSourceMatchKeyForInput`）。
      * 项目设置里存的是 `../local-demo-late` → 输入同样写 `../local-demo-late` 会解析成
      * `/local-demo-late`，与设置的 `/workspace/local-demo-late` 对不上，报
-     * `No matching package found for ../local-demo-late`（实测）。传 `installedPath`
+     * `No matching package found for ../local-demo-late`。传 `installedPath`
      * （= `pi list` 打印的那个绝对路径）两边就是同一个 key。
      * npm / git 源按 `名字` / `host+path` 匹配，不受影响 → 只在本地路径源上替换。
      */
@@ -159,8 +159,8 @@ object PiPackages {
         //   「结束并重建会话进程时 cwd 回到 ~」），而 pi 找**项目设置**是按它自己的 cwd
         //   （=`/workspace`）找 `<cwd>/.pi/settings.json` —— 不 cd 的话
         //   `pi install <src> -l` 会把包写进 `/root/.pi/settings.json` 这个 pi 根本不读的文件：
-        //   退出码 0、页面重拉 `pi list` 也看不到，**项目级安装静默失效**（2026-09-17 真机实测：
-        //   文件 mtime 与安装时刻一致）。`runPi`（`pi list`）早就是这么做的，这里对齐。
+        //   退出码 0、页面重拉 `pi list` 也看不到，**项目级安装静默失效**（文件 mtime 与安装时刻一致）。
+        //   `runPi`（`pi list`）就是这么做的，这里对齐。
         val full = "cd /workspace 2>/dev/null; $cmd"
         GuestScripts.runInTerminal(context, SESSION, label, full) { code ->
             running = false

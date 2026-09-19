@@ -43,9 +43,9 @@ import com.pient.app.ui.components.SectionHeader
 import com.pient.app.ui.components.SettingsRow
 
 /**
- * 设置页（UI 重设计 2026-08-28）：分组式布局 ——
+ * 设置页：分组式布局 ——
  * 分组标题（靠左：图标+文字）+ 功能卡片（该分组全部设置项收纳于一张卡片，
- * 样式与旧版设置页卡片一致：surfaceContainerLow + 16dp 圆角 + 描边）；
+ * 样式与设置页卡片一致：surfaceContainerLow + 16dp 圆角 + 描边）；
  * 条目 = 左侧图标+主标题+副标题小字，右侧 ">" 箭头。
  * 分组：个性化（主题与外观/语言设置/行为设置）、AI模型配置（服务商与模型配置）、
  * 数据与权限（系统权限设置/项目记录管理/模型用量信息）、关于Pient（关于）。
@@ -80,7 +80,7 @@ fun SettingsScreen(nav: NavController) {
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 16.dp),
         ) {
-            // ── 分组 1：个性化（Operit 同款 Person 图标） ──
+            // ── 分组 1：个性化（Person 图标） ──
             SettingsGroup(L.settings.personalization, Icons.Outlined.Person) {
                 SettingsRow(
                     icon = Icons.Outlined.Palette,
@@ -104,7 +104,7 @@ fun SettingsScreen(nav: NavController) {
                 )
             }
 
-            // ── 分组 2：AI模型配置（Operit 同款 Settings 齿轮图标） ──
+            // ── 分组 2：AI模型配置（Settings 齿轮图标） ──
             SettingsGroup(L.settings.groupModels, Icons.Outlined.Settings) {
                 SettingsRow(
                     icon = Icons.Outlined.SmartToy,
@@ -137,7 +137,7 @@ fun SettingsScreen(nav: NavController) {
                     onClick = { nav.navigate("usage") },
                 )
                 DividerLine()
-                // 应用日志管理（2026-09-17）：运行日志的导出 / 查看 / 清空
+                // 应用日志管理：运行日志的导出 / 查看 / 清空
                 SettingsRow(
                     icon = Icons.AutoMirrored.Outlined.ReceiptLong,
                     title = L.settings.logTitle,

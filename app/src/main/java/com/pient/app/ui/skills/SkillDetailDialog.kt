@@ -41,15 +41,15 @@ import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
 
 /**
- * 技能详情弹窗（2026-09-06）：
+ * 技能详情弹窗：
  * ① 技能名称
- * ② 描述（pi-web SkillDetail 同款「Description」小标签 + 值；无描述整块隐藏）
+ * ② 描述（「Description」小标签 + 值；无描述整块隐藏）
  * ③ 「查看Skill.md」按键（无 SKILL.md 时禁用）→ 点击展开/收起 Markdown 渲染的预览窗口
  * ④ 技能路径
  * ⑤ 目录结构窗口（ASCII 树，等宽字体）
  * ⑥ 底部「删除」+「关闭」。
  * 无右上角 ×（带关闭按钮的弹窗按全局原则不显示 ×）；点 scrim 空白处同样关闭。
- * 卡片最大高度 = 屏幕高 70%（2026-09-10 用户要求），超出时内容区滚动。
+ * 卡片最大高度 = 屏幕高 70%，超出时内容区滚动。
  */
 @Composable
 fun SkillDetailDialog(
@@ -58,8 +58,8 @@ fun SkillDetailDialog(
     onDelete: () -> Unit,
 ) {
     var showMd by remember { mutableStateOf(false) }
-    // 卡片最大高度（2026-09-10 用户要求）：屏幕高的 70%，超出部分由内容区滚动承接
-    // （展开 SKILL.md 预览 + 长描述 + 目录树时卡片会高于屏幕，原先没有上限、内容直接顶到屏外）
+    // 卡片最大高度：屏幕高的 70%，超出部分由内容区滚动承接
+    // （展开 SKILL.md 预览 + 长描述 + 目录树时卡片会高于屏幕，内容会直接顶到屏外）
     val maxCardHeight = (LocalConfiguration.current.screenHeightDp * 0.7f).dp
 
     Box(
@@ -96,7 +96,7 @@ fun SkillDetailDialog(
                         .weight(1f, fill = false)
                         .verticalScroll(rememberScrollState()),
                 ) {
-                    // ② 描述（pi-web SkillDetail 同款：小标签 + 值，1.6 行高；无描述不显示）
+                    // ② 描述（小标签 + 值，1.6 行高；无描述不显示）
                     if (item.desc.isNotBlank()) {
                         Text(
                             L.skills.description,

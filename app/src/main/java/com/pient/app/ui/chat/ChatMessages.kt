@@ -142,11 +142,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 消息区（P1 核心，设计计划 3.3；2026-09-08 消息框/回复样式重设计对齐 pi-web/pi/Operit）：
- * 用户消息 = userBubble 令牌底右对齐胶囊（Operit 20/4/20/20 尾角、85% 宽、44dp 最小高；
- * FLAT 模式 pi-web 12dp 圆角 + accent 20% 边框）；附件 chip 气泡上方（Operit AttachmentTag）；
- * 助手 = 无底卡片 Markdown + pi-web 模型标签行/usage 行；思考块/工具卡 pi-web 几何与绿红语义；
- * 工具卡内嵌成对结果（多级折叠：一级工具卡、二级结果区，2026-09-08）；压缩条目 / usage 统计。
+ * 消息区：
+ * 用户消息 = userBubble 令牌底右对齐胶囊（20/4/20/20 尾角、85% 宽、44dp 最小高；
+ * FLAT 模式 12dp 圆角 + accent 20% 边框）；附件 chip 气泡上方；
+ * 助手 = 无底卡片 Markdown + 模型标签行/usage 行；思考块/工具卡几何与绿红语义；
+ * 工具卡内嵌成对结果（多级折叠：一级工具卡、二级结果区）；压缩条目 / usage 统计。
  * 消息区禁止玻璃。
  */
 @Composable
@@ -155,16 +155,16 @@ fun ChatMessages(
     isStreaming: Boolean,
     streamDraft: String,
     listState: LazyListState,
-    /** 流式思考文本（思考模式开启时；Hermes 口径的实时预览数据源） */
+    /** 流式思考文本（思考模式开启时；实时预览数据源） */
     streamThinking: String = "",
     /** 本轮思考起点（毫秒；0 = 无）——实时计时用 */
     streamThinkingStartedAt: Long = 0L,
-    /** 本次运行内流式思考块所在下标（-1 = 无）：回答落地后该块保持展开（Hermes live preview） */
+    /** 本次运行内流式思考块所在下标（-1 = 无）：回答落地后该块保持展开（live preview） */
     liveThinkingIndex: Int = -1,
     bottomInset: Dp = 0.dp,
     /**
-     * 上屏窗口起点（长会话防护，2026-09-12）：< startIndex 的更早消息不进列表，
-     * 列表首行改为「显示更早的消息」胶囊按钮；0 = 全部消息都在窗口内。
+     * 上屏窗口起点（长会话防护）：< startIndex 的更早消息不进列表，
+     * 列表首行是「显示更早的消息」胶囊按钮；0 = 全部消息都在窗口内。
      */
     startIndex: Int = 0,
     /** 点「显示更早的消息」：返回本次新增条数（调用方据此保持视口锚点） */
@@ -176,11 +176,9 @@ fun ChatMessages(
 
     // 进入会话（首次组合 / 切换会话 / 分支换叶）默认落在消息最底部。
     //
-    // ★ 必须在**首次测量之前**就定位（2026-09-12 修复「打开 Pient 一瞬显示『显示更早的消息』
-    //   按钮和最旧的那批消息」）：旧实现在 LaunchedEffect 里 `withFrameNanos` 后再 scrollToItem，
-    //   于是**首帧一定画在列表顶部**（长会话就是按钮 + 窗口里最旧的消息），下一帧才跳到底部。
-    //   真机上这一两帧肉眼可见（页面像先错位再归位）；模拟器录屏只有 ~12fps、截图 220ms 一张，
-    //   抓不到帧不代表没有 —— 代码路径本身决定了它必然发生。
+    // ★ 必须在**首次测量之前**就定位：若在 LaunchedEffect 里 `withFrameNanos` 后再 scrollToItem，
+    //   则**首帧一定画在列表顶部**（长会话就是按钮 + 窗口里最旧的消息），下一帧才跳到底部 ——
+    //   这一两帧肉眼可见（页面像先错位再归位）。
     //   requestScrollToItem 只是登记目标位置、在下次测量生效，所以首帧就已经到底。
     val showEarlier = startIndex > 0
     val itemCount = (if (showEarlier) 1 else 0) + (messages.size - startIndex) +
@@ -193,15 +191,15 @@ fun ChatMessages(
     // 各消息气泡的根坐标（长按菜单锚点；LazyColumn 回收后需重新上报）。
     // ★ 必须是**普通 HashMap**而不是 mutableStateMapOf：写入发生在 onGloballyPositioned
     // （布局阶段），而长按回调里读它——用快照 Map 会让每次布局都写状态、又反查到组合里，
-    // 每个可见项在每帧都多走一轮组合（长会话卡顿源之一，2026-09-12 修复）。
+    // 每个可见项在每帧都多走一轮组合（长会话卡顿源之一）。
     // 该 Map 只在长按那一刻被读，不需要参与重组。
     val bubbleBounds = remember { HashMap<Int, Rect>() }
-    /** 各消息条目的根坐标**原点**（positionInRoot）：长按触点 = 它 + 按下点（2026-09-17） */
+    /** 各消息条目的根坐标**原点**（positionInRoot）：长按触点 = 它 + 按下点 */
     val bubblePos = remember { HashMap<Int, Offset>() }
     // 长按超时配置（消息长按 fork 检测用）
     val viewConfig = LocalViewConfiguration.current
 
-    // 定位器显示时机（Operit 参考）：用户滑动（含惯性滚动）时显示，停止滚动 2s 后隐藏
+    // 定位器显示时机：用户滑动（含惯性滚动）时显示，停止滚动 2s 后隐藏
     var navigatorVisible by remember { mutableStateOf(false) }
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }
@@ -220,9 +218,9 @@ fun ChatMessages(
             val info = listState.layoutInfo
             val last = info.totalItemsCount - 1
             val lastVisible = info.visibleItemsInfo.lastOrNull()
-            // 旧判定（lastVisible.index >= last-1）在最后一条消息比视口高时恒真：
-            // 视口无论停在哪，最后可见条目都是它 → 回到底部按钮永不出现（2026-09-09 修复）。
-            // 新判定 = 最后可见条目是列表末条（含 4dp 尾 spacer）且其底边贴近视口底（容差 16px）。
+            // 判定坑：只按 lastVisible.index >= last-1 判，最后一条消息比视口高时恒真：
+            // 视口无论停在哪，最后可见条目都是它 → 回到底部按钮永不出现。
+            // 判定 = 最后可见条目是列表末条（含 4dp 尾 spacer）且其底边贴近视口底（容差 16px）。
             if (lastVisible == null) info.totalItemsCount <= 1
             else lastVisible.index >= last - 1 &&
                 lastVisible.offset + lastVisible.size <= info.viewportEndOffset + 16
@@ -230,7 +228,7 @@ fun ChatMessages(
     }
 
     // 定位器进度：当前可见首项在全部消息中的位置（按**绝对**消息下标算，
-    // 让进度条在只加载了尾部窗口时也能反映真实位置，2026-09-12）
+    // 让进度条在只加载了尾部窗口时也能反映真实位置）
     val locatorProgress by remember {
         derivedStateOf {
             val total = messages.size
@@ -240,9 +238,9 @@ fun ChatMessages(
         }
     }
 
-    // 流式 / 新消息跟随滚动。2026-09-09 三轮修复（用户报障「发送后页面不上滑」）：
+    // 流式 / 新消息跟随滚动（三条硬约束）：
     // 1. LaunchedEffect 在新条目完成布局前启动，layoutInfo 还是上一帧旧值——
-    //    先 withFrameNanos 等一帧布局完成，再取新 total 滚到底（旧实现滚到旧末尾=不动）；
+    //    先 withFrameNanos 等一帧布局完成，再取新 total 滚到底（按旧 total 滚 = 不动）；
     // 2. 必须用 scrollToItem 瞬时滚动：animateScrollToItem 会被下一次重启（每个流式增量
     //    都重启 effect）取消在半途 → 视口越拖越落后，回复完成时已不在底部、不再跟随；
     // 3. 用户主动发送 = 无条件滚到底（用户想看自己的消息与回复；且 IME 弹出会把视口
@@ -258,19 +256,19 @@ fun ChatMessages(
         }
     }
 
-    // 渲染项（2026-09-14 Hermes 对齐的工具行）：连续 ≥2 个「活动型」工具调用折成一行摘要，
+    // 渲染项（工具行）：连续 ≥2 个「活动型」工具调用折成一行摘要，
     // 文件编辑（write/edit）作为交付物单列；成对工具结果并入工具行、不再单渲染。
     //
     // ★ 这里**不能包 remember(messages, …)**：messages 是同一个 SnapshotStateList 实例，
     //   流式期间 appendEntry 只是原地追加 → remember 的键不变、渲染项永远是旧的
-    //   （实测症状：RUNNING 的工具行一直不出现，直到回合结束 isStreaming 翻转才蹦出来）。
+    //   （症状：RUNNING 的工具行一直不出现，直到回合结束 isStreaming 翻转才蹦出来）。
     //   直接调用：函数体读列表 → 订阅列表变化 → 追加即重算（窗口内条目数有上限，够快）。
     val renderItems = buildChatRenderItems(messages, startIndex, isStreaming)
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
-            // 底部留出输入栏 dock 的高度（2026-09-12：dock 改为覆盖在消息之上的浮层，
+            // 底部留出输入栏 dock 的高度（dock 覆盖在消息之上、是浮层，
             // 消息可滑到 dock 之下，最后一条需能被滚到 dock 上沿之上）
             contentPadding = PaddingValues(
                 start = 14.dp,
@@ -280,13 +278,13 @@ fun ChatMessages(
             ),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
-            // 「显示更早的消息」（长会话防护，2026-09-12；Hermes showEarlier 同款胶囊按钮）：
+            // 「显示更早的消息」（长会话防护；胶囊按钮）：
             // 仅当更早消息被窗口挡住时出现，点击往前翻一页，并把新加载的一页推进视野。
             if (startIndex > 0) {
                 item(key = "show-earlier") {
                     // 触控目标 = 整行 48dp（Material 最小触控尺寸），胶囊视觉不变：
-                    // 旧实现把 clickable 挂在只含 12dp/4dp 内边距的胶囊上（高 ≈26dp），
-                    // 手机上容易点空——与「点几次才有反应」的体感叠加（2026-09-12）。
+                    // clickable 只挂在含 12dp/4dp 内边距的胶囊上（高 ≈26dp）时，手机上容易点空 ——
+                    // 与「点几次才有反应」的体感叠加。
                     Box(
                         Modifier
                             .fillMaxWidth()
@@ -295,12 +293,12 @@ fun ChatMessages(
                                 // 翻页后**把刚加载的消息推进视野**：直接滚到列表顶端（第 0 行 = 按钮本身，
                                 // 它在翻页前后都是 0 行，所以不必等布局）。
                                 //
-                                // 为什么不再自己算锚点：
+                                // 为什么不自己算锚点：
                                 // ① Compose 的 LazyColumn 本来就按 key 保持滚动位置——往前面插入条目时，
                                 //    原可见项会留在原位；再手动滚一次会与它叠加，视口位置不可控
-                                //    （2026-09-12 实测：同一个操作一次位移 291px、另一次纹丝不动）。
+                                //    （同一个操作：一次位移 291px、另一次纹丝不动）。
                                 // ② 就算把位置钉准，新内容也全在视口**上方**——用户点完看不到任何变化，
-                                //    真机反馈就是「点了无效、没加载出消息」。滚到顶端则新加载的一页直接可见。
+                                //    观感上就是「点了无效、没加载出消息」。滚到顶端则新加载的一页直接可见。
                                 val added = onShowEarlier()
                                 if (added > 0) scope.launch { listState.scrollToItem(0) }
                             },
@@ -338,11 +336,11 @@ fun ChatMessages(
                 }
                 val idx = item.key
                 val msg = messages[idx]
-                // 每条条目**就地渲染**（2026-09-16 按「节点详情卡」同款口径改写）：思考有自己的条目与
-                // 位置，不再并进紧随其后的回答卡 —— 并入会把思考摆到工具行**下方**（落库顺序里思考在
+                // 每条条目**就地渲染**（与「节点详情卡」同款口径）：思考有自己的条目与
+                // 位置，不并进紧随其后的回答卡 —— 并入会把思考摆到工具行**下方**（落库顺序里思考在
                 // 工具之后），而真实发生顺序是 思考 → 工具 → … → 回答，观感上就是流程错位。
-                // 与画布「节点详情」（TreeCanvasPanel）逐条同序：两处不再各排一套。
-                // 长按 fork 入口：仅 User/Assistant 气泡响应（2026-09-02 分支功能设计 §4.1）
+                // 与画布「节点详情」（TreeCanvasPanel）逐条同序：两处共用同一套排序。
+                // 长按 fork 入口：仅 User/Assistant 气泡响应
                 val longPressable = msg is Msg.User || msg is Msg.Assistant
                 Box(
                     Modifier
@@ -403,7 +401,7 @@ fun ChatMessages(
             item { Spacer(Modifier.height(4.dp)) }
         }
 
-        // 回到底部（未在底部时出现；2026-09-09 用户定：图标用向下箭头 ↓）
+        // 回到底部（未在底部时出现；图标用向下箭头 ↓）
         if (!atBottom) {
             Box(
                 modifier = Modifier
@@ -412,7 +410,7 @@ fun ChatMessages(
                         start = 16.dp,
                         top = 16.dp,
                         end = 16.dp,
-                        // 抬到输入栏 dock 之上（2026-09-12：dock 为浮层）
+                        // 抬到输入栏 dock 之上（dock 为浮层）
                         bottom = 16.dp + bottomInset,
                     )
                     .size(40.dp)
@@ -435,8 +433,8 @@ fun ChatMessages(
             }
         }
 
-        // 消息定位器（Operit 参考：右缘胶囊 + 进度线点；滑动即显示，停止 1.2s 后隐藏。
-        // 2026-09-09：①离右缘留 8dp 空隙防误触；②出现=从右缘滑出、消失=滑回右缘）
+        // 消息定位器（右缘胶囊 + 进度线点；滑动即显示，停止 1.2s 后隐藏。
+        // ①离右缘留 8dp 空隙防误触；②出现=从右缘滑出、消失=滑回右缘）
         AnimatedVisibility(
             visible = navigatorVisible,
             modifier = Modifier.align(Alignment.CenterEnd),
@@ -447,7 +445,7 @@ fun ChatMessages(
             val anchorLineColor = MaterialTheme.colorScheme.outlineVariant
             val anchorDotColor = MaterialTheme.colorScheme.primary
             val navigatorBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-            // 胶囊形状（2026-09-09 修复不对称）：原 14/14/8/8 左圆角 14dp 使左缘直边
+            // 胶囊形状：14/14/8/8 左圆角 14dp 会让左缘直边
             // 只有 28dp（右缘 40dp），且 14+8=22dp > 胶囊宽 20dp——上下两角弧在顶/底边
             // 中段互相交叉出凹口。对称胶囊的圆角上限 = 宽的一半 = 10dp（两端半圆、左右直边
             // 各 36dp 等长），四角取 10dp。
@@ -501,9 +499,8 @@ fun ChatMessages(
 
 /**
  * 消息定位弹窗：定位统计 + 搜索 + 筛选（全部/用户/AI）+ 逐条卡片列表 + 点击跳转。
- * 2026-09-09 从 ChatMessages 内部提升为独立组件、由 ChatScreen 根层 zIndex 3 挂载：
- * 原实现挂在 ChatMessages（顶栏下方消息区 Box）内，弹窗 scrim 的 fillMaxSize 被压到
- * 消息区范围，只压暗消息列表、盖不住顶栏与系统状态栏；提升到页面根层后 scrim 全屏铺开
+ * 挂在 ChatScreen 根层（zIndex 3）：若挂在消息区 Box 内，弹窗 scrim 的 fillMaxSize 会被压到
+ * 消息区范围，只压暗消息列表、盖不住顶栏与系统状态栏；挂到页面根层后 scrim 全屏铺开
  * （状态栏图标属系统层绘制，仍在 scrim 之上保持可见，这是 Android 的正常行为）。
  */
 @Composable
@@ -791,8 +788,8 @@ private fun MessageCard(
 // ───────────────────────────── 长按消息菜单（分支 + 复制 + 引用） ─────────────────────────────
 
 /**
- * 长按菜单的目标（2026-09-17）：上屏下标 + 气泡根坐标 rect + **触点**的根坐标。
- * 定位以触点为基准（旧实现只传 rect = 整条消息的 bounds，长回答能有好几屏高 → 菜单会飞到最上方）。
+ * 长按菜单的目标：上屏下标 + 气泡根坐标 rect + **触点**的根坐标。
+ * 定位以触点为基准（只传 rect = 整条消息的 bounds 时，长回答能有好几屏高 → 菜单会飞到最上方）。
  */
 data class MessageMenuTarget(
     val index: Int,
@@ -808,7 +805,7 @@ private val MenuEdgeMargin = 8.dp
 private val MenuGap = 8.dp
 
 /**
- * 长按菜单的落点（2026-09-17 重做：**锚定触点**）。
+ * 长按菜单的落点（**锚定触点**）。
  *
  * 实战口径（四处同一条思路）：
  * - Android 平台 `PopupMenu` / `MenuPopupHelper`：有空间就放在锚点下方，否则翻到上方；两边都放不下
@@ -834,7 +831,7 @@ private fun menuOffset(
     val x = xRaw.coerceIn(margin, (container.width - menu.width - margin).coerceAtLeast(margin))
     // 纵向参考边：气泡**整条都在可视区内**（短消息）就用它的边缘 —— 这才是「贴着气泡弹」的经典观感；
     // 长消息（被滚动裁掉一头）一律改用触点：否则「放气泡上方」会把菜单顶到离手指好几百像素之外
-    // （实测 1746px 高的回答：press.y=1500 会算到 y=36 —— 又是一个「太上方」）
+    // （1746px 高的回答：press.y=1500 会算到 y=36 —— 又是一个「太上方」）
     val itemVisible = anchor.top >= margin && anchor.bottom <= container.height - margin
     val belowRef = if (itemVisible) anchor.bottom else press.y
     val aboveRef = if (itemVisible) anchor.top else press.y
@@ -849,7 +846,7 @@ private fun menuOffset(
 }
 
 /**
- * 长按消息的上下文菜单（fork / 复制 / 引用；2026-09-17 起移除「重新生成」——重做走会话内分支）。
+ * 长按消息的上下文菜单（fork / 复制 / 引用；重做走会话内分支，不设「重新生成」）。
  *
  * 定位：见 [menuOffset] —— 锚定长按**触点**，容器 = 本菜单挂载的那层（聊天页根 Box，键盘弹起时它自己会缩）；
  * 点外关闭（无 scrim，外层处理）。
@@ -923,10 +920,9 @@ fun ForkContextMenu(
 }
 
 /**
- * 引用块卡片（消息引用/追问，2026-09-11）：
+ * 引用块卡片（消息引用/追问）：
  * 左侧 2dp 主色竖线 + 引用来源标签 + 引用原文（2 行省略）+ 可选右侧 × 取消。
- * 输入栏（待发送）与消息气泡（已发送）共用同一张卡——对齐 Hermes(@assistant-ui)
- * ComposerPrimitive.Quote/QuoteText/QuoteDismiss 与消息 Quote part 的同源形态。
+ * 输入栏（待发送）与消息气泡（已发送）共用同一张卡。
  */
 @Composable
 fun QuoteCard(
@@ -938,7 +934,7 @@ fun QuoteCard(
         modifier = modifier
             .fillMaxWidth()
             // ★ 高度必须由内容决定（IntrinsicSize.Min）：竖线用 fillMaxHeight 且父级高度无界时，
-            //   会把它撑到父级最大高度（输入栏 dock 变全屏高、卡片跑到屏幕顶部 —— 2026-09-11 实测踩过）
+            //   会把它撑到父级最大高度（输入栏 dock 变全屏高、卡片跑到屏幕顶部）
             .height(IntrinsicSize.Min)
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
@@ -985,11 +981,11 @@ fun QuoteCard(
 }
 
 /**
- * 复制消息卡片（2026-09-11；参照 Operit `MessageCopyPreviewBottomSheet`）：
+ * 复制消息卡片：
  * 标题「复制消息」+ 分段控制器（纯文本 / Markdown 源码 / XML）+ 内容区（可选中文本、可滚动）
- * + 右下按键（文案随分段变化：复制纯文本 / 复制 Markdown 源码 / 复制 XML，Operit 同款）。
+ * + 右下按键（文案随分段变化：复制纯文本 / 复制 Markdown 源码 / 复制 XML）。
  * 分段 0/1 = 这一条消息本身（正文）；分段 2 = 该回合 AI 侧全量（思考过程 + 工具调用过程 + 正文，
- * 取数见 `data/MessageXml.kt` 的 [com.pient.app.data.turnXml]，2026-09-17 用户加的）。
+ * 取数见 `data/MessageXml.kt` 的 [com.pient.app.data.turnXml]）。
  * Pient 浮层家族：PientPanel + scrim 点外关闭、无右上 ×（与点外关闭重复的元素不加）。
  */
 @Composable
@@ -1004,7 +1000,7 @@ fun MessageCopyCard(
     val clipboard = LocalClipboardManager.current
     val configuration = LocalConfiguration.current
     var mode by remember(text, xml) { mutableIntStateOf(0) }
-    // 纯文本态：按 Operit 一样用同一份 AST 转换（不放主线程——长回答逐字符转换可感）
+    // 纯文本态：用同一份 AST 转换（不放主线程——长回答逐字符转换可感）
     var plain by remember(text) { mutableStateOf<String?>(null) }
     LaunchedEffect(text) {
         plain = withContext(Dispatchers.Default) { markdownToPlainText(text) }
@@ -1058,7 +1054,7 @@ fun MessageCopyCard(
                         .padding(top = 12.dp),
                 ) {
                     if (mode == 0 && plain == null) {
-                        // 转换中（Operit 同款：先出转圈再出内容）
+                        // 转换中（先出转圈再出内容）
                         Box(
                             Modifier
                                 .fillMaxWidth()
@@ -1168,7 +1164,7 @@ internal fun AttachmentsRow(
     }
 }
 
-/** 附件 chip（Operit AttachmentTag 规格：24dp 高、12dp 圆角、不透明实底 = 气泡色、图标 12dp + 名称 120dp 截断） */
+/** 附件 chip（24dp 高、12dp 圆角、不透明实底 = 气泡色、图标 12dp + 名称 120dp 截断） */
 @Composable
 internal fun AttachmentChip(att: Attachment, bubbleBg: Color) {
     Row(
@@ -1196,12 +1192,12 @@ internal fun AttachmentChip(att: Attachment, bubbleBg: Color) {
 }
 
 /**
- * 用户消息气泡（2026-09-08 重设计，对齐三源）：
- * - 几何（Operit BubbleUserMessageComposable）：右对齐、气泡最大宽 = 可用宽 85%、
+ * 用户消息气泡：
+ * - 几何：右对齐、气泡最大宽 = 可用宽 85%、
  *   BUBBLE 模式圆角 (20,4,20,20)（尾角右上）、最小高 44dp、内边距 12dp、无边框；
- * - FLAT 模式（pi-web UserMessageView）：12dp 圆角、1dp accent 20% 边框、内边距 8×12；
- * - 底色 = userBubble 令牌（Hermes --userBubble 同源，随主色联动）；
- * - 附件 chip 在气泡上方右对齐一行（Operit trailing attachments）。
+ * - FLAT 模式：12dp 圆角、1dp accent 20% 边框、内边距 8×12；
+ * - 底色 = userBubble 令牌（随主色联动）；
+ * - 附件 chip 在气泡上方右对齐一行。
  */
 @Composable
 private fun UserBubble(msg: Msg.User) {
@@ -1213,7 +1209,7 @@ private fun UserBubble(msg: Msg.User) {
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.End,
     ) {
-        // 引用块（2026-09-11）：气泡上方右对齐，宽与气泡同口径（85%）
+        // 引用块：气泡上方右对齐，宽与气泡同口径（85%）
         if (msg.quote != null) {
             BoxWithConstraints(Modifier.padding(bottom = 4.dp)) {
                 QuoteCard(
@@ -1223,7 +1219,7 @@ private fun UserBubble(msg: Msg.User) {
             }
         }
         if (msg.attachments.isNotEmpty()) {
-            // 附件 chip 行（FlowRow：附件多时换行，不挤扁 —— 2026-09-17 与画布详情卡同款）
+            // 附件 chip 行（FlowRow：附件多时换行，不挤扁 —— 与画布详情卡同款）
             AttachmentsRow(msg.attachments, userBubbleBg, Modifier.padding(bottom = 4.dp))
         }
         BoxWithConstraints {
@@ -1255,9 +1251,9 @@ private fun UserBubble(msg: Msg.User) {
 // ───────────────────────────── 助手消息 ─────────────────────────────
 
 /**
- * 助手回复（2026-09-08 重设计，对齐 pi / pi-web）：无气泡卡片、纯 Markdown 直排；
- * 头部模型标签行（pi-web：11sp、弱化色、下距 4dp）；底部 usage 行（pi-web 顺序 in·out·cache·$、11sp）。
- * 2026-09-08 思考并入回答块（用户定）：模型标签下接「思考」+ v/^ 折叠行，展开显示思考文本，
+ * 助手回复：无气泡卡片、纯 Markdown 直排；
+ * 头部模型标签行（11sp、弱化色、下距 4dp）；底部 usage 行（顺序 in·out·cache·$、11sp）。
+ * 思考并入回答块：模型标签下接「思考」+ v/^ 折叠行，展开显示思考文本，
  * 其下直接接 markdown 正文（思考不再单独成卡）。
  */
 @Composable
@@ -1275,8 +1271,8 @@ private fun AssistantCard(
         }
         MarkdownText(msg.markdown, modifier = Modifier.padding(top = 2.dp))
         if (msg.usage != null) {
-            // 费用口径与用量页一致（2026-09-16 修）：走 UsageStore.cnyCostOf（服务商回传的费用优先，
-            // 否则按内置价格表折算成 ¥）。原来直接显示 usage.costUsd —— DeepSeek 这类不返回费用
+            // 费用口径与用量页一致：走 UsageStore.cnyCostOf（服务商回传的费用优先，
+            // 否则按内置价格表折算成 ¥）。若直接显示 usage.costUsd —— DeepSeek 这类不返回费用
             // 的服务商每条都显示 `$0.0`，而且和用量页的 ¥ 币种也对不上。
             val modelName = msg.model.orEmpty()
             val costCny = UsageStore.cnyCostOf(UsageStore.providerOf(modelName), modelName, msg.usage)
@@ -1294,28 +1290,25 @@ private fun AssistantCard(
 // ───────────────────────────── 思考折叠块 ─────────────────────────────
 
 /**
- * 思考折叠块（2026-09-12 按 **Hermes 桌面端** ThinkingDisclosure 重做）。
- * ★ 标题行不再带「思考程度档位」徽标（Pient 曾自加 `medium` 胶囊，2026-09-12 用户判为多余：
- *   档位是会话级设置，每条回答重复一遍没有信息量；档位仍可在模型选择器里看/改）。
- * 参考源：`hermes-agent/apps/desktop/src/components/assistant-ui/thread/message-parts.tsx`
- * （ThinkingDisclosure / ReasoningAccordionGroup）+ `components/chat/scaffold-row.tsx`。
+ * 思考折叠块。
+ * ★ 标题行不带「思考程度档位」徽标：
+ *   档位是会话级设置，每条回答重复一遍没有信息量；档位仍可在模型选择器里看/改。
  *
- * - 标题行文案（Hermes i18n `zh.ts` assistant.thread.* 逐字）：流式中「思考中」、
+ * - 标题行文案（逐字）：流式中「思考中」、
  *   完成后「思考了 3s」/ 不足 1s「思考了片刻」/ 无计时「已思考」（`formatElapsed`：<60s 为
  *   `3s`，≥60s 为 `1:20`）；
- * - 箭头在文字**右侧**（Hermes DisclosureRow：静息 alpha 0.4、展开 0.8），整行可点；
- * - 正文 = 思考 markdown（Hermes `text-xs leading-snug text-muted-foreground/85`
- *   → 12sp / 1.375 行高 / muted 85%，见 `MarkdownText(reasoning = true)`），无左边距（Hermes
- *   正文与标题行齐平）；
- * - 流式期间默认展开、正文限高 160dp（Hermes `max-h-40`）并**贴底跟随**增量；
- *   结束保持展开（Hermes live preview latch，判据见 ChatState.liveThinkingIndex）；
- * - 空思考不渲染（Hermes：无正文的思考组是纯噪音）。
+ * - 箭头在文字**右侧**（静息 alpha 0.4、展开 0.8），整行可点；
+ * - 正文 = 思考 markdown（12sp / 1.375 行高 / muted 85%，见 `MarkdownText(reasoning = true)`），
+ *   无左边距（正文与标题行齐平）；
+ * - 流式期间默认展开、正文限高 160dp 并**贴底跟随**增量；
+ *   结束保持展开（live preview latch，判据见 ChatState.liveThinkingIndex）；
+ * - 空思考不渲染（无正文的思考组是纯噪音）。
  *
  * @param live 流式中：标题「思考中」+ 微光 + 右侧计时秒表、正文贴底
  * @param elapsedSeconds 流式已用秒数（计时只在上屏层跑，落库用 durationMs）
  * @param expandedDefault 展开初值（刚流式完 = true；历史载入 = false）
  *
- * 可见性 = `internal`：节点详情卡（画布 FAB1）也用它，规格同源（《分支功能设计》§3.6）。
+ * 可见性 = `internal`：节点详情卡（画布 FAB1）也用它，规格同源。
  */
 @Composable
 internal fun ThinkingDisclosure(
@@ -1340,7 +1333,7 @@ internal fun ThinkingDisclosure(
         ) {
             ThinkingLabel(thoughtLabel(live, durationMs), live)
             ScaffoldCaret(open = open)
-            // 流式计时（Hermes ActivityTimerText：0.56rem / tracking .02em / midground-55；
+            // 流式计时（0.56rem / tracking .02em / midground-55；
             // 只在 pending 时出现，结束后时长已并入标题文案）
             if (live) {
                 Text(
@@ -1355,11 +1348,11 @@ internal fun ThinkingDisclosure(
             }
         }
         if (open) {
-            // 正文渲染：流式预览限高 160dp（Hermes `max-h-40`）并显示内容**尾部**
-            //（Hermes 预览是「滚到底跟随」，移动端等价形态 = 只露尾部）。
+            // 正文渲染：流式预览限高 160dp 并显示内容**尾部**
+            //（预览是「滚到底跟随」，移动端等价形态 = 只露尾部）。
             // ★ 绝不能用 verticalScroll：消息区在 LazyColumn 里、item 高度无界，
             //   嵌套垂直滚动会直接抛 IllegalStateException（infinity maximum height
-            //   constraints；2026-09-12 实测崩溃一次）——限高 + 裁切即可，不引入滚动容器。
+            //   constraints）——限高 + 裁切即可，不引入滚动容器。
             if (live) {
                 Box(
                     Modifier
@@ -1381,7 +1374,7 @@ internal fun ThinkingDisclosure(
     }
 }
 
-/** 思考标题文案（Hermes i18n 逐字：思考中 / 思考了 3s / 思考了片刻 / 已思考） */
+/** 思考标题文案（逐字：思考中 / 思考了 3s / 思考了片刻 / 已思考） */
 private fun thoughtLabel(live: Boolean, durationMs: Long?): String = when {
     live -> L.chat.thinkingLive
     durationMs == null -> L.chat.thought
@@ -1389,17 +1382,17 @@ private fun thoughtLabel(live: Boolean, durationMs: Long?): String = when {
     else -> L.chat.thoughtFor(formatElapsedSeconds(durationMs / 1000))
 }
 
-/** Hermes `formatElapsed`：<60s → `3s`；≥60s → `1:20` */
+/** 计时格式：<60s → `3s`；≥60s → `1:20` */
 private fun formatElapsedSeconds(seconds: Long): String =
     if (seconds < 60) "${seconds}s"
     else "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
 
 /**
- * 思考标题文字（流式中带 Hermes `shimmer` 效果：一道高光从左向右扫过；静止态恒亮）。
+ * 思考标题文字（流式中带 shimmer 效果：一道高光从左向右扫过；静止态恒亮）。
  */
 @Composable
 private fun ThinkingLabel(label: String, live: Boolean) {
-    // Hermes SCAFFOLD_LABEL_CLASS：11px / 18px 行高 / 前景 64%（与工具行、run 摘要同一支灰）
+    // 脚手架标签：11px / 18px 行高 / 前景 64%（与工具行、run 摘要同一支灰）
     val style = scaffoldLabelStyle()
     val base = scaffoldLabelColor()
     if (!live) {
@@ -1438,7 +1431,7 @@ private fun ThinkingLabel(label: String, live: Boolean) {
  */
 @Composable
 private fun ThinkingCard(msg: Msg.Thinking, expandedDefault: Boolean = false) {
-    // 统一无外框（2026-09-16）：与流式期间的思考预览、以及画布「节点详情」里的思考同一形态
+    // 统一无外框：与流式期间的思考预览、以及画布「节点详情」里的思考同一形态
     Column(Modifier.fillMaxWidth()) {
         ThinkingDisclosure(
             text = msg.text,
@@ -1454,7 +1447,7 @@ private fun tok(n: Int): String {
 }
 
 /**
- * 金额显示（消息卡用量行；2026-09-16）：≥1 元两位小数、≥0.01 三位、更小四位 ——
+ * 金额显示（消息卡用量行）：≥1 元两位小数、≥0.01 三位、更小四位 ——
  * 一条消息通常只有几厘钱，固定两位会全显示成 ¥0.00，看不出差别。
  */
 private fun money(v: Double): String = when {
@@ -1465,8 +1458,8 @@ private fun money(v: Double): String = when {
 }
 
 /**
- * 用户消息正文样式（Hermes user-message 规格）：13sp 字号（--conversation-text-font-size 0.8125rem）、
- * 1.3 行高（--human-msg-line-height）。字号按全局字号设置等比缩放（基准 14sp）。
+ * 用户消息正文样式：13sp 字号（0.8125rem）、1.3 行高；
+ * 字号按全局字号设置等比缩放（基准 14sp）。
  */
 @Composable
 private fun userTextStyle(): TextStyle {
@@ -1542,12 +1535,10 @@ private fun CompactionCard(msg: Msg.Compaction) {
 
 // ───────────────────────────── 分支切换条 ─────────────────────────────
 
-// 已移除（2026-09-08 用户定）：会话内分支在 /tree 画布页展示、会话外分支在会话列表展示，
-// 聊天流内不再出现分支卡片。
 
 // ───────────────────────────── 流式输出卡 ─────────────────────────────
 
-// ───────────────────────────── 渲染项（Hermes 工具运行分组） ─────────────────────────────
+// ───────────────────────────── 渲染项（工具运行分组） ─────────────────────────────
 
 /** 渲染项：单条消息，或一次「工具运行」（≥2 个连续活动型工具调用折成一行摘要）。 */
 private sealed interface ChatRender {
@@ -1559,11 +1550,11 @@ private sealed interface ChatRender {
 }
 
 /**
- * 把消息切成渲染项（Hermes `ToolGroupSlot` + `splitRunItems` 的口径）：
+ * 把消息切成渲染项：
  * - 成对工具结果（ToolCall 紧跟 ToolResult）并入工具行，不单列；
  * - 「活动型」工具调用（read/grep/find/ls/bash/其他）连续 ≥2 个 → 一次 Run（一行摘要）；
- * - 文件编辑/写入（[isCardTool]）是交付物，打断 run、各自成行（Hermes 同款切分）；
- * - 运行中的判定 = 正在流式 **且该 run 一直延伸到列表末尾**（Hermes 的尾部约束：
+ * - 文件编辑/写入（[isCardTool]）是交付物，打断 run、各自成行；
+ * - 运行中的判定 = 正在流式 **且该 run 一直延伸到列表末尾**（尾部约束：
  *   回合结束或后面又来了别的条目 → 视为已结束、可折叠）。
  */
 private fun buildChatRenderItems(
@@ -1606,10 +1597,10 @@ private fun buildChatRenderItems(
     return out
 }
 
-// ───────────────────────────── 会话块节奏（Hermes styles.css） ─────────────────────────────
+// ───────────────────────────── 会话块节奏 ─────────────────────────────
 
 /**
- * 会话块节奏（数值 = Hermes `styles.css`）：
+ * 会话块节奏：
  * `--conversation-turn-gap` 6px（消息之间 / 用户消息与回复之间）、
  * `--turn-block-gap` 12px（同一条回复内的块之间）、
  * `--scaffold-block-gap` = turn/3 = 4px（脚手架彼此相邻，例如工具行/思考标题行背靠背）、
@@ -1620,7 +1611,7 @@ private enum class BlockKind { HUMAN, SCAFFOLD, PROSE }
 private fun blockKindOf(msg: Msg): BlockKind = when (msg) {
     is Msg.User -> BlockKind.HUMAN
     is Msg.Assistant -> BlockKind.PROSE
-    // 工具行/run 摘要/思考标题/压缩条：Hermes 里都是「脚手架」
+    // 工具行/run 摘要/思考标题/压缩条：都算「脚手架」
     is Msg.ToolCall, is Msg.ToolResult, is Msg.Thinking, is Msg.Compaction -> BlockKind.SCAFFOLD
 }
 
@@ -1629,7 +1620,7 @@ private fun blockKindOf(item: ChatRender, messages: List<Msg>): BlockKind = when
     is ChatRender.One -> blockKindOf(messages[item.key])
 }
 
-/** 该项与上一项之间应有的上边距（Hermes 的 adjacency 规则搬到一维列表上）。 */
+/** 该项与上一项之间应有的上边距（adjacency 规则搬到一维列表上）。 */
 private fun renderGap(items: List<ChatRender>, messages: List<Msg>, i: Int): Dp {
     if (i <= 0) return 0.dp
     val prev = blockKindOf(items[i - 1], messages)
@@ -1653,7 +1644,7 @@ private fun locatorPreview(msg: Msg): String = when (msg) {
 }
 
 /**
- * 流式回复卡（2026-09-09 实现；2026-09-12 加思考预览）：
+ * 流式回复卡：
  * 思考先行（思考模式开启）——「思考中」+ 计时 + 实时正文贴底，随后才是逐片到达的回答正文与光标。
  */
 @Composable
@@ -1669,7 +1660,7 @@ private fun StreamingCard(
         animationSpec = infiniteRepeatable(tween(450, easing = LinearEasing), RepeatMode.Reverse),
         label = "cursorAlpha",
     )
-    // 流式秒表：思考起点已知就按它计时（Hermes ActivityTimerText 口径，1s 一跳）
+    // 流式秒表：思考起点已知就按它计时（1s 一跳）
     var elapsed by remember { mutableStateOf(0) }
     LaunchedEffect(thinkingStartedAt) {
         while (true) {

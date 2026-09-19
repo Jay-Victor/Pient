@@ -4,10 +4,10 @@ import com.pient.app.data.i18n.OptionLabels
 import com.pient.app.data.i18n.L
 import com.pient.app.data.i18n.Languages
 /**
- * **环境配置相关的静态数据**（2026-09-14 用户拍板：终端执行链路整体移除后，
- * 环境配置页已改为空白占位页 —— 原「执行环境二选一 / 镜像源 / 组件勾选」页面不再渲染本文件的清单）。
+ * **环境配置相关的静态数据**：环境配置页是空白占位页 ——
+ * 「执行环境二选一 / 镜像源 / 组件勾选」页面不渲染本文件的清单。
  *
- * 现存用途只剩两处：
+ * 用途有两处：
  * - [ExecEnv] —— 设置项 `exec_env` 的界面语义（`SettingsStore` 仍持有该字段，仅作界面状态）；
  * - [AptMirror] / [APT_MIRRORS]、[ComponentGroups] / [UBUNTU_COMPONENTS] —— 首启「环境安装」弹窗
  *   （`EnvSetupDialog`）仍在用（UI 壳，不真正安装）。
@@ -19,7 +19,7 @@ import com.pient.app.data.i18n.Languages
  * **这里只有 proot Ubuntu 的两个形态**：同一个 rootfs（它有**自己的 root 用户、自己的文件系统、
  * 自己的包管理器**），区别只在「怎么进去」——PRoot（应用 uid，无需 Root）与 su + chroot（真 uid 0）。
  *
- * **Android shell 不是这里的一个取值**（2026-09-15 用户口径）：它是**另一条完全独立的通道** ——
+ * **Android shell 不是这里的一个取值**：它是**另一条完全独立的通道** ——
  * Shizuku / Root 把命令**直接扔给 Android 系统**执行，不经过 terminal、不经过 Ubuntu，
  * 而且**即发即走、没有会话**（见 `runtime/AndroidShell.kt` 与 `runtime/ExecBridge.kt`）。
  * 两条轴别混：本枚举管「terminal 落在哪」，权限档位管「AI 能不能用 Android shell 通道」。
@@ -63,13 +63,11 @@ enum class ExecEnv(
 /**
  * apt 镜像源：**每个镜像存两条路径**（主档 + ports），按本机架构二选一。
  *
- * **为什么必须有两条（2026-09-16 真机「安装环境总是失败」的根因）**：Ubuntu 把架构分两档 ——
+ * **为什么必须有两条**：Ubuntu 把架构分两档 ——
  * `amd64/i386` 发布在**主档**（`/ubuntu/`），`arm64/armhf` 发布在 **ports**（`/ubuntu-ports/`，
  * 官方源是 `ports.ubuntu.com`）。两边互不包含：往主档请求 `dists/noble/main/binary-arm64/Packages`
  * 会 **404 Not Found**（apt 报 `E: Failed to fetch … 404`、退出码 100）。
- * 清单原来只写了主档 URI —— x86_64 模拟器上一直是对的，一到 arm64 真机整轮失败
- * （实测：`mirrors.tuna.tsinghua.edu.cn/ubuntu/dists/noble/main/binary-arm64/Packages` = 404，
- * 同镜像 `/ubuntu-ports/…` = 200）。所以两个路径都存，由 [uriFor] 按 [PiRuntime.hostMachine] 选。
+ * 两个路径都存，由 [uriFor] 按 [PiRuntime.hostMachine] 选。
  */
 data class AptMirror(val name: String, val uri: String, val portsUri: String) {
     /** 本机架构对应的真实 URI（arm64 / armhf → ports 路径，其余 → 主档） */
@@ -78,7 +76,7 @@ data class AptMirror(val name: String, val uri: String, val portsUri: String) {
 }
 
 /**
- * 默认 apt 镜像源（2026-09-14 实测结论）：**国内网络下官方源拉包会
+ * 默认 apt 镜像源：**国内网络下官方源拉包会
  * `E: Failed to fetch` → apt 退出码 100**，而清华 TUNA 同一步骤通过。
  * 所以新增/首启的默认值取 TUNA（用户可在页面里改；已选过的不受影响）。
  *
@@ -88,7 +86,7 @@ data class AptMirror(val name: String, val uri: String, val portsUri: String) {
  */
 const val DEFAULT_APT_MIRROR = "清华 TUNA"
 
-/** 五个镜像的主档与 ports 路径**都实测过**（2026-09-16：主档 200 只含 amd64，ports 200 含 arm64 + noble-security） */
+/** 五个镜像的主档与 ports 路径：主档只含 amd64，ports 含 arm64 + noble-security */
 val APT_MIRRORS = listOf(
     AptMirror("Ubuntu 官方", "http://archive.ubuntu.com/ubuntu/", "http://ports.ubuntu.com/ubuntu-ports/"),
     AptMirror("清华 TUNA", "http://mirrors.tuna.tsinghua.edu.cn/ubuntu/", "http://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/"),
@@ -106,10 +104,9 @@ fun aptMirrorByName(name: String?): AptMirror =
  * 顺序即页面分节的顺序（不依赖 groupBy 的返回顺序）。
  */
 object ComponentGroups {
-    // 口径照 Operit 的安装分类（**按运行时 / 语言分**，不按"用途"分）：
-    // 一个运行时一类，类里的东西只出现在这一类里（不会再出现"Node 在一处、Node 生态在另一处"）。
-    // 差异只有一处：**Pient 自己必须的两类排在最前，并在标题下写橙色「（Pient 必须）」**——
-    // 这正是 Operit 标记「(Operit 必须)」的位置与写法。
+    // 分类口径（**按运行时 / 语言分**，不按"用途"分）：
+    // 一个运行时一类，类里的东西只出现在这一类里（不会出现"Node 在一处、Node 生态在另一处"）。
+    // **Pient 自己必须的两类排在最前，并在标题下写橙色「（Pient 必须）」**。
 
     /** pi 是 Node 程序：不装 Node 就用不了 pi（pi 本体已随 Pient 预置） */
     const val NODE = "Node.js"
@@ -145,14 +142,14 @@ object ComponentGroups {
         else -> ""
     }
 
-    /** 分类级「（Pient 必须）」：照 Operit 在分类标题下写橙色小字 */
+    /** 分类级「（Pient 必须）」：在分类标题下写橙色小字 */
     val REQUIRED_GROUPS = setOf(NODE, PI_SEARCH)
 }
 
 
 
 /**
- * 一个「环境内软件」组件（照 Operit `PackageItem` 的字段口径）。
+ * 一个「环境内软件」组件。
  *
  * - [id]：稳定标识（勾选集合、检测结果都以它为主键）；
  * - [name]：页面显示名；
@@ -161,7 +158,7 @@ object ComponentGroups {
  * - [detectCmd]：自定义检测命令（装了但版本不对、或没有可执行文件的服务如 openssh-server 用 `dpkg -s`）；
  * - [installCmd]：自定义安装命令（不走 apt 单包，如 NodeSource / npm 全局包 / rustup）；
  * - [group]：页面分类（见 [ComponentGroups]）；
- * - [required]：**「Pient 必须」**（2026-09-14 重新设计加）：不装它 Pient 的核心能力就是残的
+ * - [required]：**「Pient 必须」**：不装它 Pient 的核心能力就是残的
  *   （目前只有 nodejs 与 pi —— node 是 pi 的运行前提，pi 本体虽已预置但同样必备）；
  * - [heavy]：体积/耗时明显更大的项（页面上给一枚「大」标记）。
  */
@@ -220,12 +217,12 @@ val UBUNTU_COMPONENTS: List<UbuntuComponent>
         L.env.nodejsDesc,
         ComponentGroups.NODE,
         required = true,
-        // 判定要**node + npm 都在**：实测踩过「node 在、npm 缺位」的残状态（更新 pi 时只报 command not found）——
+        // 判定要**node + npm 都在**：否则会出现「node 在、npm 缺位」的残状态（更新 pi 时只报 command not found）——
         // 只判 node 会让页面显示「已安装」而禁选，用户就没有修复入口了
         detectCmd = "node -v 2>/dev/null | grep -q '^v2[4-9]\\.' && command -v npm >/dev/null 2>&1",
         installCmd = "apt-get install -y --no-install-recommends ca-certificates curl gnupg && " +
             "curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && " +
-            // node 在、npm 缺（文件被删过/装残了）时 apt 会说 already the newest version 而不修 —— 实测踩过，
+            // node 在、npm 缺（文件被删过/装残了）时 apt 会说 already the newest version 而不修 ——
             // 所以这种残状态必须显式 --reinstall（否则用户点了「安装」却什么都没发生）
             "if command -v node >/dev/null 2>&1 && ! command -v npm >/dev/null 2>&1; then " +
             "echo '[Node.js] 检测到 node 在、npm 缺失，重装 nodejs 修复'; apt-get install -y --reinstall nodejs; " +
@@ -291,7 +288,7 @@ val PI_AGENT_UPDATE: UbuntuComponent
     L.env.piAgentDesc,
     ComponentGroups.NODE,
     // 先自检 npm：pi 本体不需要 npm（工具都在包里），但「更新」这一步是 npm 在干活 ——
-    // 实测踩过：guest 里 npm 缺位时只报 `npm: command not found`（退出码 127），看不出该干什么。
+    // guest 里 npm 缺位时只报 `npm: command not found`（退出码 127），看不出该干什么。
     installCmd = "if ! command -v npm >/dev/null 2>&1; then " +
         "echo '[pi 更新] 找不到 npm —— 请先在本页勾选「Node.js 24」重装 Node（npm 随 Node 一起来）'; exit 3; fi; " +
         "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",

@@ -11,14 +11,14 @@ import java.util.concurrent.TimeUnit
 import org.json.JSONObject
 
 /**
- * **技能市场**（2026-09-15，要求 4）：通信照 pi-web 的做法，落到 Pient 里。
+ * **技能市场**。
  *
- * 参考实现（`Refences/pi-web-0.8.9`）的两条通道，逐字对齐：
- *  - **搜索** `app/api/skills/search/route.ts`：先打 `https://skills.sh/api/search?q=<q>&limit=<n>`
+ * 两条通道：
+ *  - **搜索**：先打 `https://skills.sh/api/search?q=<q>&limit=<n>`
  *    （JSON `{skills:[{id,name,source,installs}]}`；条目拼成 `source@name`，按安装量倒序）；
  *    该接口不通时回落到 **`npx skills find <查询词>`**，解析它的文本输出
  *    （`owner/repo@skill   NNK installs`，下一行 `└ https://…`）。
- *  - **安装** `app/api/skills/install/route.ts`：**`npx skills add <包> -y --agent pi`**
+ *  - **安装**：**`npx skills add <包> -y --agent pi`**
  *    （全局再加 `-g`；项目作用域用 cwd = 项目目录）。`--agent pi` 是关键 —— 让 skills CLI
  *    按 pi 的目录约定落地（这与「技能页要适配 pi」是同一件事）。
  *
@@ -32,7 +32,7 @@ object PiSkillsMarket {
     /** 专用会话名（计算属性：object 里的 val 只求值一次，写 `L.…` 会冻结成首帧语言） */
     val SESSION: String get() = L.runtime.skillMarketSession
 
-    /** 市场服务地址（pi-web 里是环境变量 SKILLS_API_URL，默认 skills.sh） */
+    /** 市场服务地址（默认 skills.sh） */
     private const val SEARCH_API_BASE = "https://skills.sh"
 
     private const val DEFAULT_LIMIT = 30
@@ -76,7 +76,7 @@ object PiSkillsMarket {
     /**
      * 安装（或更新）一条市场技能：`npx skills add <pkg> -y --agent pi [-g]`。
      *
-     * **前置自检 git**（2026-09-16 真机实测）：skills CLI 的市场条目都是 `owner/repo@skill`，
+     * **前置自检 git**：skills CLI 的市场条目都是 `owner/repo@skill`，
      * 它靠 `git clone` 拉仓库 —— guest 里没有 git 时它只打印
      * `Failed to clone …: Error: spawn git ENOENT`，退回页面只有一句「安装失败（退出码 …）」，
      * 用户看不出该干什么。这里先查一次并给出可执行的下一步（git 在「环境配置 → 基础与开发」里）。
@@ -102,9 +102,9 @@ object PiSkillsMarket {
     // ─────────────────────────── 搜索实现 ───────────────────────────
 
     /**
-     * 主通道：skills.sh 的 JSON 接口（与 pi-web 完全一致）。
+     * 主通道：skills.sh 的 JSON 接口。
      *
-     * **必须在 IO 线程**（2026-09-16 实测修的 bug）：这里是阻塞式 `execute()`，
+     * **必须在 IO 线程**：这里是阻塞式 `execute()`，
      * 而调用方是 Compose 的 `LaunchedEffect`（Main dispatcher）——直接调会抛
      * `NetworkOnMainThreadException`，它的 `message` 是 **null**，日志里只看得到
      * 「skills.sh 搜索失败（回落 npx）：null」，很容易被当成网络问题。
@@ -136,7 +136,7 @@ object PiSkillsMarket {
     }
 
     /**
-     * 回落通道：`npx skills find <q>`（pi-web 同款）。
+     * 回落通道：`npx skills find <q>`。
      * 需要的 Node 环境由「环境配置」页提供；没装 node 时给出可读的一步指引，而不是丢一段 stderr。
      */
     private suspend fun searchViaNpx(context: Context, query: String, limit: Int): Pair<List<Hit>, String?> {
@@ -158,7 +158,7 @@ object PiSkillsMarket {
     }
 
     /**
-     * 解析 `npx skills find` 的输出（照 pi-web 的 parseSearchOutput）：
+     * 解析 `npx skills find` 的输出：
      * 一行 `owner/repo@skill   12.3K installs`，紧随其后可能有一行 `└ https://…`。
      */
     internal fun parseFindOutput(raw: String): List<Hit> {
@@ -193,7 +193,7 @@ object PiSkillsMarket {
         }
     }
 
-    /** 与 pi-web 的 formatInstalls 同口径（1.2M / 12.3K / 42 installs） */
+    /** 安装量展示格式（1.2M / 12.3K / 42 installs） */
     internal fun formatInstalls(count: Int): String = when {
         count <= 0 -> ""
         count >= 1_000_000 -> trimZero(count / 1_000_000.0) + "M installs"

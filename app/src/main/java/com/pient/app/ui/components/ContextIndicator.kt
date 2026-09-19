@@ -22,9 +22,9 @@ import com.pient.app.ui.theme.LightWarn
 import com.pient.app.ui.theme.LocalPientIsDark
 
 /**
- * 上下文指示器收起态（设计计划 3.4.2，Operit UsageRing 同源）：
+ * 上下文指示器收起态：
  * 环形用量环 + 百分比；>75% 警告黄、>90% 破坏红、其余主色。
- * 点击展开上下文用量卡（弹窗由 ChatScreen 以浮层呈现，2026-08-28 重构）。
+ * 点击展开上下文用量卡（弹窗由 ChatScreen 以浮层呈现）。
  */
 @Composable
 fun ContextIndicator(

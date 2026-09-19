@@ -74,15 +74,15 @@ import com.pient.app.ui.components.computeProjectInfo
 import java.io.File
 
 /**
- * 项目管理设置（2026-09-03 制作并二版迭代；原设置页「项目记录管理」占位行接入）：
+ * 项目管理设置：
  * 两组「图案 + 标题 + 卡片」：
  * - 项目记录：搜索框（placeholder 说明）+ 全部项目列表（分隔线分隔，点击单选高亮；
  *   行尾竖直三点菜单 = 详细信息 / 重命名 / 解绑 / 删除，语义与聊天页侧边栏项目菜单一致）；
  * - 会话记录：搜索框（placeholder 说明）+ 「已选择 0/N 条」/「全选」「取消」（取消仅在
  *   已选择后亮蓝）+ 全部会话列表（跨项目，圆形选择框，选中圆内 √；行尾三点菜单 = 重命名 / 删除）+
  *   选中后底部出现「操作已选会话（N）」→ 弹窗（导出会话 / 删除会话 选择项 + 取消 / 确定）。
- *   导出与删除都是真实执行（导出 → 系统「下载/Pient/」的 Markdown，2026-09-16 真实化）。
- *   2026-09-16 另修两处：① 项目重命名现在会连磁盘目录一起改；② 「详细信息」统计下放 IO 线程。
+ *   导出与删除都是真实执行（导出 → 系统「下载/Pient/」的 Markdown）。
+ *   项目重命名会连磁盘目录一起改；「详细信息」统计放 IO 线程。
  */
 @Composable
 fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
@@ -106,14 +106,14 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
     var sessionRenameFor by remember { mutableStateOf<String?>(null) }
     var sessionDeleteConfirmFor by remember { mutableStateOf<String?>(null) }
 
-    // ── 已解绑项目组（2026-09-03 新增）：files/Projects/ 下不在项目列表中的目录 ──
+    // ── 已解绑项目组：files/Projects/ 下不在项目列表中的目录 ──
     var unbindQuery by remember { mutableStateOf("") }
     val selectedUnbound = remember { mutableStateListOf<String>() } // 目录绝对路径
     var unboundMenuFor by remember { mutableStateOf<String?>(null) }
     var unboundRenameFor by remember { mutableStateOf<String?>(null) }
     var unboundDeleteConfirmFor by remember { mutableStateOf<String?>(null) }
     var unbindTick by remember { mutableIntStateOf(0) } // 绑定/重命名/删除后刷新目录列表
-    // 已解绑组批量操作弹窗（2026-09-03 追加）
+    // 已解绑组批量操作弹窗
     var unboundActionDialogOpen by remember { mutableStateOf(false) }
     var unboundActionChoice by remember { mutableStateOf<Int?>(null) } // 0 = 重新绑定；1 = 删除
 
@@ -128,7 +128,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
             it.title.contains(sessionQuery.trim(), ignoreCase = true)
     }
 
-    // 已解绑项目（2026-09-03 新增）：files/Projects/ 下不在项目列表中的目录。
+    // 已解绑项目：files/Projects/ 下不在项目列表中的目录。
     // 已绑定判定 = 本地项目（uri=null）path 与目录绝对路径精确匹配；SAF 项目不落此目录。
     val projectsDir = File(context.filesDir, "Projects")
     val unboundDirs = (projectsDir.listFiles()?.filter { it.isDirectory } ?: emptyList())
@@ -182,8 +182,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                         placeholder = L.project.searchProjects,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
                     )
-                    // 项目列表（2026-09-03：搜索框下方分隔线已移除；
-                    // 2026-09-03 高度上限 280dp 防记录增多无限延伸，超出后卡片内滚动）
+                    // 项目列表（高度上限 280dp 防记录增多无限延伸，超出后卡片内滚动）
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -253,8 +252,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                         placeholder = L.session.searchSessions,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
                     )
-                    // 「已选择 0/N 条」+ 全选 / 取消（取消仅在已选择后亮蓝，2026-09-03；
-                    // 搜索框下方与已选择行下方两条分隔线均已移除）
+                    // 「已选择 0/N 条」+ 全选 / 取消（取消仅在已选择后亮蓝）
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
@@ -292,8 +290,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                                 .padding(horizontal = 4.dp, vertical = 4.dp),
                         )
                     }
-                    // 会话列表（2026-09-03：「已选择」行下方分隔线已移除；
-                    // 2026-09-03 高度上限 340dp 防记录增多无限延伸，超出后卡片内滚动）
+                    // 会话列表（高度上限 340dp 防记录增多无限延伸，超出后卡片内滚动）
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -351,7 +348,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
 
                 Spacer(Modifier.heightIn(min = 8.dp))
 
-                // ── 已解绑项目（2026-09-03 新增：files/Projects/ 下已移出项目列表的目录） ──
+                // ── 已解绑项目（files/Projects/ 下已移出项目列表的目录） ──
                 SectionHeader(L.project.sectionUnbound, icon = Icons.Outlined.LinkOff)
                 Column(
                     modifier = Modifier
@@ -405,7 +402,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                                 .padding(horizontal = 4.dp, vertical = 4.dp),
                         )
                     }
-                    // 已解绑项目列表（2026-09-03 高度上限 340dp 防记录增多无限延伸，超出后卡片内滚动）
+                    // 已解绑项目列表（高度上限 340dp 防记录增多无限延伸，超出后卡片内滚动）
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -456,7 +453,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                             }
                         }
                     }
-                    // 选中后底部出现操作按键（2026-09-03 追加）
+                    // 选中后底部出现操作按键
                     AnimatedVisibility(visible = selectedUnbound.isNotEmpty()) {
                         PientButton(
                             L.project.selectedProjectsAction(selectedUnbound.size),
@@ -485,7 +482,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                     actionDialogOpen = false
                     when (actionChoice) {
                         0 -> {
-                            // 真实导出（2026-09-16；此前是原型占位 Toast）：
+                            // 真实导出：
                             // Markdown 落到系统「下载/Pient/」，全部会话合成一个文档。
                             val picks = allSessions.filter { selectedSessions.contains(it.id) }
                             val appCtx = context.applicationContext
@@ -550,7 +547,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
         // ── 项目详细信息弹窗 ──
         projectDetailFor?.let { name ->
             val project = chatState.projects.firstOrNull { it.name == name } ?: return@let
-            // 统计放 IO 线程（2026-09-16 修）：SAF 大目录几千文件，组合期直接扫会卡死/ANR
+            // 统计放 IO 线程：SAF 大目录几千文件，组合期直接扫会卡死/ANR
             var info by remember(project.path, project.uri) { mutableStateOf<ProjectInfo?>(null) }
             LaunchedEffect(project.path, project.uri) { info = computeProjectInfo(context, project) }
             Box(Modifier.fillMaxSize()) {
@@ -585,7 +582,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
                     confirmEnabled = newName.isNotBlank() &&
                         (newName.trim() == name || chatState.projects.none { it.name == newName.trim() }),
                     onConfirm = {
-                        // 失败（目录被占用 / 同名目录）如实提示（2026-09-16 起 renameProject 会连目录一起改）
+                        // 失败（目录被占用 / 同名目录）如实提示（renameProject 会连目录一起改）
                         chatState.renameProject(name, newName)?.let { err ->
                             Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
                         }
@@ -722,7 +719,7 @@ fun ProjectManagementScreen(nav: NavController, chatState: ChatState) {
             }
         }
 
-        // ── 已解绑项目批量操作弹窗（2026-09-03 追加）：重新绑定 / 删除 选择项 + 取消 / 确定 ──
+        // ── 已解绑项目批量操作弹窗：重新绑定 / 删除 选择项 + 取消 / 确定 ──
         if (unboundActionDialogOpen) {
             PientDialog(
                 title = L.project.selectedProjectsTitle,

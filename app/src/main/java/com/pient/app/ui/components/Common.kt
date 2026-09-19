@@ -85,7 +85,7 @@ import com.pient.app.ui.theme.MonoFont
 import com.pient.app.ui.theme.PientPanel
 
 // ─────────────────────────────────────────────────────────────
-// 连续滑轨（2026-08-31：背景设置模糊/亮度专用通用组件）
+// 连续滑轨（背景设置模糊/亮度专用通用组件）
 // 视觉逐项对齐 ThinkingLevelSlider（模型选择器思考程度同款）：
 // 12dp 圆角轨道 + 主色→品牌紫渐变填充 + 24dp 圆角方形拇指（光晕 + 0.5dp 边框）；
 // 差异：连续取值（无档位指示点）、步进 = 量程/50。
@@ -111,8 +111,8 @@ fun PientSlider(
     val trackHpx = with(density) { trackHeight.toPx() }
 
     val span = valueRange.endInclusive - valueRange.start
-    // 无动画直接渲染（2026-08-31 三轮修正）：连续滑轨首要诉求是绝对跟手。
-    // 历史：①animateFloatAsState 拖动中 200ms 追赶 = 灵敏度低；②拖动中 snapTo + 松手 animateTo，
+    // 无动画直接渲染：连续滑轨首要诉求是绝对跟手。
+    // ①animateFloatAsState 拖动中 200ms 追赶 = 灵敏度低；②拖动中 snapTo + 松手 animateTo，
     // 因每帧重启 LaunchedEffect 协程、最后一步 snapTo 未完成即松手，animateTo 从中间位置补动画 = 快速滑动回弹。
     // M3 Slider 本身无过渡动画；方向键步进瞬时跳档可接受。
     val p = ((value - valueRange.start) / span).coerceIn(0f, 1f)
@@ -283,7 +283,7 @@ fun PientSegmented(
                 modifier = Modifier
                     .weight(1f)
                     // 固定高度：中文字形度量（ascent+descent）大于 lineHeight 时会撑高行盒，
-                    // 导致中/英文标签两段高度不一致（2026-09-01 用量页 Token vs 费用实测 37px/45px）
+                    // 导致中/英文标签两段高度不一致
                     .height(34.dp)
                     .background(
                         if (sel) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
@@ -430,7 +430,6 @@ fun PientDialog(
     showClose: Boolean = true,
     showCancel: Boolean = true, // false = 单按钮（仅确认）；「详细信息」等纯展示弹窗用
     // 次按钮再加一个（如「不保存」）：与「取消」同列排在确认键左侧
-    // （Operit 关闭未保存文件弹窗结构：[取消][不保存] 保存）
     extraActionText: String? = null,
     onExtraAction: (() -> Unit)? = null,
     content: @Composable () -> Unit,
@@ -493,12 +492,11 @@ fun PientDialog(
 
 // ─────────────────────────────────────────────────────────────
 // 主/次按钮（高 40dp，圆角 12dp）
-// ★ 内容内边距（2026-09-12）：按钮背景宽度 wrap 内容，若调用方不给外部宽度约束
-//   （weight/fillMaxWidth），文字会紧贴圆角边框 —— 实测「设为当前档位」按钮
-//   背景 82.3dp × 33.9dp 与文字 ink 完全同宽 = 左右内边距 0.0dp，观感「紧」。
-//   现由组件保证左右各 [contentPadding] 的内边距：外部已定宽的调用点不受影响
+// ★ 内容内边距：按钮背景宽度 wrap 内容，若调用方不给外部宽度约束
+//   （weight/fillMaxWidth），文字会紧贴圆角边框。
+//   由组件保证左右各 [contentPadding] 的内边距：外部已定宽的调用点不受影响
 //   （文字在更大盒子里居中），只有 wrap 内容的调用点会自然长出内边距。
-//   默认 16dp = 修掉贴边 + 给等宽多按钮行留足余量（3 联按钮行可用显式更小值，见
+//   默认 16dp = 不贴边 + 给等宽多按钮行留足余量（3 联按钮行可用显式更小值，见
 //   PluginDetailDialog「检查更新 / 删除 / 关闭」行）。
 // ─────────────────────────────────────────────────────────────
 @Composable
@@ -530,7 +528,7 @@ fun PientButton(
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        // 加载态：文字位置换成旋转圆弧（2026-09-10 插件弹窗「检查更新」首用）
+        // 加载态：文字位置换成旋转圆弧
         if (loading) {
             Box(Modifier.padding(horizontal = dp(contentPadding))) {
                 ArcSpinner(size = 16.dp, color = fg)
@@ -549,8 +547,7 @@ fun PientButton(
 }
 
 // ─────────────────────────────────────────────────────────────
-// 旋转圆弧加载指示（pi-web RunningSessionIndicator 逐值对齐；2026-09-09 会话行「运行中」首用，
-// 2026-09-10 提取为公共组件供按钮加载态复用）：14dp 画布、sweep 305.1°、stroke 1.63dp 圆头、
+// 旋转圆弧加载指示：14dp 画布、sweep 305.1°、stroke 1.63dp 圆头、
 // 900ms 线性旋转一圈。颜色默认主色，填入式按钮上传 onPrimary。
 // ─────────────────────────────────────────────────────────────
 @Composable
@@ -588,8 +585,8 @@ private fun dp(v: Int) = v.dp
 
 // ─────────────────────────────────────────────────────────────
 // 卡片内分隔线（块/条目之间：outlineVariant 50% 透明，两端各缩进 14dp）
-// 上下不再自带留白：到内容的间隙 = 内容自身 padding（与内容到卡片边框距离一致，
-// Operit SettingsGroup 同款；此前 vertical 10dp 使线到文字 ~22dp vs 边框 12dp，用户 2026-08-31 指出偏大）
+// 上下自带留白为 0：到内容的间隙 = 内容自身 padding（与内容到卡片边框距离一致；
+// 自带 vertical 10dp 会让线到文字 ~22dp vs 边框 12dp，偏大）
 // ─────────────────────────────────────────────────────────────
 @Composable
 fun DividerLine(modifier: Modifier = Modifier) {
@@ -603,7 +600,7 @@ fun DividerLine(modifier: Modifier = Modifier) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 项目详细信息（2026-09-02 侧边栏首创；2026-09-03 移至公共组件供项目管理页复用）：
+// 项目详细信息：
 // 位置 / 大小 / 修改时间
 // ─────────────────────────────────────────────────────────────
 
@@ -612,11 +609,11 @@ data class ProjectInfo(val size: String, val modified: String)
 /**
  * 项目文件夹统计：大小 / 最近修改时间（位置由调用方展示）。
  *
- * **suspend + IO 线程**（2026-09-16 修）：旧实现是普通函数、SAF 分支用 `DocumentFile.listFiles()`
- * 逐项取 length/lastModified（每文件 2~3 次 IPC），而两个调用点都在**组合期主线程**用
- * `remember { computeProjectInfo(...) }` 直接调 —— 几千文件的 SAF 目录一打开详情弹窗就卡死/ANR
- * （与 2026-09-12 那次 4080 文件事故同一成因）。现在统一走 [ProjectFiles.projectStat]
- * （每目录一次 cursor 查询 + 节点预算），并在 IO 线程执行；调用点改为 LaunchedEffect + 加载态。
+ * **suspend + IO 线程**：SAF 分支若用 `DocumentFile.listFiles()`
+ * 逐项取 length/lastModified（每文件 2~3 次 IPC），又在**组合期主线程**用
+ * `remember { computeProjectInfo(...) }` 直接调 —— 几千文件的 SAF 目录一打开详情弹窗就卡死/ANR。
+ * 统一走 [ProjectFiles.projectStat]
+ * （每目录一次 cursor 查询 + 节点预算），并在 IO 线程执行；调用点用 LaunchedEffect + 加载态。
  */
 suspend fun computeProjectInfo(
     context: android.content.Context,
@@ -660,7 +657,7 @@ fun DetailRow(label: String, value: String) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 设备形态判定（全端唯一出处）：screenWidthDp >= 600 = 平板（OperitApp 同款）
+// 设备形态判定（全端唯一出处）：screenWidthDp >= 600 = 平板
 // ─────────────────────────────────────────────────────────────
 @Composable
 fun isTabletLayout(): Boolean = LocalConfiguration.current.screenWidthDp >= 600
@@ -693,7 +690,7 @@ fun SectionHeader(text: String, modifier: Modifier = Modifier, icon: ImageVector
 
 /**
  * 通用输入框（surfaceContainerHigh 底 + hairline 边 + 10dp 圆角；suffix 显示在输入框内最右侧）。
- * 2026-09-11 从服务商配置页抽到公共组件（模型定价弹窗同样使用，避免第二份实现）。
+ * 服务商配置页与模型定价弹窗共用，避免第二份实现。
  */
 @Composable
 fun PientInputBox(
@@ -752,8 +749,8 @@ fun PientInputBox(
 
 /**
  * 通用多行输入框（与 [PientInputBox] 同视觉：surfaceContainerHigh 底 + hairline 边 + 10dp 圆角）。
- * 2026-09-13 新增：上下文设置的「自定义总结规则」要写多行规则，PientInputBox 固定 38dp 单行放不下。
- * 输入选项对齐终端页的实测口径（`KeyboardCapitalization.None` + 关自动更正）：规则里常含
+ * 上下文设置的「自定义总结规则」要写多行规则，PientInputBox 固定 38dp 单行放不下。
+ * 输入选项对齐终端页口径（`KeyboardCapitalization.None` + 关自动更正）：规则里常含
  * 路径/英文缩写，首字母被 IME 大写会改变语义。
  */
 @Composable
@@ -798,7 +795,7 @@ fun PientTextArea(
 }
 
 /**
- * 卡片内搜索框（2026-09-17 从项目管理页抽成共用组件）：surfaceContainerHigh 底 + 圆角 10 +
+ * 卡片内搜索框：surfaceContainerHigh 底 + 圆角 10 +
  * Search 图案 + placeholder + 有输入时右侧 × 清空。项目管理页三处与日志查看页共用（同一语义一份实现）。
  */
 @Composable
@@ -854,7 +851,7 @@ fun PientSearchField(
 }
 
 /**
- * 弹窗操作选择行（2026-09-17 从项目管理页抽成共用组件）：图标 + 文字；
+ * 弹窗操作选择行：图标 + 文字；
  * 选中 = accent 0.10 底 + 描边 + 右侧 √；danger = 红字（删除类）。
  */
 @Composable

@@ -3,7 +3,7 @@ package com.pient.app.data
 import com.pient.app.data.i18n.L
 import android.content.Context
 
-/** 计费方式（Operit BillingMode 同款：按 Token 计费 / 按次计费） */
+/** 计费方式（按 Token 计费 / 按次计费） */
 enum class BillingMode {
     TOKEN,
     COUNT;
@@ -15,14 +15,14 @@ enum class BillingMode {
     }
 }
 
-/** 计价币种（Operit PricingCurrency 同款） */
+/** 计价币种 */
 enum class PricingCurrency(val code: String, val symbol: String) {
     CNY("CNY", "¥"),
     USD("USD", "$"),
 }
 
 /**
- * 模型定价（对齐 Operit ModelPricingDefaults）：
+ * 模型定价：
  * 按 Token 计费用三档单价（输入 / 输出 / 缓存输入，每百万 tokens），
  * 按次计费用单次请求价；币种决定金额是否按汇率折算成人民币展示。
  */
@@ -37,27 +37,27 @@ data class ModelPricing(
     val cacheWritePerMillion: Double = 0.0,
 )
 
-/** 折算成人民币（Operit convertToCny 同款） */
+/** 折算成人民币 */
 fun toCny(amount: Double, currency: PricingCurrency, usdToCnyRate: Double): Double =
     if (currency == PricingCurrency.USD) amount * usdToCnyRate else amount
 
-/** 人民币 → 模型币种（定价弹窗按 ¥ 输入、按模型币种存，Operit convertCnyToPricingCurrency 同款） */
+/** 人民币 → 模型币种（定价弹窗按 ¥ 输入、按模型币种存） */
 fun fromCny(amountCny: Double, currency: PricingCurrency, usdToCnyRate: Double): Double =
     if (currency == PricingCurrency.USD && usdToCnyRate > 0.0) amountCny / usdToCnyRate else amountCny
 
 /**
- * 内置模型价格表（2026-09-11 按 Operit 的处理方式实现）：
- * 数据 = `assets/model_pricing.tsv`（移植自 Operit `ScrapedModelPricingRowsCollect` 的 548 行抓取表，
+ * 内置模型价格表：
+ * 数据 = `assets/model_pricing.tsv`（548 行抓取表，
  * 服务商键已映射到 Pient 服务商 id；`*` 开头的行只参与「模型名回退」），
  * 行格式 `provider|model|计费方式|输入价|输出价|缓存输入价(或按次价)|币种`（每百万 tokens）。
  *
- * 查找顺序与 Operit `ModelPricingDefaultsCollect.getDefaultPricing` 一致：
+ * 查找顺序：
  * ① `provider:model` 精确匹配 → ② 模型名回退（国内服务商优先 CNY、其余优先 USD，取不到取第一条）
  * → ③ 服务商兜底（国内 = CNY 零价 / 海外 = USD 零价）。
  */
 object ModelPricingDefaults {
 
-    /** 默认美元汇率（Operit DEFAULT_USD_TO_CNY_RATE 同款） */
+    /** 默认美元汇率 */
     const val DEFAULT_USD_TO_CNY_RATE = 7.2
 
     private const val ASSET = "model_pricing.tsv"
@@ -132,7 +132,7 @@ object ModelPricingDefaults {
                     currency = currency,
                 )
             } else {
-                // 按 Token 计费：第 6 列是缓存输入价，未标注（0）时按输入价计（Operit 同口径）；第 8 列可选=缓存写入价
+                // 按 Token 计费：第 6 列是缓存输入价，未标注（0）时按输入价计；第 8 列可选=缓存写入价
                 ModelPricing(
                     billingMode = BillingMode.TOKEN,
                     inputPerMillion = input,
@@ -151,7 +151,7 @@ object ModelPricingDefaults {
         byNormalizedName = normalizedMap
     }
 
-    /** 内置默认定价（三级查找 + 归一化宽松匹配，Operit 同款结构 + 2026-09-11 容错层） */
+    /** 内置默认定价（三级查找 + 归一化宽松匹配） */
     fun defaultFor(providerId: String, model: String): ModelPricing {
         val provider = providerId.trim().lowercase()
         val name = model.trim()

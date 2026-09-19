@@ -4,10 +4,10 @@ import com.pient.app.data.SettingsStore
 import java.util.Locale
 
 /**
- * 界面语言注册表（机制对齐 pi-web `lib/i18n/registry.ts`）：注册制语言包 + 「跟随系统」解析。
+ * 界面语言注册表：注册制语言包 + 「跟随系统」解析。
  *
  * 新增一门语言 = ① 建一套 `Strings<X>` 实现 ② 在 [packs] 注册一行 —— 语言设置页的列表、
- * 落盘、切换逻辑都不用改。缺条目由 Kotlin 接口在编译期拦住（pi-web 的 map 方案只能回退英文）。
+ * 落盘、切换逻辑都不用改。缺条目由 Kotlin 接口在编译期拦住。
  */
 object Languages {
 
@@ -28,7 +28,7 @@ object Languages {
         Pack("pt", "Português", PtStrings),
     )
 
-    /** 语言设置页的选项：「跟随系统」置顶 + 各语言包（设计计划 6.3） */
+    /** 语言设置页的选项：「跟随系统」置顶 + 各语言包 */
     data class Option(val id: String, val label: String)
 
     fun options(): List<Option> =

@@ -20,15 +20,14 @@ import java.io.File
  * pi 的**命令面**（RPC `get_commands` 的解析）—— 输入栏 `/` 候选卡的数据源（技能），
  * 同时供「这条消息是不是扩展命令」的判断（见 [isExtensionCommand]）。
  *
- * 为什么以 pi 的 RPC 为准，而不是自己扫盘（用户 2026-09-17 拍板）：
- * - `get_commands`（`docs/rpc.md` §get_commands、`modes/rpc/rpc-mode.ts` 的 get_commands 分支）
- *   回的就是 pi **此刻真会认的**命令：扩展注册命令（`pi.registerCommand`）+ prompt 模板 + 技能
+ * 为什么以 pi 的 RPC 为准，而不是自己扫盘：
+ * - `get_commands` 回的就是 pi **此刻真会认的**命令：扩展注册命令（`pi.registerCommand`）+ prompt 模板 + 技能
  *   （技能注册成 `skill:<名字>`）—— 插进输入框的 `/…` 发出去必然被展开/执行；
  * - 扫盘会**多出** pi 不认的（重名冲突落选项、frontmatter 非法的）并**漏掉** pi 认的
  *   （插件带来的技能、settings `skills` 数组、`--skill` 路径）；卡片是「调用入口」，口径必须跟 pi 一致；
  * - 停用的技能（Pient 挪进 `.disabled/`）pi 的扫描器直接跳过 → 这里自然不出现。
  *
- * 每条命令的 `sourceInfo` 形状（2026-09-17 真机 vivo V2171A 实测）：
+ * 每条命令的 `sourceInfo` 形状：
  * ```
  * {"path":"/root/.pi/agent/extensions/pient.ts","source":"auto",
  *  "scope":"user","origin":"top-level","baseDir":"/root/.pi/agent"}
@@ -54,7 +53,7 @@ object PiCommands {
         val name: String,
         /** 展示名（技能去掉 `skill:` 前缀） */
         val label: String,
-        /** 插进输入框的文本（`/名字 `；尾随空格便于接着打参数，与 pi-web applySlashCommand 同口径） */
+        /** 插进输入框的文本（`/名字 `；尾随空格便于接着打参数） */
         val insert: String,
         val kind: Kind,
         val scope: Scope,
@@ -73,7 +72,7 @@ object PiCommands {
     /**
      * `items` 的写入串行化：卡片打开 / 草稿以 `/` 开头 / reload 成功后 三处都可能同时刷新 ——
      * 两次 `clear()+addAll()` 交错会让表里留下**重复项**，`/` 卡 LazyColumn 的 key 撞车直接崩
-     * （2026-09-19 真机 FATAL：`Key "skill:pdf" was already used`）。
+     * （`Key "skill:pdf" was already used`）。
      */
     private val itemsLock = Mutex()
 
@@ -88,9 +87,9 @@ object PiCommands {
      * 文本是不是 pi 的**扩展命令**（`/名字 [args]`）。
      *
      * 为什么要单独判：扩展命令在 pi 里是**立即执行**、不产生任何 agent 事件
-     * （`agent-session.ts` 的 `prompt()` 先走 `_tryExecuteExtensionCommand`，handled 即 return；
-     * rpc.md 同口径）—— 当普通回合发出去，App 会把它标成「运行中」并且**永远等不到结束事件**，
-     * 界面卡在运行中（真机实测）。所以发送侧要先判一次，走「即发即走」那条路。
+     * （`prompt()` 先走 `_tryExecuteExtensionCommand`，handled 即 return）—— 当普通回合发出去，
+     * App 会把它标成「运行中」并且**永远等不到结束事件**，界面卡在运行中。所以发送侧要先判一次，
+     * 走「即发即走」那条路。
      * 注意：prompt 模板与技能命令不算 —— 它们是**展开**成普通消息，照旧产生 agent 事件。
      */
     fun isExtensionCommand(text: String): Boolean {
@@ -186,7 +185,7 @@ object PiCommands {
                 "prompt" -> Kind.PROMPT
                 else -> Kind.COMMAND
             }
-            // sourceInfo 是 0.85.1 的形状；location/path 是 rpc.md 老写法的兜底键
+            // sourceInfo 的 path/baseDir/scope 是主键；location / path 是兜底键
             val info = o.optJSONObject("sourceInfo")
             val path = info?.optString("path").orEmpty().ifBlank { o.optString("path") }
             val baseDir = info?.optString("baseDir").orEmpty()

@@ -116,22 +116,22 @@ private data class TestRow(val model: String, val ok: Boolean?, val detail: Stri
 private const val TEST_BATCH = 3
 
 /**
- * 服务商与模型配置（2026-08-30 整体重制；2026-09-09 真实化）：
+ * 服务商与模型配置：
  * ① 选择服务商卡片：卡内首行标题，第二行服务商展示栏（logo + 名称 + 向下箭头）；
  *    点击弹出选择弹窗（顶部搜索框 + 服务商列表，列表项 = 左侧 logo + 名称）。
- *    服务商清单/名称/默认端点对齐 pi-0.84.2 providers 目录；logo 对齐
- *    pi-web ModelsConfig 的 PROVIDER_ICONS（lobehub icons；Mono 用主题色着色、Color 原色）。
+ *    服务商清单/名称/默认端点对齐 pi-0.84.2 providers 目录；logo 用
+ *    lobehub icons（Mono 用主题色着色、Color 原色）。
  * ② API设置卡片三块：API端点（输入框默认填入所选服务商端点，可编辑，旁向下箭头
  *    弹窗切换多端点）、API密钥（遮蔽输入）、模型列表（输入框 + 图案按钮弹出
  *    模型选择弹窗：搜索框 + 端点可用模型列表，点选自动填入）。
  * ③ 上下文设置卡片：上下文长度 / 最大输出长度（单位 K Tokens）。
- * ③b 思考设置卡片（2026-09-12）：思考参数格式（自动识别/不发送/OpenAI/DeepSeek·Kimi/
+ * ③b 思考设置卡片：思考参数格式（自动识别/不发送/OpenAI/DeepSeek·Kimi/
  *    智谱 GLM/通义千问/硅基流动）——决定「思考模式开关」在请求体里怎么表达：
- *    关闭 = 显式禁用字面量、开启 = 显式启用（此前只有「省略参数」一种行为）。
+ *    关闭 = 显式禁用字面量、开启 = 显式启用。
  * ④ 模型参数设置卡片：温度（开关 + 数值）、Top_P / Top_K（开关 + 数值）。
- * 2026-09-09 起全部真实化：配置读写 AiConfigStore（自动持久化）、「测试连接」与
+ * 配置读写 AiConfigStore（自动持久化）、「测试连接」与
  * 「刷新模型列表」走真实 API（AiBackend.listModels）；成功置 chatState.aiConfigured。
- * 2026-09-10：模型列表弹窗的刷新按钮以「已填 API 密钥」为前置条件——未配置密钥只弹轻提示、
+ * 模型列表弹窗的刷新按钮以「已填 API 密钥」为前置条件——未配置密钥只弹轻提示、
  * 不发起拉取；浮层内的所有反馈改走 Toast（页面上的 testState 被 scrim 遮住看不见）。
  */
 @Composable
@@ -141,7 +141,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     /** 轻提示：浮层（模型列表弹窗）内触发时用——页面上的 testState 被 scrim 遮住看不见 */
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
     // ── 状态 ──
-    // 已配置服务商列表（AiConfigStore 持久化；2026-09-09 起无预置——用户自行添加）
+    // 已配置服务商列表（AiConfigStore 持久化；无预置——用户自行添加）
     // 顺序用 AiConfigStore 维护的**添加序**（configs.keys 是哈希序，会跳）
     val configuredIds = AiConfigStore.orderedIds()
     var selectedId by remember { mutableStateOf<String?>(configuredIds.firstOrNull()) }
@@ -174,10 +174,10 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     }
 
     /**
-     * 改「上下文压缩」**四参**（三旋钮 + 压缩指令；2026-09-15 要求 3，2026-09-17 补指令）。
+     * 改「上下文压缩」**四参**（三旋钮 + 压缩指令）。
      *
      * 为什么单独一个入口：**这三项在 pi 侧是全局一份**（`~/.pi/agent/settings.json` 的 `compaction` 块，
-     * settings-manager 里没有 per-provider 的概念）。页面原来把它画在「上下文设置」卡里、跟着当前服务商走，
+     * settings-manager 里没有 per-provider 的概念）。画在「上下文设置」卡里、跟着当前服务商走的话，
      * 于是编辑第二个服务商的那份值其实不生效 —— 那是界面与 pi 不对味的地方。
      * 现在的口径：改任意一处 = 镜像到所有服务商配置（界面不出现两种值）+ 立即写盘（不等统一落盘的 debounce）。
      * **压缩指令也一并镜像**：它是 Pient 侧字段（`compactNow` 取当前模型的 provider 那份），但画在同一张
@@ -204,9 +204,9 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
         // 正因为它先写掉了，之后那次 save() 会看到「内容没变」、不会打脏标记 → 这里自己打。
         val changed = PiAgentFiles.writeSettings(context, AiConfigStore.primaryConfig())
         if (changed) PiRpc.markConfigDirty()
-        // **即时生效**（2026-09-17）：pi 的 settings.json 只在进程启动时读一次，运行中的会话
+        // **即时生效**：pi 的 settings.json 只在进程启动时读一次，运行中的会话
         // 不会察觉我们刚写的文件 —— 官方给的热改入口就是 RPC `set_auto_compaction`
-        // （`PiRpc.setAutoCompaction`，原先全仓无调用点）。通道没起来就不发（下次启动自然读到）。
+        // （`PiRpc.setAutoCompaction`）。通道没起来就不发（下次启动自然读到）。
         // 另两参（reserve/keep）pi 没有对应的 RPC：走上面的脏标记 —— 下一轮对话开始时
         // `PiRpc.start()` 会重启通道重读 settings.json，用户不必自己去切模型/重启应用。
         if (enabled != null && PiRpc.usable()) {
@@ -216,7 +216,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
 
     /**
      * 新增服务商：加入已配置列表并切换为当前；重复添加则仅切换。
-     * 只带入目录里的默认端点 —— **API 密钥与模型列表保持为空**（2026-09-10 用户要求）：
+     * 只带入目录里的默认端点 —— **API 密钥与模型列表保持为空**：
      * 模型列表由用户手动填写或点「刷新」从服务商 /models 端点拉取，不预填任何模型名。
      */
     fun addProvider(id: String) {
@@ -290,13 +290,13 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     }
 
     /**
-     * **「测试连接」= 模型列表里的每一个模型都真发一次推理请求**（2026-09-17 用户口径）。
+     * **「测试连接」= 模型列表里的每一个模型都真发一次推理请求**。
      *
-     * 旧实现只 GET `/models`（= 只证明「能列模型」），套餐不含某模型 / 模型名写错 / 权限不对
-     * 一律测不出来 —— 那不算「可用」。现在逐模型发 `max_tokens=16` 的最小请求，逐行给结果。
+     * 只 GET `/models`（= 只证明「能列模型」）不够：套餐不含某模型 / 模型名写错 / 权限不对
+     * 一律测不出来 —— 那不算「可用」。逐模型发 `max_tokens=16` 的最小请求，逐行给结果。
      *
      * 三个分支：
-     * ① 模型列表为空 → 退回老的「列模型」探活，并如实说明没逐一测；
+     * ① 模型列表为空 → 退回「列模型」探活，并如实说明没逐一测；
      * ② API 类型是应用测不了的（google / bedrock / mistral / pi-messages）→ 如实上报，
      *    **不假装失败**（这些协议的应用内请求构造不在本轮范围内）；
      * ③ 有模型 + 协议可测 → 每批 3 个并发（全串行太慢；全并发容易被限流 429 误判成不可用）。
@@ -353,7 +353,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             testState = if (ok == done.size) L.models.modelsAllOk(done.size)
             else L.models.modelsTestPartial(ok, done.size)
             testOk = ok == done.size
-            // 「AI 配置完成」= 至少一个模型真跑通（比旧口径「能列模型」严格；首启引导第二步靠它）
+            // 「AI 配置完成」= 至少一个模型真跑通（首启引导第二步靠它）
             if (ok > 0) chatState.aiConfigured = true
         }
     }
@@ -491,9 +491,9 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                                     onClick = { confirmDeleteOpen = true },
                                 )
                                 ActionChipButton(
-                                    icon = Icons.Outlined.Dns, // 对齐 Operit ModelConfigScreen 测试连接按钮（Icons.Default.Dns）
+                                    icon = Icons.Outlined.Dns, // 测试连接按钮的图标
                                     text = L.models.testConnection,
-                                    // 2026-09-17：改为**逐一测试模型列表里的每个模型**（见 startTest）
+                                    // **逐一测试模型列表里的每个模型**（见 startTest）
                                     onClick = { startTest() },
                                 )
                             }
@@ -502,7 +502,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                             Text(
                                 testState.orEmpty(),
                                 style = MaterialTheme.typography.labelSmall,
-                                // 颜色只认 testOk（不再按文案前缀判：文案随语言变，前缀判法会失效）
+                                // 颜色只认 testOk（不按文案前缀判：文案随语言变，前缀判法会失效）
                                 color = when (testOk) {
                                     true -> MaterialTheme.colorScheme.primary
                                     false -> MaterialTheme.colorScheme.error
@@ -681,7 +681,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
                 }
             }
 
-            // ── ③b 思考设置（2026-09-12 真实化：关闭思考模式 = 显式禁用，开启 = 显式启用） ──
+            // ── ③b 思考设置（关闭思考模式 = 显式禁用，开启 = 显式启用） ──
             if (provider != null && cfg != null) {
                 item {
                     Column {
@@ -772,8 +772,8 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
 
             // ── ⑤ 上下文压缩（**全局一份**）──
             // pi 侧只有一份：`~/.pi/agent/settings.json` 的 `compaction` 块（settings-manager 里没有
-            // per-provider 的概念）。原来它画在「上下文设置」卡里、跟着当前服务商走 —— 改第二个服务商
-            // 那份值其实不生效，是界面与 pi 不对味的地方。2026-09-15（要求 3）单独成卡 + 改完立即写盘。
+            // per-provider 的概念）。画在「上下文设置」卡里、跟着当前服务商走的话 —— 改第二个服务商
+            // 那份值其实不生效，是界面与 pi 不对味的地方。单独成卡 + 改完立即写盘。
             if (provider != null && cfg != null) {
                 item {
                     Column {
@@ -914,7 +914,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
 
     // ── 弹窗：逐模型参数（模型列表里点铅笔） ──
     // 为什么要有它：pi 的 models.json 里 `contextWindow` / `maxTokens` / `input` / `samplingParams`
-    // 都是**每个模型各写一份**（pi-web 的 ModelsConfig 同样逐模型编辑）；卡面上那三个字段只是
+    // 都是**每个模型各写一份**；卡面上那三个字段只是
     // 「新加入列表的模型的默认值」，改它不会动已有模型。
     editingModel?.let { entry ->
         val modelId = entry.substringBefore('=').trim()
@@ -928,7 +928,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
             initial = cfg?.settingOf(modelId) ?: ModelSetting(),
             thinkingByFormat = fmtNow != null && fmtNow != ReasoningFormat.NONE,
             formatLabel = fmtNow?.label.orEmpty(),
-            // 采样不转发警告（原「模型参数设置」卡上的那条）：搬到真正设值的地方
+            // 采样不转发警告：放在真正设值的地方
             unsupportedNote = cfg?.takeIf { !AiBackend.samplingSupported(it) }?.let { c ->
                 L.models.samplingUnsupported(c.apiType.trim().ifBlank { ProviderCatalog.apiOf(c.providerId) })
             },
@@ -943,7 +943,7 @@ fun ModelConfigScreen(nav: NavController, chatState: ChatState) {
     // ── 弹窗：模型列表（多选 + 底部取消/确定；顶栏刷新 = 真实拉取服务商模型） ──
     if (modelPickerOpen) {
         // 条目源与「已选」判定同源 = cfg.models（trim 过、去重过）：手写「a; b」这种带空格的列表
-        // 也要每行都是勾选态（旧实现按未 trim 的 split 判 → b 不勾 → 点「确定」把它静默删掉）。
+        // 也要每行都是勾选态（按未 trim 的 split 判 → b 不勾 → 点「确定」把它静默删掉）。
         val modelEntries = (cfg?.models ?: emptyList()).map {
             PickerEntry(key = it, title = it, mono = true, selected = true, editable = true)
         }
@@ -1043,7 +1043,7 @@ private fun ActionChipButton(
 /**
  * 参数区块头：左列标签+辅助说明，右侧开关（M3 默认尺寸，勿 size 压缩）
  *
- * 2026-09-13：同一视觉被上下文设置的「自动总结上下文」等区块复用 —— 不再另写一份开关行。
+ * 同一视觉被上下文设置的「自动总结上下文」等区块复用 —— 不另写一份开关行。
  */
 @Composable
 private fun ParamBlock(
@@ -1117,13 +1117,13 @@ private fun ParamInputField(
 
 /**
  * 逐模型参数浮层：**单个模型**的上下文长度 / 最大输出 / 识图 / 采样。
- * 留空 = 不写该键（pi 用自己那一层的默认），与 pi-web 的模型编辑同口径。
+ * 留空 = 不写该键（pi 用自己那一层的默认）。
  */
 @Composable
 private fun ModelSettingDialog(
     title: String,
     initial: ModelSetting,
-    /** 该 API 类型下 pi 不转发采样参数时的说明（null = 不显示）—— 原在「模型参数设置」卡上 */
+    /** 该 API 类型下 pi 不转发采样参数时的说明（null = 不显示） */
     unsupportedNote: String?,
     /** 「思考设置」卡按当前写法推断出的**默认**是否支持思考（未单独设置时生效） */
     thinkingByFormat: Boolean,
@@ -1320,7 +1320,7 @@ private fun ProviderBar(provider: ProviderInfo, onClick: () -> Unit) {
     }
 }
 
-/** 服务商 logo：Mono 图标用主题文字色着色、Color 图标原色（对齐 pi-web hasColor 语义）；
+/** 服务商 logo：Mono 图标用主题文字色着色、Color 图标原色；
  *  固有色在暗色卡片上不可见的图标（AWS 黑字 / Kimi 白 K）用 logoResDark 暗色变体 */
 @Composable
 private fun ProviderLogo(provider: ProviderInfo, size: androidx.compose.ui.unit.Dp) {
@@ -1527,7 +1527,7 @@ private fun TokenInputField(
 }
 
 /**
- * 上下文管理数值行（2026-09-13 新增）：比例阈值 / 条数阈值共用一行式输入框。
+ * 上下文管理数值行：比例阈值 / 条数阈值共用一行式输入框。
  *
  * `decimal = true` 时用文本键盘：`KeyboardType.Number` 在部分输入法上没有小数点键，
  * 而「0.70」这类占比必须要小数点（条数阈值仍走数字键盘）。
@@ -1559,14 +1559,14 @@ private fun ContextNumberField(
  * 居中选择浮层（页面内全屏 scrim + 居中卡片，与 PientDialog / 聊天页浮层同构）：
  * 顶部 = 标题（可选）或搜索框；下方 = LazyColumn 列表；点外/返回键关闭。
  *
- * **不用平台 Popup 窗口**（2026-09-10 修）：Popup 是独立窗口，窗口高度取自
+ * **不用平台 Popup 窗口**：Popup 是独立窗口，窗口高度取自
  * 「可见显示区 − IME」——键盘抬起时打开浮层，窗口只有 1080×1454px（正常 1080×2274），
  * 于是 fillMaxSize 的 scrim 只铺到键盘上沿、页面下半截没有变暗；且键盘随后收起
- * （Popup focusable 抢走焦点）窗口也不会再长回去（实测 3s 后仍 1454）。
+ * （Popup focusable 抢走焦点）窗口也不会再长回去。
  * 页面内浮层随应用窗口（全屏、不随 IME 缩放）布局，天然不受键盘影响。
  */
 /**
- * 刷新回来的 id 列表与手写列表合并（**不再整串覆盖**）：
+ * 刷新回来的 id 列表与手写列表合并（**不是整串覆盖**）：
  * - 同名 id 保留用户写的 `id=别名` 原文（别名是 pi 的 `models[].name`，覆盖掉就丢了）；
  * - 顺序按服务商返回的顺序重排；
  * - 服务商不再返回的 id 丢弃（那本来就是这个按钮的语义：以服务商当前可用列表为准）。
@@ -1722,7 +1722,7 @@ private fun SearchPickerPopup(
     }
 }
 
-/** 弹窗顶部搜索框（放大镜 + 输入 + 底部 hairline，pi-web picker 同构） */
+/** 弹窗顶部搜索框（放大镜 + 输入 + 底部 hairline） */
 @Composable
 private fun SearchBar(placeholder: String, query: String, onQueryChange: (String) -> Unit) {
     Column {

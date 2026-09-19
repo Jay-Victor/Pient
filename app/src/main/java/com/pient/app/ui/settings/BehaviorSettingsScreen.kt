@@ -54,9 +54,9 @@ import com.pient.app.ui.components.SectionHeader
 import com.pient.app.ui.components.isTabletLayout
 
 /**
- * 行为设置（2026-08-28；2026-09-10 改为三选一）：
+ * 行为设置：
  * 手机端 = 侧边栏展出方式三选一 —— 水平滑出（默认，浮层 + 遮罩）/ 3D 透视展开 / 推动展开；
- * 平板端 = 固定压缩滑出（不支持 3D 透视展开与推动展开），故只呈现一种方式（用户决策 2026-09-10）。
+ * 平板端 = 固定压缩滑出（不支持 3D 透视展开与推动展开），故只呈现一种方式。
  * 切换即时生效并持久化（prefs `drawer_mode`）；平板端不写 prefs，手机端所选方式得以保留。
  */
 @Composable
@@ -214,7 +214,7 @@ fun BehaviorSettingsScreen(nav: NavController) {
                     )
                 }
             }
-            // 消息通知（2026-09-16，行为设置）：AI 回复完成且应用不在前台时发系统通知；
+            // 消息通知：AI 回复完成且应用不在前台时发系统通知；
             // 提示音 / 震动是通知渠道属性，各自独立开关（见 runtime/ReplyNotify.kt）
             item { SectionHeader(L.settings.messageNotify) }
             item {

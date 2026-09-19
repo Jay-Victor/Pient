@@ -5,13 +5,13 @@ import androidx.annotation.DrawableRes
 import com.pient.app.R
 
 /**
- * 服务商目录（2026-08-30 服务商与模型配置页数据源）：
- * - 服务商清单与显示名对齐 pi-0.84.2 `packages/ai/src/providers/`（官方 name 字段）；
+ * 服务商目录（服务商与模型配置页数据源）：
+ * - 服务商清单与显示名取 pi 官方的 `name` 字段；
  * - 默认 API 端点对齐各 provider 官方 `baseUrl` 字段；
- * - 服务商 logo 对齐 pi-web `ModelsConfig.tsx` 的 `PROVIDER_ICONS` 映射
+ * - 服务商 logo 的图标与着色规则：
  *   （lobehub/icons，Mono 单色 = hasColor:false，用主题文字色着色；
  *    Color 多彩 = hasColor:true，原色渲染）；
- * - 无模型列表数据：模型列表由用户在配置页填写或经「刷新」从服务商 /models 拉取（2026-09-10）。
+ * - 无模型列表数据：模型列表由用户在配置页填写或经「刷新」从服务商 /models 拉取。
  */
 data class ProviderInfo(
     val id: String,
@@ -23,21 +23,21 @@ data class ProviderInfo(
     /** 暗色主题专用 logo（0 = 复用 logoRes）。用于固有色在暗色卡片上不可见的图标 */
     @DrawableRes val logoResDark: Int = 0,
     /**
-     * 该服务商**确定的**思考参数写法（2026-09-12）：新增服务商时预置为 `ProviderConfig.reasoningFormat`；
+     * 该服务商**确定的**思考参数写法：新增服务商时预置为 `ProviderConfig.reasoningFormat`；
      * AUTO 只留给「自定义」服务商（按模型名推断）。
      */
     val reasoningFormat: ReasoningFormat = ReasoningFormat.NONE,
-    // 2026-09-17：**删掉「服务商级档位词表/预算覆盖」**（原 ThinkingLevels）。它当时是照
-    // 「DeepSeek 官方只有 low/high/max」这类印象给服务商手写档位表，实际 pi 的档位表在
-    // **每个模型的 thinkingLevelMap** 里（pi 0.85.1 目录里 1354 个模型有 599 个带 map、37 种集合），
-    // 应用手写的表既跟不上、也容易写错（kimi-coding / moonshotai 三家就被标成「无档位」，
-    // 而 pi 目录里它们有 1~5 档）。档位的事实来源 = pi 自己：面板按 `get_available_thinking_levels`
+    // 服务商级**不设**「档位词表 / 预算覆盖」：手写档位表既跟不上、也容易写错 —— 档位事实在
+    // **每个模型的 thinkingLevelMap** 里（pi 目录里 1354 个模型有 599 个带 map、37 种集合）；
+    // 照「DeepSeek 官方只有 low/high/max」这类印象给服务商手写，
+    // kimi-coding / moonshotai 三家会被标成「无档位」，而 pi 目录里它们有 1~5 档。
+    // 档位的唯一事实来源 = pi 自己：面板按 `get_available_thinking_levels`
     // 渲染、估算行按档位名原样报（见 AiBackend.levelWire）。
 )
 
 object ProviderCatalog {
 
-    /** 自定义服务商 id（pi-web "custom" 卡片语义） */
+    /** 自定义服务商 id */
     const val CUSTOM_ID = "custom"
 
     // 计算属性：object 里的 val 只求值一次，写 `L.…` 会冻结成首帧语言
@@ -74,7 +74,7 @@ object ProviderCatalog {
         // ── 国内大模型 ──
         p("deepseek", "DeepSeek", R.drawable.provider_deepseek, mono = false,
             "https://api.deepseek.com", reasoningFormat = ReasoningFormat.DEEPSEEK),
-        // 2026-09-17 修：原来是 DEEPSEEK 写法 ⇒ pi 会发 `thinking:{type:enabled}`，而 Kimi 官方对 K3 明说
+        // 用 DEEPSEEK 写法会发 `thinking:{type:enabled}`，而 Kimi 官方对 K3 明说
         // 「不应传 thinking 参数」，只要顶层 `reasoning_effort` —— 那正是 pi 的 openai 分支行为。
         p("kimi-coding", "Kimi For Coding", R.drawable.provider_kimi_coding, mono = false,
             "https://api.kimi.com/coding", reasoningFormat = ReasoningFormat.OPENAI,
@@ -118,7 +118,7 @@ object ProviderCatalog {
         p("groq", "Groq", R.drawable.provider_groq, mono = true,
             "https://api.groq.com/openai/v1"),
         // ── 聚合 / 网关 / 推理平台 ──
-        // 说明（2026-09-12）：以上/以下未显式标注的服务商一律 **NONE = 不发送思考参数**——
+        // 说明：以上/以下未显式标注的服务商一律 **NONE = 不发送思考参数**——
         // 它们的思考参数写法未核实（或模型架构性不可关，如 Gemini 3 系），宁可开关只作用于展示，
         // 也不猜字段导致 400；用户可在配置页「思考设置」里按需覆盖为具体写法。
         p("openrouter", "OpenRouter", R.drawable.provider_openrouter, mono = true,
@@ -155,14 +155,13 @@ object ProviderCatalog {
         p("opencode-go", "OpenCode Go", R.drawable.provider_opencode, mono = true,
             "https://opencode.ai/zen"),
         // Radius：pi 官方的**动态网关**（provider 级 `oauth: "radius"` + 用户自备 baseUrl，api = pi-messages）。
-        // 补它是因为 pi-ai 的 provider 表里有这一家而 Pient 目录缺（2026-09-15 要求 3）。
         // 思考写法给 AUTO：网关后面挂什么模型都可能，按模型名推断、识别不出就不发参数。
         p("radius", L.models.providerRadius, R.drawable.provider_radius, mono = true,
             "", reasoningFormat = ReasoningFormat.AUTO),
     )
 
     /**
-     * **provider → pi 的 api 类型**（事实表，2026-09-14 从 pi-0.85.1 各 provider 的 .ts 源文件核出）。
+     * **provider → pi 的 api 类型**（事实表）。
      *
      * pi 的 `api` 是 **per-model** 的（同一 provider 可以挂多种：opencode 挂 4 种、fireworks/github-copilot
      * 挂 2–3 种），Pient 页面按服务商配置，所以这里取该家的**主用法**写在 provider 级；
@@ -208,7 +207,7 @@ object ProviderCatalog {
 
     /**
      * 一个服务商**可用的** api 类型（pi-ai 里 api 是 per-model 的，provider 给出可用集合）。
-     * 多 api 的家（网关/代理类）按 §4.1 事实表列出；其余只有一个默认值。
+     * 多 api 的家（网关/代理类）列出多个；其余只有一个默认值。
      */
     private val API_SETS: Map<String, List<String>> = mapOf(
         "fireworks" to listOf("anthropic-messages", "openai-completions"),
@@ -239,9 +238,9 @@ object ProviderCatalog {
         endpoints: List<String> = emptyList(),
         @DrawableRes logoResDark: Int = 0,
         /**
-         * 该服务商**确定的**思考参数写法（2026-09-12）：新增该服务商时直接按它预置
+         * 该服务商**确定的**思考参数写法：新增该服务商时直接按它预置
          * `ProviderConfig.reasoningFormat`，用户不必自己选。写法来源 = pi `thinkingFormat`
-         * 枚举 + Operit 各 Provider 类；拿不准的一律 NONE（不发参数，绝不猜）。
+         * 枚举；拿不准的一律 NONE（不发参数，绝不猜）。
          */
         reasoningFormat: ReasoningFormat = ReasoningFormat.NONE,
         ) = ProviderInfo(

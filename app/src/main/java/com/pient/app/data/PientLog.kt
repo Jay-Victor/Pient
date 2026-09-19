@@ -12,22 +12,22 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
 /**
- * 应用日志（2026-09-17，「应用日志管理」功能的地基）。
+ * 应用日志（「应用日志管理」功能的地基）。
  *
- * **为什么需要它**：改造前全仓日志只有 `android.util.Log` —— 只进系统 logcat，
+ * **为什么需要它**：`android.util.Log` 只进系统 logcat，
  * 用户手上没有任何通道能拿到（不接 adb 就等于没有日志）。本对象把每一次调用
  * **同时**做两件事：① 转发 `android.util.Log`（adb 工作流不变、tag 不变）；
  * ② 追加落盘 `files/logs/pient.log`（滚动：单文件 2MB、保留 [MAX_BACKUPS] 份），
  * 于是「设置 → 数据与权限 → 应用日志管理」能把日志导成文件发出去。
  *
  * 形状对齐 `android.util.Log`（`i/w/e(tag, msg)`、`e(tag, msg, tr)`）——调用点机械替换即可，
- * 不发明新的日志 DSL。口径派生自 Operit `util/AppLogger.kt`（异步单线程落盘 + 单条消息截断
- * + 崩溃保留上一轮日志），差异是我们不做 per-package 分文件（Pient 没有 toolpkg 那层）。
+ * 不发明新的日志 DSL。异步单线程落盘 + 单条消息截断 + 崩溃保留上一轮日志；
+ * 不做 per-package 分文件（Pient 没有 toolpkg 那层）。
  *
  * 线程模型：写入走一条 daemon 单线程 + 队列 —— 聊天流式期间每次 Log 都同步落盘会顶到调用线程。
  * 崩溃路径例外：用 [flushBlocking] 同步落盘（进程马上要死，队列来不及），见 [installCrashHandler]。
  *
- * 行格式（与 Operit 的解析口径一致，便于将来复用解析器）：
+ * 行格式：
  *     `2026-09-17 20:45:12.123 I/PientChat: 消息正文`
  * 多行消息（堆栈）保持原样续行 —— 续行没有级别前缀，读的时候按「前缀匹配的行」切段。
  */
@@ -42,7 +42,7 @@ object PientLog {
     /** 轮转保留份数（pient.log.1 / .2）——总量上限 = 3 × 2MB */
     private const val MAX_BACKUPS = 2
 
-    /** 单条消息上限：整份文件内容这类超长正文不该整段灌进日志（对齐 Operit 的 12k 口径） */
+    /** 单条消息上限：整份文件内容这类超长正文不该整段灌进日志（12k） */
     private const val MAX_MESSAGE_CHARS = 12_000
 
     private const val FLUSH_WAIT_MS = 300L
@@ -161,7 +161,7 @@ object PientLog {
 
     fun dir(context: Context): File = File(context.filesDir, DIR_NAME)
 
-    /** 确保目录存在（2026-09-17 真机实测：不建目录时每次落盘都是 ENOENT，日志一条都写不出来） */
+    /** 确保目录存在（不建目录时每次落盘都是 ENOENT，日志一条都写不出来） */
     private fun readyDir(ctx: Context): File {
         val d = dir(ctx)
         if (!d.isDirectory) runCatching { d.mkdirs() }

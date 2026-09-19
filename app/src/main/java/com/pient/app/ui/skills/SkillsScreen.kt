@@ -47,7 +47,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 技能管理（**真数据层**，2026-09-15 接回 pi）：
+ * 技能管理（**真数据层**）：
  *
  * - 列表 = **扫盘**（[PiSkills.list]）：全局 `~/.pi/agent/skills/`+`~/.agents/skills/`、
  *   项目 `<工作区>/.pi/skills/`+`.agents/skills/`，按 pi 的发现规则认技能（含 SKILL.md 的目录、
@@ -216,7 +216,7 @@ fun SkillsScreen(nav: NavController) {
                     }
                 }
             },
-            // ZIP 页签（2026-09-16 真实化）：SAF 选的 zip → 解压 + 校验 + 整目录落盘
+            // ZIP 页签：SAF 选的 zip → 解压 + 校验 + 整目录落盘
             onImportZip = { uri ->
                 scope.launch {
                     val (err, slug) = withContext(Dispatchers.IO) {
@@ -232,7 +232,7 @@ fun SkillsScreen(nav: NavController) {
         )
     }
 
-    // 技能详情弹窗（2026-09-06：点技能卡片弹出；删除 = 从列表移除技能及全部文件）
+    // 技能详情弹窗（点技能卡片弹出；删除 = 从列表移除技能及全部文件）
     detailFor?.let { item ->
         SkillDetailDialog(
             item = item,
@@ -279,9 +279,8 @@ private fun SkillRow(item: SkillItem, onClick: () -> Unit, onToggle: (Boolean) -
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
-        // 开关状态文字"开/关"已移除（用户反馈纯多余，2026-08-27）
         // 注意：不能用 Modifier.size() 压缩 Switch——内部轨道仍按默认 52dp 绘制并居中
-        // 溢出，会向左侵入内容文字造成视觉重叠（实测溢出 ~10dp）
+        // 溢出，会向左侵入内容文字造成视觉重叠（溢出 ~10dp）
         Switch(
             checked = item.enabled,
             onCheckedChange = onToggle,

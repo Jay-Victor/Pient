@@ -79,9 +79,9 @@ import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 
 /**
- * 系统权限设置页（设计计划 P8 权限中心 / 开发计划 6.1 三级权限体系）
+ * 系统权限设置页（三级权限体系）
  *
- * 结构（照 Operit `PermissionLevelCard` + `ShizukuDemoScreen` 对齐，视觉走 Pient 卡片令牌）：
+ * 结构（视觉走 Pient 卡片令牌）：
  *  ① 权限档位卡：档位分段选择（标准 / 调试 / Root，可预览）→ 档位说明 → 「设为当前档位」/「当前使用中」
  *     → 该档位对应的权限清单（基础权限四项 + 档位专属项，逐项实时状态、点击直达授权）；
  *  ② 设置向导（当前档位未就绪时出现）：Shizuku 三步 / Root 两步的渐进引导。
@@ -109,7 +109,7 @@ fun SystemPermissionScreen(nav: NavController) {
     var shellReady by remember { mutableStateOf(AndroidShell.available(context)) }
     var shellText by remember { mutableStateOf(AndroidShell.statusText(context)) }
 
-    // 展示中的档位（可预览，与「当前生效档位」分离，同 Operit displayedPermissionLevel / preferredPermissionLevel）
+    // 展示中的档位（可预览，与「当前生效档位」分离）
     var displayed by remember { mutableStateOf(SettingsStore.permissionTier) }
     val activeTier = SettingsStore.permissionTier
 
@@ -138,7 +138,7 @@ fun SystemPermissionScreen(nav: NavController) {
         deviceRooted = st.deviceRooted
         rootGranted = st.rootGranted
         rootProbed = RootGateway.probed
-        // Android shell 卡同样要真刷新（此前只在组合期现查，刷新键动不了它）
+        // Android shell 卡同样要真刷新（不在组合期现查，否则刷新键动不了它）
         shellReady = AndroidShell.available(context)
         shellText = AndroidShell.statusText(context)
     }
@@ -312,7 +312,7 @@ fun SystemPermissionScreen(nav: NavController) {
                     Spacer(Modifier.height(12.dp))
 
                     // 档位选择（三档，可预览）——**设备不具备的能力不给选**：
-                    // Root 档在未 Root 设备上变暗且点不动（2026-09-14 用户要求：不支持的不让用户选）
+                    // Root 档在未 Root 设备上变暗且点不动
                     val tierSupported = PermissionTier.values().map { t ->
                         when (t) {
                             // 标准档永远可用；调试档只依赖可安装的 Shizuku（未装时给向导，不算不支持）
@@ -360,7 +360,7 @@ fun SystemPermissionScreen(nav: NavController) {
                                 )
                             }
                         } else if (displayed != activeTier) {
-                            // 门控（用户口径 2026-09-16）：只有该档位权限清单**全部配齐**才允许设为当前档位
+                            // 门控：只有该档位权限清单**全部配齐**才允许设为当前档位
                             val ready = tierState.ready(displayed)
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 PientButton(
@@ -429,11 +429,9 @@ fun SystemPermissionScreen(nav: NavController) {
             }
 
             // ═══════════ Android shell（系统命令通道，三档边界） ═══════════
-            // 归位说明（2026-09-13 用户拍板）：这一块**不再放在终端页**——终端页是 Ubuntu 的地盘；
-            // 系统命令通道属于"权限能力"，按 Operit 的口径只在权限页管（Operit 的 AndroidPermissionLevel
-            // 也只出现在权限引导页/抽屉/权限卡里）。bash 的执行落点与这里无关（只有 Ubuntu 两档）。
+            // 系统命令通道属于"权限能力"，只在权限页管；bash 的执行落点与这里无关（只有 Ubuntu 两档）。
             //
-            // 2026-09-15（要求 5）起这里是**真状态**：通道 = 应用在 Java 侧用 Shizuku / su 直接把命令
+            // 这里是**真状态**：通道 = 应用在 Java 侧用 Shizuku / su 直接把命令
             // 扔给 Android 系统执行，即发即走、没有会话；AI 的工具 `android_shell` 与它同源。
             SectionHeader(L.perm.shellSectionTitle, icon = Icons.Outlined.Terminal)
             PermissionCardBox {

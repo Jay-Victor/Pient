@@ -68,12 +68,12 @@ import com.pient.app.runtime.PiRuntime
 import kotlinx.coroutines.launch
 
 /**
- * 终端页面（UI 重设计 2026-08-28，Operit TerminalHome 参考），自上而下：
+ * 终端页面，自上而下：
  * 1. 顶部工具栏：[会话 ×] 标签 + 右端「+」新建会话；
  * 2. 输出区（等宽、无玻璃、选择复制、自动吸底）；
  * 3. 快捷按键栏：Ctrl+C 中断 / Ctrl+L 清屏，右端「环境配置」进入环境配置页；
  * 4. 输入栏：`~ $` 提示符 + 命令输入，右端 ⌨ 唤出 14 键额外按键栏
- *    （2×7：ESC / - HOME ↑ END PGUP / TAB CTRL ALT ← ↓ → PGDN，Operit 默认布局）。
+ *    （2×7：ESC / - HOME ↑ END PGUP / TAB CTRL ALT ← ↓ → PGDN）。
  */
 @Composable
 fun TerminalPanel(chatState: ChatState, nav: NavController) {
@@ -82,7 +82,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
     var showExtraKeys by remember { mutableStateOf(false) }
     var ctrlActive by remember { mutableStateOf(false) }
     var altActive by remember { mutableStateOf(false) }
-    // 会话删除二次确认（Operit onTabCloseRequest 同款：弹窗确认后删除）
+    // 会话删除二次确认（弹窗确认后删除）
     var closeConfirmIndex by remember { mutableStateOf<Int?>(null) }
     val outputScroll = rememberScrollState()
     val keyScope = rememberCoroutineScope()
@@ -95,7 +95,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
     LaunchedEffect(Unit) { TerminalSessions.ensure(context) }
     val session = TerminalSessions.sessions.getOrNull(chatState.terminalIndex) ?: TerminalSessions.sessions.firstOrNull()
 
-    // 首启「环境安装」（对齐 Operit 的 SetupScreen：首启弹一次、可跳过）——rootfs 就绪后弹，
+    // 首启「环境安装」（首启弹一次、可跳过）——rootfs 就绪后弹，
     // 首启那 1–2 分钟先在后台自动解包，别让用户在还没就绪的界面上做选择。
     var showEnvSetup by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
@@ -110,8 +110,8 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
     }
 
     if (session == null) {
-        // 空状态（2026-09-16）：允许关闭**最后一个**会话后落在这里 ——
-        // 给一条新建入口，而不是一块空白（旧写法 `return Box(fillMaxSize())` 连「+」都没有＝死胡同）
+        // 空状态：允许关闭**最后一个**会话后落在这里 ——
+        // 给一条新建入口，而不是一块空白（直接 return 空 Box 连「+」都没有＝死胡同）
         EmptyTerminal(
             onNew = {
                 TerminalSessions.newSession(context)
@@ -181,9 +181,9 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                                     color = if (sel) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                                // 关闭会话（2026-09-16 起**最后一个也能关**）：会话活着就挂前台保活，
-                                // 不给关 = 通知栏那条常驻通知永远消不掉（用户报过）。全关完落空状态。
-                                // 触控目标 18dp（原 12dp 图标本体太小，违反「整块可点」口径）。
+                                // 关闭会话（**最后一个也能关**）：会话活着就挂前台保活，
+                                // 不给关 = 通知栏那条常驻通知永远消不掉。全关完落空状态。
+                                // 触控目标 18dp（12dp 图标本体太小，违反「整块可点」口径）。
                                 Box(
                                     modifier = Modifier
                                         .padding(start = 4.dp)
@@ -290,7 +290,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                         cursorBrush = SolidColor(termColors["white"]!!),
                         singleLine = true,
                         // 终端输入必须关掉自动大写与纠错：Gboard 默认给首字母大写，
-                        // 实测 `cd /workspace` 变成 `CD /workspace` → bash: CD: command not found
+                        // `cd /workspace` 会变成 `CD /workspace` → bash: CD: command not found
                         keyboardOptions = KeyboardOptions(
                             capitalization = KeyboardCapitalization.None,
                             autoCorrectEnabled = false,
@@ -320,7 +320,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                     }
                 }
 
-                // ── 5. 14 键额外按键栏（Operit 默认 2×7 布局） ──
+                // ── 5. 14 键额外按键栏（2×7 布局） ──
                 if (showExtraKeys) {
                     ExtraKeysBar(
                         termColors = termColors,
@@ -366,7 +366,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
                                     keyScope.launch { outputScroll.animateScrollTo(target) }
                                 }
                                 else -> {
-                                    // 文本键：插入到光标处（TAB 用四个空格，Operit 发送 \t）
+                                    // 文本键：插入到光标处（TAB 用四个空格）
                                     val v = if (key == "TAB") "    " else key
                                     val start = input.selection.start.coerceIn(0, input.text.length)
                                     input = TextFieldValue(
@@ -383,7 +383,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
             }
         }
 
-        // ── 会话关闭二次确认（Operit onTabCloseRequest 同款弹窗） ──
+        // ── 会话关闭二次确认 ──
         closeConfirmIndex?.let { i ->
             TerminalSessions.sessions.getOrNull(i)?.let { target ->
                 PientDialog(
@@ -410,7 +410,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
         }
 
         // 首启「环境安装」（可跳过；装完/跳过后写 SettingsStore.envSetupDone，永久生效）。
-        // 注意别塞进上面 closeConfirmIndex?.let 里——那样只在"删除会话确认"时才渲染（已踩过）。
+        // 注意别塞进上面 closeConfirmIndex?.let 里——那样只在"删除会话确认"时才渲染。
         if (showEnvSetup) {
             EnvSetupDialog(
                 onDone = {
@@ -430,7 +430,7 @@ fun TerminalPanel(chatState: ChatState, nav: NavController) {
 }
 
 /**
- * 终端页空状态（2026-09-16）：会话全被关掉时渲染 —— 顶部保留工具栏与「+」新建入口，
+ * 终端页空状态：会话全被关掉时渲染 —— 顶部保留工具栏与「+」新建入口，
  * 下面一句说明。**不能是空白盒**：否则用户关掉最后一个会话后就没有任何入口再建回来。
  */
 @Composable
@@ -475,7 +475,7 @@ private fun EmptyTerminal(onNew: () -> Unit) {
     }
 }
 
-/** 快捷按键（Operit TerminalToolbar 同款：等宽键名 + 灰色中文标签） */
+/** 快捷按键（等宽键名 + 灰色中文标签） */
 @Composable
 private fun QuickKey(
     key: String,
@@ -508,7 +508,7 @@ private fun QuickKey(
     }
 }
 
-/** 14 键额外按键栏（Operit VirtualKeyboard：2 行 × 7 列，CTRL/ALT 为切换键） */
+/** 14 键额外按键栏（2 行 × 7 列，CTRL/ALT 为切换键） */
 @Composable
 private fun ExtraKeysBar(
     termColors: Map<String, Color>,
