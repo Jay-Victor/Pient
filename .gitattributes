@@ -1,0 +1,37 @@
+# ===== 行尾 =====
+# 仓库内统一按 LF 存储；签出时的处理交由各人的 core.autocrlf。
+* text=auto
+
+# 会推到设备上直接执行的脚本必须保持 LF —— CRLF 会让 guest 里的 bash 报
+# `syntax error: unexpected 'do\r'`（pient-shell.sh / pient-root-wrapper.sh 都属这类）。
+*.sh text eol=lf
+
+# Windows 批处理反过来：cmd.exe 对 LF 行尾不稳。
+*.bat text eol=crlf
+
+# 构建脚本里的路径拼接与 shebang 同理按 LF。
+*.py text eol=lf
+
+# ===== 二进制（禁行尾转换与文本 diff）=====
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.so binary
+*.jar binary
+*.jks binary
+*.keystore binary
+*.apk binary
+*.aab binary
+*.tgz binary
+*.gz binary
+*.tar binary
+*.zip binary
+
+# 随包的数据表按 LF（解析侧按行切分）。
+*.tsv text eol=lf
