@@ -27,11 +27,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.Badge
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Copyright
+import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Gavel
 import androidx.compose.material.icons.outlined.History
@@ -65,32 +67,34 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.pient.app.R
+import com.pient.app.data.AppUpdate
+import com.pient.app.data.SettingsStore
+import com.pient.app.data.UpdateCenter
+import com.pient.app.data.UpdateSource
 import com.pient.app.ui.components.DividerLine
-import com.pient.app.ui.components.PientDialog
 import com.pient.app.ui.components.SectionHeader
 import com.pient.app.ui.components.SettingsRow
+import com.pient.app.ui.components.SettingsSwitchRow
 import kotlinx.coroutines.delay
 
-private const val APP_VERSION = "0.1.0"
 private const val GITHUB_USER_URL = "https://github.com/Jay-Victor"
 private const val GITHUB_REPO_URL = "https://github.com/Jay-Victor/Pient"
 private const val GITEE_REPO_URL = "https://gitee.com/Jay-Victor/Pient"
 private const val CONTACT_EMAIL = "18261738221@163.com"
 
-private enum class AboutDialog { UPDATE, LOG }
-
 /**
  * 关于页：
- * 顶部 = 圆形 logo + 产品名「Pient」+ 版本号；
+ * 顶部 = 圆形 logo + 产品名「Pient」+ 版本号（读安装包，不写死）；
  * 下方 = 分组标题（卡片左上方）+ 卡片，四组：
- * 更新（检查更新/更新日志）、项目信息（GitHub/Gitee 仓库地址，暂未提供）、
- * 联系（开发者 Jay-Victor / 联系方式暂未提供）、版权（开源许可声明/版权所有）。
+ * 更新（检查更新 / 更新日志，数据源 = GitHub / Gitee 的 Releases API）、项目信息（GitHub/Gitee 仓库地址）、
+ * 联系（开发者 Jay-Victor / 联系方式）、版权（开源许可声明/版权所有）。
  */
 @Composable
 fun AboutScreen(nav: NavController) {
-    var dialog by remember { mutableStateOf<AboutDialog?>(null) }
-    var emailCopied by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    var emailCopied by remember { mutableStateOf(false) }
+    // 本机安装版本 → 顶部版本号（「检查更新」用的比对基准在 UpdateCenter 里读同一份安装包信息）
+    val appVersion = remember { AppUpdate.localVersion(context)?.first } ?: L.common.unknown
     fun openUrl(url: String) {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -168,7 +172,7 @@ fun AboutScreen(nav: NavController) {
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = L.settings.versionLabel(APP_VERSION),
+                    text = L.settings.versionLabel(appVersion),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp),
@@ -181,15 +185,26 @@ fun AboutScreen(nav: NavController) {
                     icon = Icons.Outlined.SystemUpdate,
                     title = L.common.checkUpdate,
                     subtitle = L.settings.updateSubtitle,
-                    onClick = { dialog = AboutDialog.UPDATE },
+                    onClick = { UpdateCenter.check(context) },
                 )
                 DividerLine()
                 SettingsRow(
                     icon = Icons.Outlined.History,
                     title = L.settings.updateLog,
                     subtitle = L.settings.updateLogSubtitle,
-                    onClick = { dialog = AboutDialog.LOG },
+                    // 整页展示版本卡片（含「最新」徽标 / 折叠展开 / 查看发布），与「检查更新」共用同一份清单
+                    onClick = { nav.navigate("changelog") },
                 )
+                DividerLine()
+                SettingsSwitchRow(
+                    icon = Icons.Outlined.Autorenew,
+                    title = L.settings.updateAutoCheck,
+                    desc = L.settings.updateAutoCheckDesc,
+                    checked = SettingsStore.updateAutoCheck,
+                    onChecked = { SettingsStore.updateAutoCheck = it },
+                )
+                DividerLine()
+                UpdateSourceOptions()
             }
 
             // ── 项目信息 ──
@@ -246,26 +261,56 @@ fun AboutScreen(nav: NavController) {
             }
         }
     }
+}
 
-    // ── mock 弹窗（演示用） ──
-    when (dialog) {
-        AboutDialog.UPDATE -> PientDialog(
-            title = L.common.checkUpdate,
-            onDismiss = { dialog = null },
-            onConfirm = { dialog = null },
-            showClose = false,
+/**
+ * 「更新源」选项（互斥三选一，整行可点、选中行主色 + ✓）：
+ * 自动 = 优先 Gitee、失败退 GitHub；指定某个源 = 只用它（版本清单两边是同一份，差别只在取哪个地址）。
+ */
+@Composable
+private fun UpdateSourceOptions() {
+    val options = listOf(
+        Triple(UpdateSource.AUTO, L.settings.updateSourceAuto, L.settings.updateSourceAutoDesc),
+        Triple(UpdateSource.GITEE, L.settings.updateSourceGitee, null),
+        Triple(UpdateSource.GITHUB, L.settings.updateSourceGithub, null),
+    )
+    options.forEachIndexed { index, (source, title, desc) ->
+        if (index > 0) DividerLine()
+        val selected = SettingsStore.updateSource == source
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { SettingsStore.updateSource = source }
+                .padding(horizontal = 16.dp, vertical = 10.dp),
         ) {
-            Text(L.settings.upToDateLabel(APP_VERSION), style = MaterialTheme.typography.bodyMedium)
+            Icon(
+                Icons.Outlined.Dns, null,
+                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+            Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
+                )
+                if (desc != null) {
+                    Text(
+                        desc,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (selected) {
+                Icon(
+                    Icons.Outlined.Check, null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         }
-        AboutDialog.LOG -> PientDialog(
-            title = L.settings.updateLog,
-            onDismiss = { dialog = null },
-            onConfirm = { dialog = null },
-            showClose = false,
-        ) {
-            Text(L.settings.noChangelog, style = MaterialTheme.typography.bodyMedium)
-        }
-        null -> Unit
     }
 }
 

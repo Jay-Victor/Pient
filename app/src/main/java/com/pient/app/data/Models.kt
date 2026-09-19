@@ -155,6 +155,10 @@ object SettingsStore {
     var replyNotifySound by mutableStateOf(false)
     var replyNotifyVibrate by mutableStateOf(false)
 
+    // 更新检查（关于页）：应用启动时自动查一次 + 版本清单走哪个源
+    var updateAutoCheck by mutableStateOf(true)
+    var updateSource by mutableStateOf(UpdateSource.AUTO)
+
     // ── 自定义主题色：开关 + 色相（0..360）；开启时覆盖 12 预设色作为 accent ──
     var customAccentEnabled by mutableStateOf(false)
     var customAccentHue by mutableStateOf(215f)   // 默认蓝 hue ≈ 215
@@ -237,6 +241,8 @@ object SettingsStore {
         replyNotify = p.getBoolean("reply_notify", true)
         replyNotifySound = p.getBoolean("reply_notify_sound", false)
         replyNotifyVibrate = p.getBoolean("reply_notify_vibrate", false)
+        updateAutoCheck = p.getBoolean("update_auto_check", true)
+        updateSource = UpdateSource.fromId(p.getString("update_source", UpdateSource.AUTO.id))
         customAccentEnabled = p.getBoolean("custom_accent_enabled", false)
         customAccentHue = p.getFloat("custom_accent_hue", 215f).coerceIn(0f, 360f)
         backgroundMediaType = runCatching {
@@ -304,6 +310,15 @@ object SettingsStore {
         androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
             .edit()
             .putBoolean("file_preview_no_wrap", filePreviewNoWrap)
+            .apply()
+    }
+
+    /** 保存更新检查设置（关于页：启动自动检查 + 更新源），重启后保持 */
+    fun saveUpdateSettings(androidCtx: android.content.Context) {
+        androidCtx.getSharedPreferences("pient_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("update_auto_check", updateAutoCheck)
+            .putString("update_source", updateSource.id)
             .apply()
     }
 

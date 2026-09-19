@@ -39,6 +39,39 @@ interface SettingsStrings {
     val aboutSubtitle: String
     fun versionLabel(a0: Any?): String
     fun upToDateLabel(a0: Any?): String
+    // ── 更新检查（关于页：检查更新 / 更新日志）──
+    val checkingUpdate: String
+    val loadingChangelog: String
+    val newVersionFound: String
+    fun newVersionDetail(a0: Any?, a1: Any?): String
+    val updateNotes: String
+    val updateCheckFailed: String
+    val updateCheckFailedTitle: String
+    val upToDateDesc: String
+    // ── 更新日志页（版本卡片列表）──
+    val changelogLatest: String
+    val changelogLoadFailed: String
+    val changelogViewRelease: String
+    // ── 应用内更新（检查更新弹窗的下载区 + 关于页两行设置）──
+    val updateAutoCheck: String
+    val updateAutoCheckDesc: String
+    val updateSourceAuto: String
+    val updateSourceAutoDesc: String
+    val updateSourceGitee: String
+    val updateSourceGithub: String
+    val updateDownload: String
+    val updateDownloadComplete: String
+    val updateInstallNow: String
+    val updateInstallLater: String
+    val updateRetryDownload: String
+    val updatePause: String
+    val updatePaused: String
+    val updateResume: String
+    val updateMirrorLabel: String
+    val updateInstallPermissionTitle: String
+    val updateInstallPermissionDesc: String
+    val updateInstallPermissionGo: String
+    fun updateRemaining(a0: Any?): String
     val languageApplied: String
     val backgroundKeepAlive: String
     val residentNotification: String
@@ -161,6 +194,36 @@ object ZhSettings : SettingsStrings {
     override val aboutSubtitle: String = "版本与产品信息"
     override fun versionLabel(a0: Any?): String = "版本 ${a0}"
     override fun upToDateLabel(a0: Any?): String = "当前已是最新版本 ${a0}"
+    override val checkingUpdate: String = "正在检查更新…"
+    override val loadingChangelog: String = "正在获取更新日志…"
+    override val newVersionFound: String = "发现新版本"
+    override fun newVersionDetail(a0: Any?, a1: Any?): String = "最新版本 ${a0} · 当前 ${a1}"
+    override val updateNotes: String = "更新内容"
+    override val updateCheckFailed: String = "连不上更新服务器"
+    override val updateCheckFailedTitle: String = "检查更新失败"
+    override val upToDateDesc: String = "你正在使用最新版本的 Pient"
+    override val changelogLatest: String = "最新"
+    override val changelogLoadFailed: String = "加载更新日志失败"
+    override val changelogViewRelease: String = "查看发布"
+    override val updateAutoCheck: String = "自动检查更新"
+    override val updateAutoCheckDesc: String = "应用启动时自动检查新版本"
+    override val updateSourceAuto: String = "自动"
+    override val updateSourceAutoDesc: String = "优先 Gitee，失败时切换 GitHub"
+    override val updateSourceGitee: String = "仅 Gitee"
+    override val updateSourceGithub: String = "仅 GitHub"
+    override val updateDownload: String = "下载更新"
+    override val updateDownloadComplete: String = "下载完成"
+    override val updateInstallNow: String = "立即安装"
+    override val updateInstallLater: String = "稍后安装"
+    override val updateRetryDownload: String = "重新下载"
+    override val updatePause: String = "暂停"
+    override val updatePaused: String = "已暂停"
+    override val updateResume: String = "继续"
+    override val updateMirrorLabel: String = "镜像下载源"
+    override val updateInstallPermissionTitle: String = "安装权限"
+    override val updateInstallPermissionDesc: String = "需要允许安装未知来源应用才能安装更新"
+    override val updateInstallPermissionGo: String = "前往设置"
+    override fun updateRemaining(a0: Any?): String = "剩余约 ${a0}"
     override val languageApplied: String = "切换后即时生效（无需重启）"
     override val backgroundKeepAlive: String = "后台保活"
     override val residentNotification: String = "后台常驻通知"
@@ -282,6 +345,36 @@ object EnSettings : SettingsStrings {
     override val aboutSubtitle: String = "Version & product info"
     override fun versionLabel(a0: Any?): String = "Version ${a0}"
     override fun upToDateLabel(a0: Any?): String = "Up to date (${a0})"
+    override val checkingUpdate: String = "Checking for updates…"
+    override val loadingChangelog: String = "Loading changelog…"
+    override val newVersionFound: String = "New version available"
+    override fun newVersionDetail(a0: Any?, a1: Any?): String = "Latest ${a0} · Current ${a1}"
+    override val updateNotes: String = "Release notes"
+    override val updateCheckFailed: String = "Cannot reach the update server"
+    override val updateCheckFailedTitle: String = "Check failed"
+    override val upToDateDesc: String = "You're using the latest version of Pient"
+    override val changelogLatest: String = "Latest"
+    override val changelogLoadFailed: String = "Failed to load the changelog"
+    override val changelogViewRelease: String = "View release"
+    override val updateAutoCheck: String = "Check automatically"
+    override val updateAutoCheckDesc: String = "Check for a new version on app start"
+    override val updateSourceAuto: String = "Automatic"
+    override val updateSourceAutoDesc: String = "Gitee first, fall back to GitHub"
+    override val updateSourceGitee: String = "Gitee only"
+    override val updateSourceGithub: String = "GitHub only"
+    override val updateDownload: String = "Download update"
+    override val updateDownloadComplete: String = "Download complete"
+    override val updateInstallNow: String = "Install now"
+    override val updateInstallLater: String = "Install later"
+    override val updateRetryDownload: String = "Download again"
+    override val updatePause: String = "Pause"
+    override val updatePaused: String = "Paused"
+    override val updateResume: String = "Resume"
+    override val updateMirrorLabel: String = "Mirror sources"
+    override val updateInstallPermissionTitle: String = "Install permission"
+    override val updateInstallPermissionDesc: String = "Allow installing apps from unknown sources to install updates"
+    override val updateInstallPermissionGo: String = "Open settings"
+    override fun updateRemaining(a0: Any?): String = "About ${a0} left"
     override val languageApplied: String = "Applies immediately — no restart needed"
     override val backgroundKeepAlive: String = "Background keep-alive"
     override val residentNotification: String = "Resident notification"

@@ -4,4 +4,7 @@
     <cache-path name="camera_cache" path="camera/" />
     <!-- 日志/会话导出（API 26~28 落在应用外部下载目录，分享时走 FileProvider） -->
     <external-files-path name="pient_export" path="Download/" />
+    <!-- 应用内下载的安装包（cacheDir/updates 与 externalCacheDir/updates，安装时交给系统安装器） -->
+    <cache-path name="updates_internal" path="updates/" />
+    <external-cache-path name="updates" path="updates/" />
 </paths>

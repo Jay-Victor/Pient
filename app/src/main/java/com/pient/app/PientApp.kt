@@ -2,7 +2,9 @@ package com.pient.app
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.graphics.drawable.ColorDrawable
+import android.net.Uri
 import android.widget.Toast
 import android.os.SystemClock
 import androidx.compose.animation.core.tween
@@ -30,17 +32,22 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.pient.app.data.AiConfigStore
+import com.pient.app.data.ApkDownloader
+import com.pient.app.data.AppUpdate
 import com.pient.app.data.ChatState
 import com.pient.app.data.ChatStore
 import com.pient.app.data.ModelPricingDefaults
 import com.pient.app.data.SettingsStore
 import com.pient.app.data.ThemeMode
+import com.pient.app.data.UpdateCenter
 import com.pient.app.data.UsageStore
+import com.pient.app.data.i18n.L
 import com.pient.app.ui.chat.ChatScreen
 import com.pient.app.ui.onboarding.OnboardingScreen
 import com.pient.app.ui.plugins.PluginsScreen
 import com.pient.app.ui.settings.AboutScreen
 import com.pient.app.ui.settings.BehaviorSettingsScreen
+import com.pient.app.ui.settings.ChangelogScreen
 import com.pient.app.ui.settings.LanguageSettingsScreen
 import com.pient.app.ui.settings.LogManagementScreen
 import com.pient.app.ui.settings.LogViewerScreen
@@ -49,6 +56,7 @@ import com.pient.app.ui.settings.ProjectManagementScreen
 import com.pient.app.ui.settings.SettingsScreen
 import com.pient.app.ui.settings.SystemPermissionScreen
 import com.pient.app.ui.settings.ThemeSettingsScreen
+import com.pient.app.ui.settings.UpdateDialog
 import com.pient.app.ui.settings.UsageScreen
 import com.pient.app.ui.skills.SkillSearchScreen
 import com.pient.app.ui.skills.SkillsScreen
@@ -202,6 +210,17 @@ fun PientApp() {
         snapshotFlow {
             Triple(SettingsStore.replyNotify, SettingsStore.replyNotifySound, SettingsStore.replyNotifyVibrate)
         }.collect { SettingsStore.saveReplyNotify(context) }
+    }
+
+    // 更新检查设置持久化（关于页：启动自动检查 + 更新源），重启后保持
+    LaunchedEffect(Unit) {
+        snapshotFlow { SettingsStore.updateAutoCheck to SettingsStore.updateSource }
+            .collect { SettingsStore.saveUpdateSettings(context) }
+    }
+
+    // 开屏自动检查更新（关于页设置开着时才查；查到更新的版本才弹窗，本次运行只查一次）
+    LaunchedEffect(ready) {
+        if (ready) UpdateCenter.autoCheckIfEnabled(context)
     }
 
     // 输入框设置持久化（样式 + 材质 + 透明度/纹理强度），重启后保持
@@ -377,11 +396,41 @@ fun PientApp() {
                     composable("about") {
                         AboutScreen(nav = nav)
                     }
+                    composable("changelog") {
+                        ChangelogScreen(nav = nav)
+                    }
                 }
 
                 // 开屏加载层（最后渲染 = 在最上层）：首屏数据未就绪期间盖住下层界面。
                 // 行为设置里关掉「开屏动画」时整层不渲染（数据仍在后台加载，主界面直接进入；见 ChatScreen 的 startupReady 门控）。
                 StartupOverlay(visible = !ready && SettingsStore.startupAnimation)
+
+                // 更新弹窗：与页面同级的浮层（开屏自动检查查到新版本时也在这里弹，与从关于页点进来是同一个）
+                if (UpdateCenter.dialogVisible) {
+                    val localVersion = remember { AppUpdate.localVersion(context)?.first }
+                    UpdateDialog(
+                        state = UpdateCenter.checkState,
+                        downloadState = ApkDownloader.state,
+                        installPermissionNeeded = UpdateCenter.installPermissionNeeded,
+                        appVersion = localVersion ?: L.common.unknown,
+                        onRetry = { UpdateCenter.check(context) },
+                        onDownload = { mirrorUrl -> UpdateCenter.startDownload(context, mirrorUrl) },
+                        onPause = { UpdateCenter.pauseDownload() },
+                        onResume = { UpdateCenter.resumeDownload() },
+                        onCancelDownload = { UpdateCenter.cancelDownload(context) },
+                        onInstall = { path -> UpdateCenter.install(context, path) },
+                        onOpenInstallSettings = { UpdateCenter.openInstallPermissionSettings(context) },
+                        onOpenDownloadPage = { url ->
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                )
+                            }
+                        },
+                        onDismiss = { UpdateCenter.dismissDialog() },
+                    )
+                }
             }
         }
     }

@@ -29,6 +29,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 震动（消息通知的「震动提醒」）：通知渠道的震动属性需要它，见 runtime/ReplyNotify.kt -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 应用内更新：把下载好的安装包交给系统安装器（Android 8+ 还需用户在系统里允许
+         Pient「安装未知应用」，见 data/UpdateCenter.kt 的 install()） -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
 
     <!-- 包可见性（Android 11+）：权限页要探测 Shizuku 与各 Root 管理器是否安装，
