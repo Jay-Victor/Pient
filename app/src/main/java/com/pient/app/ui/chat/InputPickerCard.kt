@@ -112,6 +112,27 @@ fun applyPickerInsert(text: String, endExclusive: Int, insert: String): TextFiel
     return TextFieldValue(merged, selection = TextRange(merged.length))
 }
 
+/**
+ * 输入框里已完成的 `/命令` token（整条消息以 `/` 开头、且命令词命中 pi 命令面）。
+ *
+ * 与 @ 引用同一口径：**只认 pi 真认的命令**（[items] = `PiCommands.items`，即 `/` 卡的数据源）——
+ * 半截（`/ski`）或未知名字不命中，也就不高亮、不出 pill（不给「看着像命令、发出去不生效」的假块）。
+ * [endExclusive] = 命令词末尾（第一个空白之前；前导 `/` 算进 token）。
+ */
+data class SlashTokenMatch(
+    val item: PiCommands.Item,
+    val endExclusive: Int,
+)
+
+/** 见 [SlashTokenMatch]；[items] 未加载时一律不命中（冷启动手打 `/skill:…` 就没有块） */
+fun findSlashToken(text: String, items: List<PiCommands.Item>): SlashTokenMatch? {
+    if (items.isEmpty() || text.isEmpty() || text[0] != '/') return null
+    var end = 1
+    while (end < text.length && !text[end].isWhitespace()) end++
+    val word = text.substring(1, end)
+    if (word.isEmpty()) return null
+    return items.firstOrNull { it.name == word }?.let { SlashTokenMatch(it, end) }
+}
 /** `/` 技能卡：全局 / 项目 分段 + 技能列表（名字 + 说明），选中插 `/skill:<名字> ` */
 @Composable
 fun SkillPickerCard(

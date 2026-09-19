@@ -1,6 +1,7 @@
 package com.pient.app.ui.chat
 
 import com.pient.app.data.i18n.L
+import com.pient.app.runtime.PiCommands
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Description
@@ -34,6 +36,7 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.Send
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.Undo
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -98,6 +101,7 @@ fun ChatInputBar(
     text: TextFieldValue,
     onTextChange: (TextFieldValue) -> Unit,
     mentionFiles: List<MentionFile> = emptyList(), // @ 引用候选（chip 派生 + 输入框高亮共用）
+    slashCommands: List<PiCommands.Item> = emptyList(), // pi 命令面（`/命令` token 的 pill 与高亮共用）
     onOpenModelSelector: () -> Unit,
     onOpenAttach: () -> Unit,
     onToggleContextCard: () -> Unit,
@@ -126,8 +130,9 @@ fun ChatInputBar(
     LaunchedEffect(focusTick) {
         if (focusTick > 0) runCatching { focusRequester.requestFocus() }
     }
-    // @ 引用高亮（Operit MentionVisualTransformation 同款：主色 14% 底 + 主色字 + 0.88x + Medium）
-    val mentionTransformation = rememberMentionVisualTransformation(mentionFiles)
+    // 输入框 token 高亮（@ 引用照 Operit MentionVisualTransformation 同款规格，2026-09-19 起 `/命令` 同款：
+    // 主色 14% 底 + 主色字 + 0.88x + Medium）—— 用户要求「用 / 调用技能也要像 @ 那样有个块」
+    val tokenTransformation = rememberTokenVisualTransformation(mentionFiles, slashCommands)
 
     // 输入框设置（2026-09-12）：贴底 / 悬浮 + 材质（默认 / 磨砂玻璃 / 液态玻璃）
     val floating = SettingsStore.inputBarStyle == InputBarStyle.FLOATING
@@ -187,7 +192,9 @@ fun ChatInputBar(
         // ── 附件 chip 行（输入框上方；Hermes AttachmentPill 规格 2026-08-28） ──
         // 左侧 = "+" 菜单附件；右侧 = @ 引用文件 chip（由输入文本派生，单一事实源）
         val refMatches = remember(text.text, mentionFiles) { findMentionPathMatches(text.text, mentionFiles) }
-        if (chatState.attachments.isNotEmpty() || refMatches.isNotEmpty()) {
+        // `/命令` token（整条消息以 `/` 开头且命中 pi 命令面）：与 @ 引用同款，出一枚可删的 pill
+        val slashToken = remember(text.text, slashCommands) { findSlashToken(text.text, slashCommands) }
+        if (chatState.attachments.isNotEmpty() || refMatches.isNotEmpty() || slashToken != null) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -215,6 +222,18 @@ fun ChatInputBar(
                         },
                     )
                 }
+                slashToken?.let { tk ->
+                    AttachmentPill(
+                        label = tk.item.label,   // 技能 = 去掉 `skill:` 前缀的名字（与 `/` 卡同一显示名）
+                        icon = slashCommandIcon(tk.item.kind),
+                        onRemove = {
+                            // token 在整条消息开头：移除 "[0, endExclusive)"（连同尾随空格），光标回到起点
+                            var end = tk.endExclusive
+                            if (end < text.text.length && text.text[end] == ' ') end++
+                            onTextChange(TextFieldValue(text.text.removeRange(0, end), TextRange(0)))
+                        },
+                    )
+                }
             }
         }
 
@@ -226,7 +245,7 @@ fun ChatInputBar(
             BasicTextField(
                 value = text,
                 onValueChange = onTextChange,
-                visualTransformation = mentionTransformation,
+                visualTransformation = tokenTransformation,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onBackground),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 readOnly = polishing,
@@ -440,6 +459,13 @@ internal fun attachmentIcon(kind: AttachmentKind): ImageVector = when (kind) {
     AttachmentKind.URL -> Icons.Outlined.Link
 }
 
+/** `/命令` token 的 pill 图标（对应命令面三类：技能 / 提示模板 / 扩展命令） */
+private fun slashCommandIcon(kind: PiCommands.Kind): ImageVector = when (kind) {
+    PiCommands.Kind.SKILL -> Icons.Outlined.AutoAwesome
+    PiCommands.Kind.PROMPT -> Icons.Outlined.Description
+    PiCommands.Kind.COMMAND -> Icons.Outlined.Terminal
+}
+
 /**
  * 附件 pill（Hermes AttachmentPill 规格）：12dp 圆角 + hairline 边框 +
  * 28dp 圆角图标容器 + 文件名 + 常驻删除 ×。
@@ -508,37 +534,35 @@ private fun AttachmentPill(
 }
 
 /**
- * @ 引用文字高亮（参照 Operit MentionVisualTransformation.kt）：
- * 对已匹配的完整 "@路径" 施加 主色文字 + 主色 14% 背景 + 0.88x 字号 + Medium 字重。
- * 只高亮已知文件路径（未输完的 @ 不高亮）。
+ * 输入框 token 高亮（参照 Operit MentionVisualTransformation.kt）：
+ * 对已匹配的完整 "@路径" 与开头的 "/命令" 施加 主色文字 + 主色 14% 背景 + 0.88x 字号 + Medium 字重。
+ * 只高亮已知文件路径与 pi 真认的命令（未输完的 @ / 半截 `/` 不高亮）。
  */
 @Composable
-private fun rememberMentionVisualTransformation(
+private fun rememberTokenVisualTransformation(
     files: List<MentionFile>,
+    slashCommands: List<PiCommands.Item>,
 ): VisualTransformation {
     val primary = MaterialTheme.colorScheme.primary
     val baseFontSize = MaterialTheme.typography.bodyLarge.fontSize
-    return remember(files, primary, baseFontSize) {
+    return remember(files, slashCommands, primary, baseFontSize) {
         VisualTransformation { text ->
             val matches = findMentionPathMatches(text.text, files)
-            if (matches.isEmpty()) {
+            val slash = findSlashToken(text.text, slashCommands)
+            if (matches.isEmpty() && slash == null) {
                 TransformedText(text, OffsetMapping.Identity)
             } else {
                 TransformedText(
                     buildAnnotatedString {
                         append(text)
-                        matches.forEach { m ->
-                            addStyle(
-                                SpanStyle(
-                                    color = primary,
-                                    background = primary.copy(alpha = 0.14f),
-                                    fontSize = baseFontSize * 0.88f,
-                                    fontWeight = FontWeight.Medium,
-                                ),
-                                m.start,
-                                m.endExclusive,
-                            )
-                        }
+                        val tokenStyle = SpanStyle(
+                            color = primary,
+                            background = primary.copy(alpha = 0.14f),
+                            fontSize = baseFontSize * 0.88f,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        matches.forEach { m -> addStyle(tokenStyle, m.start, m.endExclusive) }
+                        slash?.let { addStyle(tokenStyle, 0, it.endExclusive) }
                     },
                     OffsetMapping.Identity,
                 )

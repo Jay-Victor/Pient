@@ -243,6 +243,13 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
     var skillSegment by rememberSaveable { mutableStateOf(0) }
     // 卡片打开时向 pi 要一次命令面（技能）——结果缓存在 PiCommands，卡上是即时显示
     LaunchedEffect(skillCardOpen) { if (skillCardOpen) PiCommands.refresh(context) }
+    // 草稿以 `/` 开头、命令面还没拉过 → 补拉一次（否则冷启动手打 `/skill:…` 认不出、没有块；
+    // 与上面那次刷新同一个调用，通道没起时只是安静地拿不到，不会起通道）
+    LaunchedEffect(inputText.text.startsWith("/"), PiCommands.items.size) {
+        if (inputText.text.startsWith("/") && !skillCardOpen && PiCommands.items.isEmpty() && !PiCommands.loading) {
+            PiCommands.refresh(context)
+        }
+    }
 
     // 输入栏背后内容层（2026-09-12，修「玻璃输入框看着像遮罩、内容滑过不透」）：
     // 输入栏改为覆盖在面板内容之上（Operit ClassicChatInputSection 同款 —— 其输入栏是
@@ -543,6 +550,8 @@ fun ChatScreen(chatState: ChatState, nav: NavController, startupReady: Boolean =
                             chatState.clearPolishRevert()
                         },
                         mentionFiles = mentionFiles,
+                        // `/命令` token 的高亮与 pill 判据 = pi 命令面（与 `/` 卡同一份）
+                        slashCommands = PiCommands.items.toList(),
                         onOpenModelSelector = { modelSheetOpen = true },
                         onOpenAttach = { attachSheetOpen = !attachSheetOpen },
                         onToggleContextCard = { contextCardOpen = !contextCardOpen },
