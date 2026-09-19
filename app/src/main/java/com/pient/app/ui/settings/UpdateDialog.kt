@@ -22,7 +22,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Update
 import androidx.compose.material3.Icon
@@ -55,7 +54,8 @@ private const val COLLAPSED_MAX_CHANGES = 3
 
 /**
  * 检查更新弹窗：形态对齐参考实现 Mdcito 的 `UpdateDialog` ——
- * 标题「检查更新」+ 右上关闭键，正文按状态分支，**动作按钮放在正文里**（没有底部按钮行）。
+ * 标题「检查更新」+ 正文按状态分支，**动作按钮放在正文里**（没有底部按钮行）；
+ * 关闭只有一条路 = 点卡片外的遮罩（弹窗自身不带关闭键：与遮罩点外关闭重复）。
  *
  * 四种检查状态（检测中 / 已是最新 / 发现新版本 / 检查失败）与四种下载状态
  * （空闲 / 下载中·已暂停 / 下载完成 / 下载出错）都在这里渲染；实际动作由 [com.pient.app.data.UpdateCenter] 执行。
@@ -104,30 +104,13 @@ fun UpdateDialog(
                     .verticalScroll(rememberScrollState())
                     .padding(24.dp),
             ) {
-                // ── 标题 + 关闭 ──
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                // ── 标题（退出方式 = 点卡片外的遮罩，另有「稍后安装」等正文按钮）──
+                Text(
+                    L.common.checkUpdate,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.W700,
                     modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        L.common.checkUpdate,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.W700,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clickable(onClick = onDismiss),
-                    ) {
-                        Icon(
-                            Icons.Outlined.Close, L.common.close,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
+                )
 
                 Spacer(Modifier.height(16.dp))
 
